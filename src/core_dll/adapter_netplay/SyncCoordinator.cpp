@@ -58,8 +58,12 @@ struct GameTickPayload {
     uint16_t direction;       // 入力方向（フレーム内で固定）
 };
 
-/// PING ペイロード: 空（ヘッダ内タイムスタンプで十分）
-// type=0x00, ペイロードなし
+/// PING ペイロード: NTPエコー（WaitStart中のθ推定用）
+struct PingPayload {
+    int64_t t_send;      // 送信時刻 (WASAPI μs)
+    int64_t echo_t1;     // エコー: 最後に受信した相手の t_send
+    int64_t echo_t2;     // エコー: そのパケットを受信した自分の時刻
+};
 #pragma pack(pop)
 
 // ============================================================================
@@ -267,8 +271,25 @@ void SyncCoordinator::DrainAndProcessPackets() {
             continue;
         }
 
-        // ── PING / その他: WaitStart 用ハートビート（エコーなし、疎通維持のみ）──
-        // PING はタイムスタンプのみ。WaitStart 中はエコー情報がないので疎通更新のみ。
+        // ── PING パケット (type=0x00) — WaitStart 用 NTPエコー付き ──
+        if (pktType == 0x00 && pkt.data.size() >= UNIFIED_HEADER_SIZE + sizeof(PingPayload)) {
+            PingPayload pp{};
+            std::memcpy(&pp, pkt.data.data() + UNIFIED_HEADER_SIZE, sizeof(pp));
+
+            // (1) NTP T1-T4 θ推定
+            if (pp.echo_t1 > 0 && pp.echo_t2 > 0) {
+                _clock.AddNtpSample(pp.echo_t1, pp.echo_t2, pp.t_send, pkt.receiveTimeUs);
+                _state.clockOffsetUs.store(_clock.GetThetaUs(), std::memory_order_release);
+                _state.lastRttUs.store(_clock.GetRttUs(), std::memory_order_release);
+            }
+
+            // (2) エコー追跡更新
+            _lastPeerT1 = pp.t_send;
+            _lastPeerRecvUs = pkt.receiveTimeUs;
+            continue;
+        }
+
+        // ── その他: 未知タイプ（疎通は冒頭で処理済み）──
     }
 
     _recvQueueSwap.clear();
@@ -292,7 +313,13 @@ void SyncCoordinator::SendPacket(const std::vector<uint8_t>& data) {
 // ============================================================================
 void SyncCoordinator::SendPing() {
     int64_t now = timer::WasapiClock::GetTimeUs();
-    auto pkt = BuildUnifiedPacket(0x00, 0x00, now);
+
+    PingPayload pp{};
+    pp.t_send  = now;
+    pp.echo_t1 = _lastPeerT1;     // 最後に受信した相手の t_send をエコー
+    pp.echo_t2 = _lastPeerRecvUs; // そのパケットの受信時刻をエコー
+
+    auto pkt = BuildUnifiedPacket(0x00, 0x00, now, &pp, sizeof(pp));
     SendPacket(pkt);
 }
 

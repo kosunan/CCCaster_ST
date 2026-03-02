@@ -115,9 +115,9 @@ bool SessionNegotiator::ParseAddressAndPort(const std::string& inputStr, bool is
 NegotiationResult SessionNegotiator::RunNegotiation(bool isIpv6, bool isHost, const std::string& targetIp, uint16_t port, bool isHeadless, bool skipHostDisplay) {
     timeBeginPeriod(1); 
     
-    cccaster::network::UdpSocket socket(isHost ? port : 0, isIpv6);
+    cccaster::network::UdpSocket socket(port, isIpv6);
     if (!socket.IsValid()) {
-        std::cout << "\x1b[31m  [ERROR] Failed to bind to Port " << (isHost ? port : 0) << ".\n  It may already be in use. Press any key to try again...\x1b[0m";
+        std::cout << "\x1b[31m  [ERROR] Failed to bind to Port " << port << ".\n  It may already be in use. Press any key to try again...\x1b[0m";
         if (!isHeadless) _getch();
         timeEndPeriod(1);
         return NegotiationResult{};

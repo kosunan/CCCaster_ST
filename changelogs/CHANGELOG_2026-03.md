@@ -1,4 +1,24 @@
-# feat: CentralBuffer 新設 + SyncCoordinator統合 + ワールドタイマーゲート360F
+# fix: PING NTPエコー追加 + クライアントUDPポート修正
+
+## 2026-03-03: WaitStart停滞修正 + UDPポートバインド統一
+
+### 問題1: WaitStart → Counting 遷移不可
+- PING(0x00) にペイロードがなく、WaitStart 中に NTP サンプルが蓄積されない
+- `IsThetaStable()` (最低10サンプル) が永久に false → START 未送信 → Counting 不到達
+
+### 問題2: クライアントがOS割当ポートを使用
+- `SessionNegotiator` がクライアント時に `UdpSocket(0)` でバインド → 意図しないエフェメラルポート
+
+### 変更内容
+- [MODIFY] `SyncCoordinator.cpp`:
+  - `PingPayload` 構造体新設（t_send, echo_t1, echo_t2）
+  - `SendPing()`: エコー情報を搭載して送信（GAME_TICK と同等の NTP エコー機構）
+  - `DrainAndProcessPackets()`: PING 受信時に `AddNtpSample()` 呼出し + エコー追跡更新
+- [MODIFY] `SessionNegotiator.cpp`: `UdpSocket(isHost ? port : 0)` → `UdpSocket(port)` に変更
+
+---
+
+
 
 ## 2026-03-03: §2 Central Ring Buffer + §3 ゲート閾値修正
 
