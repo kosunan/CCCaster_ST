@@ -1,4 +1,21 @@
-# feat: 通信スレッド再設計 — 3連パケット送信 + NTP T1-T4 Θ算出 + α補正
+# feat: CentralBuffer 新設 + SyncCoordinator統合 + ワールドタイマーゲート360F
+
+## 2026-03-03: §2 Central Ring Buffer + §3 ゲート閾値修正
+
+### 変更内容
+- [NEW] `CentralBuffer.hpp`: 600スロットリングバッファ。FrameSlot（自入力, 相手入力,
+  localBaseFrame, remoteBaseFrame, remoteConfirmed）。WriteLocal/RemoteInput（通信スレッド）、
+  GetSlot/PlayHead/ConsumeMismatch（ゲームスレッド）。観戦者再生用の将来拡張を想定。
+- [MODIFY] `SyncCoordinator.cpp`:
+  - GAME_TICK 受信時に `CentralBuffer::WriteRemoteInput()` 呼出し（SharedSyncState と並行書込み）
+  - subTick0 のローカル入力確定後に `CentralBuffer::WriteLocalInput()` 呼出し
+  - CentralBuffer include 追加
+- [MODIFY] `GameControl.hpp`: ワールドタイマーゲートの閾値を `worldTimer > syncFrame` →
+  `worldTimer > syncFrame + 360`（3秒以上先行時のみ停止）に変更。軽微な先行はα補正で自然吸収。
+
+---
+
+
 
 ## 2026-03-03: SyncCoordinator 3連パケット + NetplayClock NTP方式
 

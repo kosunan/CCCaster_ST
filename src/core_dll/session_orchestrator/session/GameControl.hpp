@@ -129,13 +129,14 @@ public:
         }
 
         // ── ワールドタイマーゲート ──
-        // ゲーム内蔵タイマー(CC_WORLD_TIMER_ADDR)が currentFrame より先行
-        // → ゲームが進みすぎているので currentFrame が追いつくまで待機
-        // ゲーム内蔵タイマーが遅れている場合 → 早回し許容（何もしない）
+        // ゲーム内蔵タイマー(CC_WORLD_TIMER_ADDR)が currentFrame より 360F 以上先行
+        // → 大幅にゲームが進みすぎているので currentFrame が追いつくまで待機
+        // 軽微な先行（<360F）はα補正で自然に吸収する
         // 高速早回し中のため Sleep なしスピンウェイト
+        static constexpr uint32_t WORLD_TIMER_GATE_THRESHOLD = 360; // ~3秒
         uint32_t worldTimer = *CC_WORLD_TIMER_ADDR;
         uint32_t syncFrame  = syncState.currentFrame.load(std::memory_order_acquire);
-        while (worldTimer > syncFrame) {
+        while (worldTimer > syncFrame + WORLD_TIMER_GATE_THRESHOLD) {
             syncFrame = syncState.currentFrame.load(std::memory_order_acquire);
         }
     }

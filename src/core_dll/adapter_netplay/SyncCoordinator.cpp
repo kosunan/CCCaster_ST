@@ -26,6 +26,7 @@
 #include "core_dll/adapter_netplay/SyncCoordinator.hpp"
 #include "core_dll/adapter_netplay/timer/WasapiClock.hpp"
 #include "core_dll/adapter_netplay/NetplayManager.hpp"
+#include "core_dll/pure_sync_engine/CentralBuffer.hpp"
 #include "core_dll/session_orchestrator/session/DebugLog.hpp"
 #include <algorithm>
 #include <cstring>
@@ -249,12 +250,18 @@ void SyncCoordinator::DrainAndProcessPackets() {
             _lastPeerT1 = gtp.t_send;
             _lastPeerRecvUs = pkt.receiveTimeUs;
 
-            // (3) 入力データを SharedSyncState に書き込み
+            // (3) 入力データを CentralBuffer と SharedSyncState に書き込み
+            uint32_t remoteInput = static_cast<uint32_t>(gtp.buttons) | (static_cast<uint32_t>(gtp.direction) << 16);
+
+            // CentralBuffer への書込み
+            cccaster::core::sync::CentralBuffer::GetInstance().WriteRemoteInput(
+                gtp.baseFrame, remoteInput, gtp.baseFrame);
+
+            // SharedSyncState への書込み（既存互換）
             int idx = _state.remoteWriteIndex.load(std::memory_order_relaxed);
             auto& slot = _state.remoteInputs[idx % SharedSyncState::RING_SIZE];
             slot.frame.store(gtp.baseFrame, std::memory_order_relaxed);
-            slot.input.store(static_cast<uint32_t>(gtp.buttons) | (static_cast<uint32_t>(gtp.direction) << 16),
-                            std::memory_order_release);
+            slot.input.store(remoteInput, std::memory_order_release);
             _state.remoteWriteIndex.store(idx + 1, std::memory_order_release);
 
             continue;
@@ -456,6 +463,11 @@ void SyncCoordinator::ThreadMain() {
                     _currentInputDirection = static_cast<uint16_t>((latest.input >> 16) & 0xFFFF);
                 }
                 _localQueueSwap.clear();
+
+                // ── CentralBuffer にローカル入力を書込み ──
+                uint32_t localInput = static_cast<uint32_t>(_currentInputButtons)
+                                   | (static_cast<uint32_t>(_currentInputDirection) << 16);
+                cccaster::core::sync::CentralBuffer::GetInstance().WriteLocalInput(frame, localInput);
 
                 // フレーム進捗ログ（60Fごと）
                 if (frame % 60 == 0) {
