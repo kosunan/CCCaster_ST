@@ -1,4 +1,20 @@
-# fix: PING NTPエコー追加 + クライアントUDPポート修正
+# fix: α補正をベースラインΔθ方式に修正（絶対クロック差を除外）
+
+## 2026-03-03: GetTickUs ベースラインθ差分化
+
+### 問題
+- NTP θ はマシン間の絶対クロック差（例: ±7073秒）を正確に反映するが、
+  `GetTickUs()` がこの巨大な θ をそのままα補正に使い、常に最大飽和 (tick=14000/19332) で暴走
+
+### 修正内容
+- [MODIFY] `NetplayClock.hpp`: `_baselineTheta` フィールドと `SetBaselineTheta()` を追加
+- [MODIFY] `NetplayClock.cpp`: `GetTickUs()` の absTheta を `θ - baseline` (Δθ) に変更。
+  符号判定も Δθ ベースに修正
+- [MODIFY] `SyncCoordinator.cpp`: Counting 遷移時に `_clock.SetBaselineTheta()` を呼出し
+
+---
+
+
 
 ## 2026-03-03: WaitStart停滞修正 + UDPポートバインド統一
 

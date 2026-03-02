@@ -127,7 +127,11 @@ int64_t NetplayClock::GetTickUs() const {
     // サンプル不足: 補正なし
     if (_sampleCount < 3) return BASE_TICK_US;
 
-    int64_t absTheta = (_thetaUs >= 0) ? _thetaUs : -_thetaUs;
+    // ベースラインθからの差分 (Δθ) を使う
+    // 絶対クロック差はstartTime合意で吸収済みなので、
+    // α補正は「合意後のドリフト」のみを対象とする
+    int64_t deltaTheta = _thetaUs - _baselineTheta;
+    int64_t absTheta = (deltaTheta >= 0) ? deltaTheta : -deltaTheta;
 
     int64_t alpha = 0;
 
@@ -148,7 +152,7 @@ int64_t NetplayClock::GetTickUs() const {
 
     // 符号適用
     int64_t adjusted = BASE_TICK_US;
-    if (_thetaUs > 0) {
+    if (deltaTheta > 0) {
         adjusted -= alpha;  // 相手が先行 → 自分を速く
     } else {
         adjusted += alpha;  // 相手が遅延 → 自分を遅く

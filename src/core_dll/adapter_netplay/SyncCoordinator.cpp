@@ -448,6 +448,7 @@ void SyncCoordinator::ThreadMain() {
             int64_t agreedStart = _clock.GetAgreedStartTime();
             if (agreedStart > 0 && now >= agreedStart) {
                 _mode = SyncMode::Counting;
+                _clock.SetBaselineTheta();  // 絶対クロック差をベースラインとして固定
                 _state.isSynced.store(true, std::memory_order_release);
                 subTickIdx = 0;  // フレームカウント開始位置をリセット
                 cccaster::domain::session::DebugLog(

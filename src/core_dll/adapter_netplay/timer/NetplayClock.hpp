@@ -72,6 +72,9 @@ public:
     /// 全状態リセット
     void Reset();
 
+    /// Counting開始時にベースラインθを記録。α補正はここからの差分のみで行う。
+    void SetBaselineTheta() { _baselineTheta = _thetaUs; }
+
     // ── 定数 ────────────────────────────────────
     static constexpr int64_t BASE_TICK_US   = 16666;   // 60fps
     static constexpr int64_t MAX_TICK_US    = 19332;   // BASE + MAX_ALPHA
@@ -91,6 +94,7 @@ private:
     int     _sampleCount = 0;
     int64_t _thetaUs     = 0;       // 最良θ（最小RTTサンプル）
     int64_t _bestRttUs   = INT64_MAX; // 最小RTT
+    int64_t _baselineTheta = 0;     // Counting開始時のθ（α補正の基準点）
 
     // ── スタート時刻 ─────────────────────────────
     int64_t _localStartTimeUs = 0;
