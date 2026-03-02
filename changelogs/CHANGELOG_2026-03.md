@@ -1,4 +1,23 @@
-# refactor: 通信スレッドをサブティック3分割ループに再設計
+# feat: SleepFrame にワールドタイマー完全一致同期を実装
+
+## 2026-03-03: WorldTimer × currentFrame 完全一致同期（早回し・停止制御）
+
+### 背景
+従来の `GameControl::SleepFrame()` は `SyncCoordinator::currentFrame` の変化のみを待機しており、
+ゲームエンジン内部の進行カウンタ（`CC_WORLD_TIMER_ADDR`）との乖離を検知・補正する機能がなかった。
+ゲームが遅れてもネットワークフレームは進み続け、進みすぎてもそのまま放置されていた。
+
+### 変更内容
+- [MODIFY] `GameControl.hpp` — `SleepFrame()` を3分岐のワールドタイマー完全一致同期方式に刷新:
+  - `worldTimer < netFrame`（ゲームが遅れ）: `TickBypass=true` にして即リターン（1F早回し）
+  - `worldTimer > netFrame`（ゲームが進みすぎ）: `Sleep(1)` ループで `netFrame` が追いつくまで停止
+  - `worldTimer == netFrame`（完全一致）: `TickBypass=false` を確保し、次の `currentFrame` 変化まで通常ポーリング
+  - FastBoot / Rollup 中（`TickBypass` 永続 true）は差分チェックをスキップ（即リターン）
+- [ADD] 差分発生時に `DebugLog` でワールドタイマーとネットフレームの値を出力
+
+---
+
+
 
 ## 2026-03-02: Sleep(1)ポーリング廃止 → 精密サブティック方式
 
