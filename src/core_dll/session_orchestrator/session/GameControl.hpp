@@ -95,71 +95,48 @@ public:
 
 
     /**
-     * @brief 次フレームまで待機する（ワールドタイマー完全一致同期方式）
+     * @brief 次フレームまで待機する
      * @details
      *   【高速モード（TickBypass=true）】
-     *     SetModeHighSpeedSkip 等の永続高速モード中は即リターン。
-     *     差分補正による一時的な早回しも同じパスを使う。
+     *     即リターン。Sleep 一切なし。DxHook EndScene もスキップ済。
+     *     DLL の処理とゲームの処理を最速で走らせる。
      *
      *   【通常モード（TickBypass=false）】
-     *     ① worldTimer < netFrame（ゲームが遅れている）
-     *          → TickBypass=true にして即リターン（ゲームを1F加速）
-     *          　 次回呼び出し時に再評価し、一致したら ② へ移行
-     *
-     *     ② worldTimer > netFrame（ゲームが進みすぎ）
-     *          → Sleep(1) ループで netFrame が worldTimer に追いつくまで停止
-     *          　 追いついたら TickBypass=false を確認して通常ポーリングへ
-     *
-     *     ③ worldTimer == netFrame（一致）
-     *          → TickBypass=false を確認し、次の netFrame 変化を待つ通常ポーリング
-     *
-     *   【設計原則】
-     *     ワールドタイマーは CC_WORLD_TIMER_ADDR (0x55D1D4) を参照。
-     *     FastBoot 中（SetModeHighSpeedSkip 永続中）は差分チェックをスキップ。
+     *     SyncCoordinator の currentFrame が変化するまでポーリング。
+     *     通信スレッドが WASAPI クロックで 16666μs 周期をカウントアップし、
+     *     DLL スレッドはその変化を検知してフレーム処理を進める。
+     *     - 残り > 2ms: Sleep(1) で CPU 負荷低減
+     *     - 残り ≤ 2ms: スピンウェイトで精度確保
      */
     static void SleepFrame() {
-        // ── 永続高速モード（FastBoot/Rollup）: 即リターン ──────────────
+        // 高速モード: 即リターン（Sleep なし）
         if (MbaaSpeedController::TickBypass().load(std::memory_order_acquire)) {
             return;
         }
 
+        // 通常モード: 通信スレッドの currentFrame 変化をポーリング
         auto& syncState = cccaster::core::netplay::SyncCoordinator::GetState();
+        uint32_t lastFrame = syncState.currentFrame.load(std::memory_order_acquire);
 
-        // ── ワールドタイマー vs ネットワークフレーム 差分チェック ────
-        uint32_t worldTimer = *CC_WORLD_TIMER_ADDR;
-        uint32_t netFrame   = syncState.currentFrame.load(std::memory_order_acquire);
-
-        if (worldTimer < netFrame) {
-            // ① ゲームが遅れている → 1F 加速（TickBypass を一時的に true）
-            // 次フレームの SleepFrame 先頭で再評価する
-            MbaaSpeedController::TickBypass().store(true, std::memory_order_release);
-            DebugLog("[GameControl] WorldTimer catch-up: wt=%u net=%u (+%u F ahead)",
-                     worldTimer, netFrame, netFrame - worldTimer);
-            return;
-        }
-
-        if (worldTimer > netFrame) {
-            // ② ゲームが進みすぎ → netFrame が追いつくまで停止
-            DebugLog("[GameControl] WorldTimer wait: wt=%u net=%u (+%u F behind)",
-                     worldTimer, netFrame, worldTimer - netFrame);
-            for (;;) {
-                uint32_t curNet = syncState.currentFrame.load(std::memory_order_acquire);
-                uint32_t curWorld = *CC_WORLD_TIMER_ADDR;
-                if (curNet >= curWorld) break;   // 追いついた
-                Sleep(1);
-            }
-            // 一時的な早回しフラグが残っていれば解除
-            MbaaSpeedController::TickBypass().store(false, std::memory_order_release);
-            return;
-        }
-
-        // ③ 完全一致: TickBypass 解除（一時的早回し後の復帰）を確実に行い、
-        //    次の netFrame 変化（SyncCoordinator の 1F 進行）まで通常ポーリング
-        MbaaSpeedController::TickBypass().store(false, std::memory_order_release);
+        // currentFrame が変化するまで待機（Sleep + Spin ハイブリッド）
         for (;;) {
             uint32_t now = syncState.currentFrame.load(std::memory_order_acquire);
-            if (now != netFrame) break;
+            if (now != lastFrame) break;
+
+            // Sleep(1) で CPU 負荷低減（Windows の最小粒度 ~1ms）
+            // 次回ポーリングまでの間、CPU を譲る
             Sleep(1);
+        }
+
+        // ── ワールドタイマーゲート ──
+        // ゲーム内蔵タイマー(CC_WORLD_TIMER_ADDR)が currentFrame より先行
+        // → ゲームが進みすぎているので currentFrame が追いつくまで待機
+        // ゲーム内蔵タイマーが遅れている場合 → 早回し許容（何もしない）
+        // 高速早回し中のため Sleep なしスピンウェイト
+        uint32_t worldTimer = *CC_WORLD_TIMER_ADDR;
+        uint32_t syncFrame  = syncState.currentFrame.load(std::memory_order_acquire);
+        while (worldTimer > syncFrame) {
+            syncFrame = syncState.currentFrame.load(std::memory_order_acquire);
         }
     }
 

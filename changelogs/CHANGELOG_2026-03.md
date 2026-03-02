@@ -1,19 +1,17 @@
-# feat: SleepFrame にワールドタイマー完全一致同期を実装
+# feat: SleepFrame にワールドタイマー同期ゲートを追加
 
-## 2026-03-03: WorldTimer × currentFrame 完全一致同期（早回し・停止制御）
+## 2026-03-03: CC_WORLD_TIMER_ADDR vs currentFrame フレーム同期制御
 
 ### 背景
-従来の `GameControl::SleepFrame()` は `SyncCoordinator::currentFrame` の変化のみを待機しており、
-ゲームエンジン内部の進行カウンタ（`CC_WORLD_TIMER_ADDR`）との乖離を検知・補正する機能がなかった。
-ゲームが遅れてもネットワークフレームは進み続け、進みすぎてもそのまま放置されていた。
+SyncCoordinator::currentFrame（通信スレッド駆動）とゲーム内蔵の CC_WORLD_TIMER_ADDR が
+独立してカウントアップしており、両者のずれを検出・制御する仕組みがなかった。
 
 ### 変更内容
-- [MODIFY] `GameControl.hpp` — `SleepFrame()` を3分岐のワールドタイマー完全一致同期方式に刷新:
-  - `worldTimer < netFrame`（ゲームが遅れ）: `TickBypass=true` にして即リターン（1F早回し）
-  - `worldTimer > netFrame`（ゲームが進みすぎ）: `Sleep(1)` ループで `netFrame` が追いつくまで停止
-  - `worldTimer == netFrame`（完全一致）: `TickBypass=false` を確保し、次の `currentFrame` 変化まで通常ポーリング
-  - FastBoot / Rollup 中（`TickBypass` 永続 true）は差分チェックをスキップ（即リターン）
-- [ADD] 差分発生時に `DebugLog` でワールドタイマーとネットフレームの値を出力
+- [MODIFY] `GameControl.hpp`: `SleepFrame()` の currentFrame ポーリング後に
+  ワールドタイマーゲートを追加。
+  - `worldTimer > syncFrame`（ゲーム先行）→ スピンウェイトで currentFrame の追いつきを待機
+  - `worldTimer ≤ syncFrame`（早回し中）→ 何もしない（早回し許容）
+  - 高速早回し中のため Sleep なしスピンウェイト
 
 ---
 
