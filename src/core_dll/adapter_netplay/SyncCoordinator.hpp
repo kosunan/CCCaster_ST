@@ -178,6 +178,7 @@ private:
     bool    _peerReady = false;
     bool    _startSent = false;
     int     _framesSinceLastRecv = 0;  // 疎通カウンタ
+    uint32_t _latestPeerFrame = 0;     // 最後に受信した相手の baseFrame（キャッチアップ用）
 
     // ─── 実ピアポート（NAT越え用）──────────────────────
     uint16_t _peerActualPort = 0;

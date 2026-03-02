@@ -74,6 +74,7 @@ public:
 
     /// Counting開始時にベースラインθを記録。α補正はここからの差分のみで行う。
     void SetBaselineTheta() { _baselineTheta = _thetaUs; }
+    int64_t GetBaselineTheta() const { return _baselineTheta; }
 
     // ── 定数 ────────────────────────────────────
     static constexpr int64_t BASE_TICK_US   = 16666;   // 60fps

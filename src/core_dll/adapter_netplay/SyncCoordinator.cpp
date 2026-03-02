@@ -268,6 +268,11 @@ void SyncCoordinator::DrainAndProcessPackets() {
             slot.input.store(remoteInput, std::memory_order_release);
             _state.remoteWriteIndex.store(idx + 1, std::memory_order_release);
 
+            // (4) 相手フレーム追跡（キャッチアップ用）
+            if (gtp.baseFrame > _latestPeerFrame) {
+                _latestPeerFrame = gtp.baseFrame;
+            }
+
             continue;
         }
 
@@ -500,10 +505,27 @@ void SyncCoordinator::ThreadMain() {
                 // フレーム進捗ログ（60Fごと）
                 if (frame % 60 == 0) {
                     cccaster::domain::session::DebugLog(
-                        "[SyncCoordinator] F=%u tick=%lldus θ=%lldus RTT=%lldus alive=%d",
-                        frame, tickUs, _clock.GetThetaUs(),
+                        "[SyncCoordinator] F=%u tick=%lldus Δθ=%lldus RTT=%lldus alive=%d peerF=%u",
+                        frame, tickUs, _clock.GetThetaUs() - _clock.GetBaselineTheta(),
                         _clock.GetRttUs(),
-                        _state.isPeerAlive.load() ? 1 : 0);
+                        _state.isPeerAlive.load() ? 1 : 0,
+                        _latestPeerFrame);
+                }
+
+                // ── キャッチアップバースト: peerFrame > myFrame + 1 ──
+                // 相手が2F以上先行している場合、現在の入力でバッファを埋めつつ
+                // フレームを一気に追いつかせる
+                if (_latestPeerFrame > frame + 1) {
+                    uint32_t catchupTarget = _latestPeerFrame;
+                    uint32_t startFrame = frame;
+                    while (frame < catchupTarget) {
+                        frame++;
+                        _state.currentFrame.store(frame, std::memory_order_release);
+                        cccaster::core::sync::CentralBuffer::GetInstance().WriteLocalInput(frame, localInput);
+                    }
+                    cccaster::domain::session::DebugLog(
+                        "[SyncCoordinator] Catch-up burst: F=%u -> F=%u (skipped %u frames)",
+                        startFrame, frame, frame - startFrame);
                 }
             }
 

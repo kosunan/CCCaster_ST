@@ -1,4 +1,22 @@
-# fix: α補正をベースラインΔθ方式に修正（絶対クロック差を除外）
+# feat: キャッチアップバースト実装（peerFrame > myFrame+1 時のフレーム追従）
+
+## 2026-03-03: Catch-up バースト + Δθログ改善
+
+### 問題
+- SyncCoordinator に相手フレームとの比較・バースト進行（キャッチアップ）ロジックが未実装
+- 相手がフレーム先行しても追いつくメカニズムがなかった
+
+### 変更内容
+- [MODIFY] `SyncCoordinator.hpp`: `_latestPeerFrame` フィールド追加
+- [MODIFY] `SyncCoordinator.cpp`:
+  - GAME_TICK 受信時に `gtp.baseFrame` → `_latestPeerFrame` を更新
+  - Counting モード: `_latestPeerFrame > frame+1` の場合バースト進行（CentralBuffer にローカル入力を埋めつつスキップ）
+  - ログを `Δθ`(ベースライン差分) + `peerF` 表示に改善
+- [MODIFY] `NetplayClock.hpp`: `GetBaselineTheta()` getter 追加
+
+---
+
+
 
 ## 2026-03-03: GetTickUs ベースラインθ差分化
 
