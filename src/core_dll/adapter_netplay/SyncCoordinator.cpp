@@ -5,12 +5,21 @@
 //   WaitReady  → (双方READY) → WaitStart → (合意時刻到達) → Counting
 //
 // 【パケット送受信】
-//   READY (0x15): 準備完了信号
-//   START (0x16): スタート時刻通知（WASAPIクロック値）
-//   PING  (CC10ヘッダ): タイムスタンプ付きハートビート
+//   READY     (0x15): 準備完了信号
+//   START     (0x16): スタート時刻通知（WASAPIクロック値）
+//   GAME_TICK (0x20): ゲームティック（入力+NTPタイミング）
+//   PING      (0x00): ハートビート（WaitReady/WaitStart 用）
+//
+// 【3連パケット送信】
+//   1F周期を3サブティックに分割し、各サブティックで同一入力の
+//   GAME_TICK パケットを送信。t_send のみサブティックごとに異なる。
+//
+// 【NTP T1-T4 θ推定】
+//   各パケットにエコー情報 (echo_t1, echo_t2) を載せ、
+//   受信側で T1-T4 からRTT/θを算出。最小RTTサンプルのθを採用。
 //
 // 【計算エンジン分離】
-//   θ推定・ドリフト補正・1F周期算出は NetplayClock に委譲。
+//   θ推定・α算出は NetplayClock に委譲。
 //   本クラスはモード遷移とパケットI/Oのみ。
 // ============================================================================
 
@@ -36,6 +45,16 @@ namespace netplay {
 /// START ペイロード: スタート時刻 (8bytes)
 struct StartPayload {
     int64_t startTimeUs;  // WASAPIクロックによる開始時刻 (μs)
+};
+
+/// GAME_TICK ペイロード: 入力 + NTPタイミング
+struct GameTickPayload {
+    uint32_t baseFrame;       // 送信側の現在フレーム番号
+    int64_t  t_send;          // 送信時刻 (WASAPI μs) ← サブティックごとに異なる
+    int64_t  echo_t1;         // エコー: 最後に受信した相手パケットの t_send
+    int64_t  echo_t2;         // エコー: そのパケットを受信した自分の時刻
+    uint16_t buttons;         // 入力ボタン（フレーム内で固定）
+    uint16_t direction;       // 入力方向（フレーム内で固定）
 };
 
 /// PING ペイロード: 空（ヘッダ内タイムスタンプで十分）
@@ -108,6 +127,10 @@ void SyncCoordinator::Start(bool isHost,
     _framesSinceLastRecv = 0;
     _peerActualPort = 0;
     _lastRecvUs = timer::WasapiClock::GetTimeUs();
+    _lastPeerT1 = 0;
+    _lastPeerRecvUs = 0;
+    _currentInputButtons = 0;
+    _currentInputDirection = 0;
 
     // キュークリア
     {
@@ -206,13 +229,39 @@ void SyncCoordinator::DrainAndProcessPackets() {
             continue;
         }
 
-        // ── PING / その他: タイムスタンプからθ推定 ──
-        int64_t peerTimestamp = 0;
-        std::memcpy(&peerTimestamp, pkt.data.data() + HDR_TIMESTAMP_OFFSET, sizeof(peerTimestamp));
-        if (peerTimestamp > 0) {
-            _clock.AddThetaSample(peerTimestamp, pkt.receiveTimeUs);
-            _state.clockOffsetUs.store(_clock.GetThetaUs(), std::memory_order_release);
+        // ── GAME_TICK パケット (type=0x20) ──
+        if (pktType == PKT_GAME_TICK && pkt.data.size() >= UNIFIED_HEADER_SIZE + sizeof(GameTickPayload)) {
+            GameTickPayload gtp{};
+            std::memcpy(&gtp, pkt.data.data() + UNIFIED_HEADER_SIZE, sizeof(gtp));
+
+            // (1) NTP T1-T4 θ推定: 相手がエコーしてきた T1(=自分の送信時刻), T2(=相手の受信時刻)
+            if (gtp.echo_t1 > 0 && gtp.echo_t2 > 0) {
+                // T1 = echo_t1 (自分の元の送信時刻、エコーされたもの)
+                // T2 = echo_t2 (相手の受信時刻)
+                // T3 = gtp.t_send (相手の送信時刻)
+                // T4 = pkt.receiveTimeUs (自分の受信時刻)
+                _clock.AddNtpSample(gtp.echo_t1, gtp.echo_t2, gtp.t_send, pkt.receiveTimeUs);
+                _state.clockOffsetUs.store(_clock.GetThetaUs(), std::memory_order_release);
+                _state.lastRttUs.store(_clock.GetRttUs(), std::memory_order_release);
+            }
+
+            // (2) エコー追跡更新: このパケットの t_send と受信時刻を記録
+            _lastPeerT1 = gtp.t_send;
+            _lastPeerRecvUs = pkt.receiveTimeUs;
+
+            // (3) 入力データを SharedSyncState に書き込み
+            int idx = _state.remoteWriteIndex.load(std::memory_order_relaxed);
+            auto& slot = _state.remoteInputs[idx % SharedSyncState::RING_SIZE];
+            slot.frame.store(gtp.baseFrame, std::memory_order_relaxed);
+            slot.input.store(static_cast<uint32_t>(gtp.buttons) | (static_cast<uint32_t>(gtp.direction) << 16),
+                            std::memory_order_release);
+            _state.remoteWriteIndex.store(idx + 1, std::memory_order_release);
+
+            continue;
         }
+
+        // ── PING / その他: WaitStart 用ハートビート（エコーなし、疎通維持のみ）──
+        // PING はタイムスタンプのみ。WaitStart 中はエコー情報がないので疎通更新のみ。
     }
 
     _recvQueueSwap.clear();
@@ -237,6 +286,24 @@ void SyncCoordinator::SendPacket(const std::vector<uint8_t>& data) {
 void SyncCoordinator::SendPing() {
     int64_t now = timer::WasapiClock::GetTimeUs();
     auto pkt = BuildUnifiedPacket(0x00, 0x00, now);
+    SendPacket(pkt);
+}
+
+// ============================================================================
+// SendGameTick — GAME_TICK パケット送信（入力 + NTPエコー）
+// ============================================================================
+void SyncCoordinator::SendGameTick(uint32_t frame) {
+    int64_t now = timer::WasapiClock::GetTimeUs();
+
+    GameTickPayload gtp{};
+    gtp.baseFrame = frame;
+    gtp.t_send    = now;
+    gtp.echo_t1   = _lastPeerT1;     // 最後に受信した相手の t_send をエコー
+    gtp.echo_t2   = _lastPeerRecvUs; // そのパケットの受信時刻をエコー
+    gtp.buttons   = _currentInputButtons;
+    gtp.direction = _currentInputDirection;
+
+    auto pkt = BuildUnifiedPacket(0x00, PKT_GAME_TICK, now, &gtp, sizeof(gtp));
     SendPacket(pkt);
 }
 
@@ -357,12 +424,14 @@ void SyncCoordinator::ThreadMain() {
         }
 
         // ================================================================
-        // Mode::Counting — フレームカウント中
+        // Mode::Counting — フレームカウント中 + 3連パケット送信
         // ================================================================
         case SyncMode::Counting: {
-            // ── フレーム進行: 3サブティックに1回 ──
+            uint32_t frame = _state.currentFrame.load(std::memory_order_relaxed);
+
+            // ── フレーム進行: 3サブティックに1回 (subTickIdx==0) ──
             if (subTickIdx == 0) {
-                uint32_t frame = _state.currentFrame.load(std::memory_order_relaxed) + 1;
+                frame = frame + 1;
                 _state.currentFrame.store(frame, std::memory_order_release);
 
                 // 疎通カウンタ
@@ -371,37 +440,36 @@ void SyncCoordinator::ThreadMain() {
                     _state.isPeerAlive.store(false, std::memory_order_release);
                 }
 
-                // ティック周期をドリフト補正込みで算出 → サブティック更新
+                // ティック周期をα補正込みで算出 → サブティック更新
                 tickUs = _clock.GetTickUs();
                 _state.currentTickUs.store(tickUs, std::memory_order_release);
                 subTickUs = tickUs / SUB_TICKS_PER_FRAME;
 
-                // ── ローカル入力送信（≤3回/F）──
-                int sends = 0;
+                // ── ローカル入力を確定（フレーム内で固定）──
                 {
                     std::lock_guard<std::mutex> lock(_localMutex);
                     std::swap(_localQueue, _localQueueSwap);
                 }
-                for (const auto& entry : _localQueueSwap) {
-                    (void)entry;
-                    if (++sends >= MAX_SENDS_PER_FRAME) break;
+                if (!_localQueueSwap.empty()) {
+                    const auto& latest = _localQueueSwap.back();
+                    _currentInputButtons   = static_cast<uint16_t>(latest.input & 0xFFFF);
+                    _currentInputDirection = static_cast<uint16_t>((latest.input >> 16) & 0xFFFF);
                 }
                 _localQueueSwap.clear();
-
-                // ── PING ハートビート (入力送信がなければ) ──
-                if (sends == 0) {
-                    SendPing();
-                }
 
                 // フレーム進捗ログ（60Fごと）
                 if (frame % 60 == 0) {
                     cccaster::domain::session::DebugLog(
-                        "[SyncCoordinator] F=%u tick=%lldus θ=%lldus drift=%.6f alive=%d",
+                        "[SyncCoordinator] F=%u tick=%lldus θ=%lldus RTT=%lldus alive=%d",
                         frame, tickUs, _clock.GetThetaUs(),
-                        _clock.GetDriftRate(),
+                        _clock.GetRttUs(),
                         _state.isPeerAlive.load() ? 1 : 0);
                 }
             }
+
+            // ── 3連パケット送信: 全サブティックで GAME_TICK ──
+            // baseFrame と input はフレーム内で固定、t_send のみサブティックごとに異なる
+            SendGameTick(frame);
 
             // サブティックインデックスを巡回
             subTickIdx = (subTickIdx + 1) % SUB_TICKS_PER_FRAME;

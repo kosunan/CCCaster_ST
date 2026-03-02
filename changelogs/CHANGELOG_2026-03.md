@@ -1,4 +1,30 @@
-# feat: SleepFrame にワールドタイマー同期ゲートを追加
+# feat: 通信スレッド再設計 — 3連パケット送信 + NTP T1-T4 Θ算出 + α補正
+
+## 2026-03-03: SyncCoordinator 3連パケット + NetplayClock NTP方式
+
+### 背景
+旧Θ推定は片道 offset_raw の最大値フィルタで精度が限られていた。
+入力パケットは subTickIdx==0 でのみ送信され、冗長送信によるロス対策がなかった。
+
+### 変更内容: NetplayClock (NTP T1-T4 min-RTT)
+- [MODIFY] `NetplayClock.hpp`: `AddThetaSample()` → `AddNtpSample(t1,t2,t3,t4)` に変更。
+  `ThetaSample` 構造体追加（T1-T4, RTT, θ）。旧 max-offset / EMA ドリフト / 基準θ偏差を廃止。
+  3段階α定数（`DEAD_BAND_US=500`, `STRONG_TH_US=16666`, `MAX_ALPHA_US=2666`）追加。
+- [MODIFY] `NetplayClock.cpp`: RTT/θ計算式を NTP 準拠に改修。
+  最小RTTフィルタリングで最良θを採用。GetTickUs() を3段階α補正（デッドバンド→二乗→飽和）に簡素化。
+
+### 変更内容: SyncCoordinator (GAME_TICK 3連パケット)
+- [MODIFY] `SyncCoordinator.hpp`: `PKT_GAME_TICK=0x20` 追加、`SendGameTick()` 宣言追加、
+  エコー追跡フィールド (`_lastPeerT1`, `_lastPeerRecvUs`)、現フレーム入力 (`_currentInputButtons/Direction`) 追加。
+- [MODIFY] `SyncCoordinator.cpp`:
+  - `GameTickPayload` 構造体追加（baseFrame, t_send, echo_t1, echo_t2, buttons, direction）
+  - `SendGameTick()`: GAME_TICK パケット組立+送信（NTPエコー付き）
+  - `DrainAndProcessPackets()`: GAME_TICK 受信時に NTP T1-T4 サンプル投入 + エコー追跡 + 入力書込み
+  - Counting モード: 3サブティック全てで GAME_TICK を送信（入力はフレーム開始時に確定・固定）
+
+---
+
+
 
 ## 2026-03-03: CC_WORLD_TIMER_ADDR vs currentFrame フレーム同期制御
 

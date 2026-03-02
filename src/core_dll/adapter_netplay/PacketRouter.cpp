@@ -197,6 +197,21 @@ void PacketRouter::OnPacket(const std::vector<uint8_t>& data, const std::string&
                 break;
             }
 
+            case 0x00: // PING — SyncCoordinator が処理済み（ログ抑制）
+                break;
+
+            case 0x15: // READY — SyncCoordinator が処理済み
+                cccaster::domain::session::DebugLog(
+                    "[PacketRouter] UNIFIED:READY from=%s:%u",
+                    fromIp.c_str(), fromPort);
+                break;
+
+            case 0x16: // START — SyncCoordinator が処理済み
+                cccaster::domain::session::DebugLog(
+                    "[PacketRouter] UNIFIED:START from=%s:%u",
+                    fromIp.c_str(), fromPort);
+                break;
+
             default:
                 cccaster::domain::session::DebugLog(
                     "[PacketRouter] UNIFIED:UNKNOWN type=0x%02X phase=0x%02X size=%u from=%s:%u",

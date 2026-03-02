@@ -117,9 +117,10 @@ public:
     static constexpr int     UNIFIED_HEADER_SIZE    = 20;
     static constexpr uint32_t CC10_MAGIC            = 0x30314343u;
 
-    // パケットタイプ（旧SYNC系は廃止、新しい信号）
-    static constexpr uint8_t PKT_READY = 0x15;  // 準備完了信号
-    static constexpr uint8_t PKT_START = 0x16;  // スタート時刻通知
+    // パケットタイプ
+    static constexpr uint8_t PKT_READY     = 0x15;  // 準備完了信号
+    static constexpr uint8_t PKT_START     = 0x16;  // スタート時刻通知
+    static constexpr uint8_t PKT_GAME_TICK = 0x20;  // ゲームティック（入力+タイミング）
 
 private:
     SyncCoordinator() = default;
@@ -134,6 +135,7 @@ private:
     void SendPing();
     void SendReady();
     void SendStart(int64_t startTimeUs);
+    void SendGameTick(uint32_t frame);
     static void SleepUntil(int64_t targetUs);
 
     // ─── 状態 ──────────────────────────────────────────
@@ -162,6 +164,14 @@ private:
     std::mutex _localMutex;
     std::vector<LocalInputEntry> _localQueue;
     std::vector<LocalInputEntry> _localQueueSwap;
+
+    // ─── 現フレームの確定入力（3サブティックで同一内容を送信）───
+    uint16_t _currentInputButtons   = 0;
+    uint16_t _currentInputDirection = 0;
+
+    // ─── NTP T1-T4 エコー追跡 ─────────────────────────
+    int64_t _lastPeerT1     = 0;  // 最後に受信した相手パケットの t_send（= 相手の T1）
+    int64_t _lastPeerRecvUs = 0;  // そのパケットを受信した自分の WASAPI 時刻（= T2）
 
     // ─── 内部タイマー ──────────────────────────────────
     int64_t _lastRecvUs = 0;
