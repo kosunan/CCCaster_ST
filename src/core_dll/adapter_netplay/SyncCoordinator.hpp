@@ -108,8 +108,7 @@ public:
 
     // ─── 定数 ──────────────────────────────────────────
     static constexpr int     MAX_SENDS_PER_FRAME    = 3;
-    static constexpr int64_t PING_INTERVAL_US       = 200000;   // 200ms
-    static constexpr int64_t READY_INTERVAL_US      = 200000;   // 200ms
+    static constexpr int     SUB_TICKS_PER_FRAME    = 3;        // 1Fを3分割
     static constexpr int64_t START_MARGIN_US        = 500000;   // 500ms
     static constexpr int     DISCONNECT_TIMEOUT_FRAMES = 180;   // 180F = 3秒
 
@@ -135,6 +134,7 @@ private:
     void SendPing();
     void SendReady();
     void SendStart(int64_t startTimeUs);
+    static void SleepUntil(int64_t targetUs);
 
     // ─── 状態 ──────────────────────────────────────────
     SharedSyncState _state;
@@ -165,8 +165,6 @@ private:
 
     // ─── 内部タイマー ──────────────────────────────────
     int64_t _lastRecvUs = 0;
-    int64_t _lastPingSentUs = 0;
-    int64_t _lastReadySentUs = 0;
     bool    _peerReady = false;
     bool    _startSent = false;
     int     _framesSinceLastRecv = 0;  // 疎通カウンタ

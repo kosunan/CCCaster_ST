@@ -1,4 +1,23 @@
-# fix: 非線形θ偏差ベースドリフト補正 + 切断タイムアウト3秒化
+# refactor: 通信スレッドをサブティック3分割ループに再設計
+
+## 2026-03-02: Sleep(1)ポーリング廃止 → 精密サブティック方式
+
+### 背景
+旧ループは `Sleep(1)` (~1-15ms不定) でポーリングし、200ms間隔でPING/READY送信。
+ティック精度が低く、ハンドシェイク応答も最大200ms遅延。
+
+### 変更内容
+- [MODIFY] `SyncCoordinator.hpp` — `PING_INTERVAL_US`/`READY_INTERVAL_US` 削除、`SUB_TICKS_PER_FRAME=3` 追加、`SleepUntil()` 宣言追加、`_lastPingSentUs`/`_lastReadySentUs` フィールド削除。
+- [MODIFY] `SyncCoordinator.cpp`:
+  - `SleepUntil()`: Sleep+スピンのハイブリッド精密スリープ（2ms以上→Sleep(1)、未満→YieldProcessor）
+  - `ThreadMain()`: 1F(≈16666μs) を3分割 → ~5555μs間隔のサブティックループ
+  - WaitReady/WaitStart: 毎サブティック (~5.5ms) でPING/READY送信（旧200ms→35倍高速化）
+  - Counting: `subTickIdx==0` で1Fに1回フレーム進行、サブティック毎にドレイン処理
+  - `nextSubTickUs` 累積方式でドリフト補正と連動
+
+---
+
+
 
 ## 2026-03-02: ドリフト補正の非線形θ偏差ベース刷新 + タイムアウト短縮
 

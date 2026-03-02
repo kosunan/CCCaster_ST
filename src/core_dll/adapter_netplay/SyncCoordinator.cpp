@@ -108,8 +108,6 @@ void SyncCoordinator::Start(bool isHost,
     _framesSinceLastRecv = 0;
     _peerActualPort = 0;
     _lastRecvUs = timer::WasapiClock::GetTimeUs();
-    _lastPingSentUs = _lastRecvUs;
-    _lastReadySentUs = 0;
 
     // キュークリア
     {
@@ -240,7 +238,6 @@ void SyncCoordinator::SendPing() {
     int64_t now = timer::WasapiClock::GetTimeUs();
     auto pkt = BuildUnifiedPacket(0x00, 0x00, now);
     SendPacket(pkt);
-    _lastPingSentUs = now;
 }
 
 // ============================================================================
@@ -250,7 +247,6 @@ void SyncCoordinator::SendReady() {
     int64_t now = timer::WasapiClock::GetTimeUs();
     auto pkt = BuildUnifiedPacket(0x00, PKT_READY, now);
     SendPacket(pkt);
-    _lastReadySentUs = now;
 }
 
 // ============================================================================
@@ -268,12 +264,48 @@ void SyncCoordinator::SendStart(int64_t startTimeUs) {
 }
 
 // ============================================================================
-// ThreadMain — 通信スレッドのメインループ（モード遷移ステートマシン）
+// SleepUntil — 精密スリープ（Sleep + スピンウェイトのハイブリッド）
+// ============================================================================
+//
+// 2ms 以上残り → Sleep(1) で CPU 節約
+// 2ms 未満     → スピンウェイトで精度優先
+//
+void SyncCoordinator::SleepUntil(int64_t targetUs) {
+    while (true) {
+        int64_t remain = targetUs - timer::WasapiClock::GetTimeUs();
+        if (remain <= 0) break;
+        if (remain > 2000) {
+            Sleep(1);
+        } else {
+            // スピンウェイト（CPU省電力ヒント付き）
+            YieldProcessor();
+        }
+    }
+}
+
+// ============================================================================
+// ThreadMain — 通信スレッドのメインループ（サブティック3分割方式）
+// ============================================================================
+//
+// 【設計】
+//   1Fの基礎時間（tickUs ≈ 16666μs）を SUB_TICKS_PER_FRAME (=3) 分割。
+//   ループは ~5555μs 間隔で回り、3サブティック目でフレームを進行させる。
+//
+//   WaitReady/WaitStart: 毎サブティックで READY/PING を送信（旧200ms→~5.5ms）
+//   Counting: subTickIndex == 0 のサブティックでフレーム進行
+//
 // ============================================================================
 void SyncCoordinator::ThreadMain() {
     cccaster::domain::session::DebugLog("[SyncCoordinator] Thread started. Mode=WaitReady");
 
+    int64_t tickUs     = timer::NetplayClock::BASE_TICK_US;
+    int64_t subTickUs  = tickUs / SUB_TICKS_PER_FRAME;
+    int     subTickIdx = 0;
+    int64_t nextSubTickUs = timer::WasapiClock::GetTimeUs();
+
     while (_running.load()) {
+        // ── 精密スリープ ──
+        SleepUntil(nextSubTickUs);
         int64_t now = timer::WasapiClock::GetTimeUs();
 
         // ── 全モード共通: 受信パケット処理 ──
@@ -284,10 +316,8 @@ void SyncCoordinator::ThreadMain() {
         // Mode::WaitReady — 準備完了待機
         // ================================================================
         case SyncMode::WaitReady: {
-            // READY を 200ms 毎に送信
-            if (now - _lastReadySentUs >= READY_INTERVAL_US) {
-                SendReady();
-            }
+            // 毎サブティックで READY 送信
+            SendReady();
 
             // 双方 READY → WaitStart へ遷移
             if (_peerReady) {
@@ -301,16 +331,9 @@ void SyncCoordinator::ThreadMain() {
         // Mode::WaitStart — 開始時刻待機（θ推定 + START 合意）
         // ================================================================
         case SyncMode::WaitStart: {
-            // 相手の SyncCoordinator が遅れて起動した場合に備え、
-            // READY を引き続き送信する（レースコンディション対策）
-            if (now - _lastReadySentUs >= READY_INTERVAL_US) {
-                SendReady();
-            }
-
-            // PING を 200ms 毎に送信（θ推定用タイムスタンプ）
-            if (now - _lastPingSentUs >= PING_INTERVAL_US) {
-                SendPing();
-            }
+            // 毎サブティックで READY + PING 送信
+            SendReady();
+            SendPing();
 
             // θ安定 → START 送信
             if (!_startSent && _clock.IsThetaStable()) {
@@ -325,6 +348,7 @@ void SyncCoordinator::ThreadMain() {
             if (agreedStart > 0 && now >= agreedStart) {
                 _mode = SyncMode::Counting;
                 _state.isSynced.store(true, std::memory_order_release);
+                subTickIdx = 0;  // フレームカウント開始位置をリセット
                 cccaster::domain::session::DebugLog(
                     "[SyncCoordinator] Mode -> Counting. startTime=%lld us θ=%lld us drift=%.6f",
                     agreedStart, _clock.GetThetaUs(), _clock.GetDriftRate());
@@ -336,14 +360,8 @@ void SyncCoordinator::ThreadMain() {
         // Mode::Counting — フレームカウント中
         // ================================================================
         case SyncMode::Counting: {
-            // ── 疎通チェック（フレームベース）──
-            // ティックごとにカウントアップするため、下のティック判定内で加算
-
-            // ── ティック判定 ──
-            static int64_t nextTickUs = 0;
-            if (nextTickUs == 0) nextTickUs = now;
-
-            if (now >= nextTickUs) {
+            // ── フレーム進行: 3サブティックに1回 ──
+            if (subTickIdx == 0) {
                 uint32_t frame = _state.currentFrame.load(std::memory_order_relaxed) + 1;
                 _state.currentFrame.store(frame, std::memory_order_release);
 
@@ -353,10 +371,10 @@ void SyncCoordinator::ThreadMain() {
                     _state.isPeerAlive.store(false, std::memory_order_release);
                 }
 
-                // ティック周期をドリフト補正込みで算出
-                int64_t tickUs = _clock.GetTickUs();
+                // ティック周期をドリフト補正込みで算出 → サブティック更新
+                tickUs = _clock.GetTickUs();
                 _state.currentTickUs.store(tickUs, std::memory_order_release);
-                nextTickUs += tickUs;
+                subTickUs = tickUs / SUB_TICKS_PER_FRAME;
 
                 // ── ローカル入力送信（≤3回/F）──
                 int sends = 0;
@@ -370,8 +388,8 @@ void SyncCoordinator::ThreadMain() {
                 }
                 _localQueueSwap.clear();
 
-                // ── PING ハートビート (送信がなければ) ──
-                if (sends == 0 && (now - _lastPingSentUs > PING_INTERVAL_US)) {
+                // ── PING ハートビート (入力送信がなければ) ──
+                if (sends == 0) {
                     SendPing();
                 }
 
@@ -384,12 +402,15 @@ void SyncCoordinator::ThreadMain() {
                         _state.isPeerAlive.load() ? 1 : 0);
                 }
             }
+
+            // サブティックインデックスを巡回
+            subTickIdx = (subTickIdx + 1) % SUB_TICKS_PER_FRAME;
             break;
         }
         } // switch
 
-        // ── 短いスリープ（CPU節約、~1ms）──
-        Sleep(1);
+        // ── 次のサブティック時刻を累積 ──
+        nextSubTickUs += subTickUs;
     }
 
     uint32_t finalFrame = _state.currentFrame.load();
@@ -399,3 +420,4 @@ void SyncCoordinator::ThreadMain() {
 } // namespace netplay
 } // namespace core
 } // namespace cccaster
+
