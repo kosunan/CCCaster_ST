@@ -1,4 +1,21 @@
-# feat: キャッチアップバースト実装（peerFrame > myFrame+1 時のフレーム追従）
+# fix: Counting開始時 currentFrame を worldTimer に同期
+
+## 2026-03-03: currentFrame 初期値を CC_WORLD_TIMER_ADDR に設定
+
+### 問題
+- Counting 開始時に `currentFrame=0` で始まるため、各マシンの worldTimer との差が大きい
+- ワールドタイマーゲート（360F先行制限）で不要なフリーズが発生
+- フリーズ解除タイミングが各マシンで異なるため worldTimer が永久にずれる
+
+### 変更内容
+- [MODIFY] `SyncCoordinator.cpp`:
+  - `MbaaConstants.hpp` を include 追加
+  - Counting 遷移時に `currentFrame = *CC_WORLD_TIMER_ADDR` で初期化
+  - キャッチアップバーストが遅れた側の worldTimer を追いつかせる
+
+---
+
+
 
 ## 2026-03-03: Catch-up バースト + Δθログ改善
 
