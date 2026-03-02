@@ -109,8 +109,13 @@ public:
      *     - 残り ≤ 2ms: スピンウェイトで精度確保
      */
     static void SleepFrame() {
-        // 高速モード: 即リターン（Sleep なし）
+        // 高速モード: currentFrame を worldTimer に追従させて即リターン
+        // TickBypass 中はゲームが最速で回り worldTimer が急進するが、
+        // currentFrame も追従させることで NormalSpeed 復帰時の乖離をゼロにする
         if (MbaaSpeedController::TickBypass().load(std::memory_order_acquire)) {
+            auto& syncState = cccaster::core::netplay::SyncCoordinator::GetMutableState();
+            uint32_t wt = *CC_WORLD_TIMER_ADDR;
+            syncState.currentFrame.store(wt, std::memory_order_release);
             return;
         }
 

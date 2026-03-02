@@ -1,4 +1,19 @@
-# fix: Counting開始時 currentFrame を worldTimer に同期
+# fix: HighSpeed中にcurrentFrameをworldTimerに追従させる
+
+## 2026-03-03: SleepFrame HighSpeed パス修正
+
+### 問題
+- HighSpeed (TickBypass=true) 中に SleepFrame が即リターンし worldTimer が暴走
+- currentFrame が追いつけず NormalSpeed 復帰時に大きな乖離
+- 乖離の解消時間が各マシンで異なるため worldTimer が永久にずれる
+
+### 変更内容
+- [MODIFY] `GameControl.hpp`: SleepFrame の HighSpeed パスで `currentFrame = *CC_WORLD_TIMER_ADDR` を毎F書込み
+- [MODIFY] `SyncCoordinator.hpp`: 非const版 `GetMutableState()` 追加（SleepFrame からの currentFrame 書込み用）
+
+---
+
+
 
 ## 2026-03-03: currentFrame 初期値を CC_WORLD_TIMER_ADDR に設定
 

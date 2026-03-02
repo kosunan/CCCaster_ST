@@ -90,6 +90,9 @@ public:
     static const SharedSyncState& GetState() {
         return GetInstance()._state;
     }
+    static SharedSyncState& GetMutableState() {
+        return GetInstance()._state;
+    }
 
     // ─── ライフサイクル ─────────────────────────────────
     void Start(bool isHost,
