@@ -79,7 +79,7 @@ void GameFrameOrchestrator::OnPresent(LPDIRECT3DDEVICE9 pDevice) {
 // ============================================================================
 bool GameFrameOrchestrator::OnPresentSkip(LPDIRECT3DDEVICE9 pDevice) {
     (void)pDevice;
-    return cccaster::domain::MbaaSpeedController::GetInstance().IsSkipMode();
+    return cccaster::domain::MbaaSpeedController::RenderSkip().load(std::memory_order_acquire);
 }
 
 // ============================================================================

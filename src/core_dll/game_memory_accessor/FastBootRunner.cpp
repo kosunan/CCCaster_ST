@@ -91,9 +91,9 @@ void FastBootRunner::RunLoop(cccaster::public_api::IpcGameMode targetMode) {
                     MP::WriteMemory<uint32_t>(GAME_STATE_ADDR, STATE_INTRO_SKIP);
                 }
 
-                // 描画スキップを毎ループ強制維持
-                MP::WriteMemory<uint32_t>(
-                    reinterpret_cast<uintptr_t>(CC_SKIP_FRAMES_ADDR), 1);
+                // 描画スキップ: CC_SKIP_FRAMES_ADDR は使用禁止。描画制御は API hook (RenderSkip) で行う
+                // MP::WriteMemory<uint32_t>(
+                //     reinterpret_cast<uintptr_t>(CC_SKIP_FRAMES_ADDR), 1);
 
                 // SFX バッファゼロクリア（起動中の不快な SE 連打防止）
                 MP::ZeroMemoryRegion(reinterpret_cast<uintptr_t>(CC_SFX_ARRAY_ADDR), 1500);

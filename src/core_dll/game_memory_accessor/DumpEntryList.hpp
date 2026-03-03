@@ -45,7 +45,7 @@ inline std::vector<DumpEntry> BuildGameDumpEntries() {
     entries.push_back({ (uintptr_t)CC_CAMERA_Y_ADDR, 4 });
     
     // スキップフレーム（ロールバック後に復元が必要）
-    entries.push_back({ (uintptr_t)CC_SKIP_FRAMES_ADDR, 4 });
+    // entries.push_back({ (uintptr_t)CC_SKIP_FRAMES_ADDR, 4 });  // 使用禁止
     entries.push_back({ (uintptr_t)CC_SKIPPABLE_FLAG_ADDR, 4 });
     
     // ===== RNG: 乱数状態 =====

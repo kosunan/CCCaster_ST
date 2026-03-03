@@ -76,7 +76,7 @@ public:
         cccaster::core::hooks::TimeHooks::SetSleepBypass(true);
 
         // CC_SKIP_FRAMES は不使用 (0固定)
-        *CC_SKIP_FRAMES_ADDR = 0;
+        // *CC_SKIP_FRAMES_ADDR = 0;  // 使用禁止: 描画制御は API hook (RenderSkip) で行う
 
         switch (mode) {
             case cccaster::core::SpeedMode::HighSpeedSkip_Rollup:
@@ -119,8 +119,7 @@ public:
     }
 
     void MaintainState() override {
-        // CC_SKIP_FRAMES は不使用 (0固定)
-        *CC_SKIP_FRAMES_ADDR = 0;
+        // CC_SKIP_FRAMES は SleepFrame が gap に基づいて制御するため、ここでは触らない
     }
 
     cccaster::core::SpeedMode GetMode() const override { return m_mode; }

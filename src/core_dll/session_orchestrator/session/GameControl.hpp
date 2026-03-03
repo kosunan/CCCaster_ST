@@ -104,6 +104,9 @@ public:
      *     gap <= 0: worldTimer が追いついた → currentFrame 変化を待機
      *     gap == 1: 通常速度で 1F 進める
      *     gap >= 2: 描画OFF で高速に追いつかせる
+     *
+     *   【注意】CC_SKIP_FRAMES_ADDR は使用禁止。
+     *   描画の ON/OFF は API hook (RenderSkip → OnPresentSkip) で制御する。
      */
     static void SleepFrame() {
         auto& syncState = cccaster::core::netplay::SyncCoordinator::GetState();
@@ -127,7 +130,7 @@ public:
             MbaaSpeedController::RenderSkip().store(false, std::memory_order_release);
             MbaaSpeedController::TickBypass().store(false, std::memory_order_release);
         } else {
-            // 2F 以上遅れ → 描画OFF で高速に追いつかせる
+            // 2F 以上遅れ → 描画OFF (API hook経由: RenderSkip→OnPresentSkip)
             MbaaSpeedController::RenderSkip().store(true, std::memory_order_release);
             MbaaSpeedController::TickBypass().store(true, std::memory_order_release);
         }

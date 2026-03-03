@@ -1,4 +1,22 @@
-# refactor: SleepFrame をcurrentFrame基準のgap追従方式に再設計
+# fix: 描画OFFをAPI hook経由に統一、CC_SKIP_FRAMES_ADDR使用禁止
+
+## 2026-03-04: 描画制御の統一
+
+### 変更方針
+- CC_SKIP_FRAMES_ADDR は使用禁止（全箇所コメントアウト）
+- 描画の ON/OFF は API hook (RenderSkip → OnPresentSkip) で制御
+
+### 変更ファイル
+- [MODIFY] `GameControl.hpp`: CC_SKIP_FRAMES 使用禁止の注意コメント追記
+- [MODIFY] `GameFrameOrchestrator.cpp`: OnPresentSkip が RenderSkip() を参照するよう変更
+- [MODIFY] `MbaaSpeedController.hpp`: MaintainState の CC_SKIP_FRAMES=0 強制を削除、SetMode内の使用をコメントアウト
+- [MODIFY] `MbaaConstants.hpp`: CC_SKIP_FRAMES_ADDR 定義をコメントアウト
+- [MODIFY] `FastBootRunner.cpp`: WriteMemory呼出をコメントアウト
+- [MODIFY] `DumpEntryList.hpp`: ダンプ登録をコメントアウト
+
+---
+
+
 
 ## 2026-03-04: SleepFrame 制御方式の全面見直し
 

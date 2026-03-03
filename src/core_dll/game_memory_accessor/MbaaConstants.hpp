@@ -73,7 +73,7 @@
 #define CC_SCREEN_WIDTH_ADDR        ( ( uint32_t * ) 0x54D048 ) // The actual width of the main viewport
 #define CC_WORLD_TIMER_ADDR         ( ( uint32_t * ) 0x55D1D4 ) // Frame step timer, always counting up
 #define CC_PAUSE_FLAG_ADDR          ( ( uint8_t * )  0x55D203 ) // 1 when paused
-#define CC_SKIP_FRAMES_ADDR         ( ( uint32_t * ) 0x55D25C ) // Set to N to skip rendering for N frames
+// #define CC_SKIP_FRAMES_ADDR         ( ( uint32_t * ) 0x55D25C ) // 使用禁止: 描画制御は API hook で行う
 #define CC_INTRO_STATE_ADDR         ( ( uint8_t * )  0x55D20B ) // 2 (character intros), 1 (pre-game), 0 (in-game)
 #define CC_ALIVE_FLAG_ADDR          ( ( uint8_t * )  0x76E650 ) // Flag that indicates the game is alive
 
