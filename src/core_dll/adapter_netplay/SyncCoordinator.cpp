@@ -27,7 +27,6 @@
 #include "core_dll/adapter_netplay/timer/WasapiClock.hpp"
 #include "core_dll/adapter_netplay/NetplayManager.hpp"
 #include "core_dll/pure_sync_engine/CentralBuffer.hpp"
-#include "core_dll/game_memory_accessor/MbaaConstants.hpp"
 #include "core_dll/session_orchestrator/session/DebugLog.hpp"
 #include <algorithm>
 #include <cstring>
@@ -112,7 +111,7 @@ void SyncCoordinator::Start(bool isHost,
     _maxRollback  = maxRollback;
 
     // SharedSyncState リセット
-    _state.currentFrame.store(0);
+    _state.currentFrame.store(2000);  // 初期値: worldTimerより先行しておく
     _state.currentTickUs.store(timer::NetplayClock::BASE_TICK_US);
     _state.isSynced.store(false);
     _state.isPeerAlive.store(false);
@@ -457,18 +456,11 @@ void SyncCoordinator::ThreadMain() {
                 _clock.SetBaselineTheta();  // 絶対クロック差をベースラインとして固定
                 _state.isSynced.store(true, std::memory_order_release);
 
-                // ── currentFrame をゲーム内ワールドタイマーに同期 ──
-                // worldTimer は起動時から常時カウントアップ。
-                // currentFrame = worldTimer で初期化することで:
-                //   1. ワールドタイマーゲートによる不要なフリーズを回避
-                //   2. キャッチアップバーストが遅れている側のworldTimerを追いつかせる
-                uint32_t worldTimer = *CC_WORLD_TIMER_ADDR;
-                _state.currentFrame.store(worldTimer, std::memory_order_release);
-
                 subTickIdx = 0;  // フレームカウント開始位置をリセット
                 cccaster::domain::session::DebugLog(
-                    "[SyncCoordinator] Mode -> Counting. startTime=%lld us θ=%lld us worldTimer=%u",
-                    agreedStart, _clock.GetThetaUs(), worldTimer);
+                    "[SyncCoordinator] Mode -> Counting. startTime=%lld us θ=%lld us currentFrame=%u",
+                    agreedStart, _clock.GetThetaUs(),
+                    _state.currentFrame.load(std::memory_order_relaxed));
             }
             break;
         }

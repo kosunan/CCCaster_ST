@@ -1,4 +1,27 @@
-# fix: HighSpeed中にcurrentFrameをworldTimerに追従させる
+# refactor: SleepFrame をcurrentFrame基準のgap追従方式に再設計
+
+## 2026-03-04: SleepFrame 制御方式の全面見直し
+
+### 変更方針
+- worldTimer はゲームエンジンが毎F++するのみ（DLL側の読取/書込を廃止）
+- currentFrame 初期値を 2000 に変更（worldTimer より先行開始）
+- SleepFrame は gap = currentFrame - worldTimer で制御:
+  - gap <= 0: worldTimer が追いついた → currentFrame 変化を待機
+  - gap == 1: 通常速度で 1F 進行
+  - gap >= 2: 描画OFF で高速に追いつかせる
+
+### 削除した機能
+- HighSpeed パスの worldTimer → currentFrame 転記
+- ワールドタイマーゲート (360F 先行制限)
+- Counting 遷移時の worldTimer 読取
+
+### 変更ファイル
+- [MODIFY] `GameControl.hpp`: SleepFrame を gap 方式に全面書き直し
+- [MODIFY] `SyncCoordinator.cpp`: 初期値=2000, worldTimer読取削除, MbaaConstants include削除
+
+---
+
+
 
 ## 2026-03-03: SleepFrame HighSpeed パス修正
 
