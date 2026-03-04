@@ -31,3 +31,6 @@ test_compile.*
 compile_commands.json
 
 .clangd
+
+# ツール（テストピア等）
+tools/

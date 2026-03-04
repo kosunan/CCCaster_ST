@@ -1,3 +1,16 @@
+# chore: tools/ ディレクトリをGit追跡対象から除外
+
+## 2026-03-04: tools/ を .gitignore に追加
+
+### 変更内容
+- [MODIFY] `.gitignore`: `tools/` エントリを追加
+- `git rm -r --cached tools/` でインデックスから除外（ファイルはディスク上に残存）
+
+### 理由
+tools/ 配下（dummy_peer, lan_test 等）はローカル開発ツールであり、メインリポジトリの追跡対象から外す。
+
+---
+
 # refactor: 全Scene入力をCentralBuffer一元化 — 独自ディレイバッファ/atomicリモート全削除
 
 ## 2026-03-04: 全Scene入力をCentralBuffer一元化
