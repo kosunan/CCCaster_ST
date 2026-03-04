@@ -1,4 +1,21 @@
-# refactor: autoTestMode/ランダム入力生成/バッファ外入力取得を全削除
+# refactor: 全Scene入力をCentralBuffer一元化 — 独自ディレイバッファ/atomicリモート全削除
+
+## 2026-03-04: 全Scene入力をCentralBuffer一元化
+
+### 変更方針
+全Sceneの入力をCentralBuffer.GetSlot(playHead)→GC::WriteInput()の統一パターンに変更。
+DLL側は一切ディレイ計算を行わない（通信スレッドがバッファ書込み時に処理済み）。
+
+### 変更ファイル
+- [MODIFY] `SceneLoading.cpp`: 全面書き換え — 独自ディレイバッファ/Phase判定/atomic s_remoteInput 削除
+- [MODIFY] `SceneLoading.hpp`: `SetRemoteLoadingInput` 宣言削除
+- [MODIFY] `SceneCharaSelect.cpp`: 全面書き換え — Filter A/B/C/atomic s_remoteCharaInput/ProcessDelayInput 削除
+- [MODIFY] `SceneCharaSelect.hpp`: `SetRemoteInput` 宣言削除
+- [MODIFY] `PacketRouter.cpp`: SetRemoteInput/SetRemoteLoadingInput 呼出を廃止コメントに置換
+
+---
+
+
 
 ## 2026-03-04: autoTest 関連コード削除
 

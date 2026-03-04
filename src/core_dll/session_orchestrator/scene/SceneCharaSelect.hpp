@@ -20,10 +20,6 @@ public:
     static void ProcessFrame(session::SessionContext& ctx);
 
     static void Reset();   // 画面遷移時のリセット
-
-    /// @brief PacketRouter から呼ばれるリモート入力受信 API
-    /// スレッドセーフ（atomic 書き込み）
-    static void SetRemoteInput(uint16_t input);
 };
 
 } // namespace cccaster::domain::scene

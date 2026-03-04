@@ -149,7 +149,7 @@ void PacketRouter::OnPacket(const std::vector<uint8_t>& data, const std::string&
                 cccaster::domain::session::DebugLog(
                     "[PacketRouter] UNIFIED:CS_INPUT phase=0x%02X frame=%u input=0x%04X from=%s:%u",
                     phase, pl.frame, pl.input, fromIp.c_str(), fromPort);
-                cccaster::domain::scene::SceneCharaSelect::SetRemoteInput(pl.input);
+                // 入力は CentralBuffer 経由で管理されるため、直接の SetRemoteInput は廃止
                 break;
             }
 
@@ -163,7 +163,7 @@ void PacketRouter::OnPacket(const std::vector<uint8_t>& data, const std::string&
                 cccaster::domain::session::DebugLog(
                     "[PacketRouter] UNIFIED:LOADING_INPUT phase=0x%02X frame=%u input=0x%04X delay=%d from=%s:%u",
                     phase, pl.frame, pl.input, pl.delay, fromIp.c_str(), fromPort);
-                cccaster::domain::scene::SceneLoading::SetRemoteLoadingInput(pl.input);
+                // 入力は CentralBuffer 経由で管理されるため、直接の SetRemoteLoadingInput は廃止
                 break;
             }
 
@@ -244,14 +244,14 @@ void PacketRouter::OnPacket(const std::vector<uint8_t>& data, const std::string&
             cccaster::domain::session::DebugLog(
                 "[PacketRouter] LEGACY:CS_INPUT val=0x%04X from=%s:%u",
                 payload, fromIp.c_str(), fromPort);
-            cccaster::domain::scene::SceneCharaSelect::SetRemoteInput(payload);
+            // 入力は CentralBuffer 経由で管理されるため、直接の SetRemoteInput は廃止
             break;
 
         case 0x21: // 旧 LOADING_INPUT
             cccaster::domain::session::DebugLog(
                 "[PacketRouter] LEGACY:LOADING_INPUT val=0x%04X from=%s:%u",
                 payload, fromIp.c_str(), fromPort);
-            cccaster::domain::scene::SceneLoading::SetRemoteLoadingInput(payload);
+            // 入力は CentralBuffer 経由で管理されるため、直接の SetRemoteLoadingInput は廃止
             break;
 
         case 0x22: // 旧 REMATCH_MENU
