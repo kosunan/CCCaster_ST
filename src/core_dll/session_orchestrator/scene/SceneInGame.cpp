@@ -27,6 +27,7 @@
 #include "core_dll/pure_sync_engine/InputFilter.hpp"
 #include "core_dll/pure_sync_engine/RemoteInputQueue.hpp"
 #include "core_dll/game_memory_accessor/MbaaConstants.hpp"
+#include "core_dll/adapter_os_hooks/input/DirectInputHook.hpp"
 #include <cstring>
 
 namespace cccaster::domain::scene {
@@ -171,8 +172,12 @@ static void ProcessRollbackFrame(session::SessionContext& ctx,
         }
     }
 
-    // ローカル入力取得 + フィルタ
-    uint16_t localInput = GC::ReadLocal(ctx.isHost);
+    // ローカル入力取得 (DirectInputHook から直接) + フィルタ
+    cccaster::game_interface::DirectInputHook::Poll();
+    uint32_t rawInput = ctx.isHost
+        ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
+        : cccaster::game_interface::DirectInputHook::GetPlayer2Input();
+    uint16_t localInput = static_cast<uint16_t>(rawInput & 0xFFFF);
     localInput = Filter::FilterBlockedButtons(localInput);
 
     // ★ 11F入力履歴バッファにシフト挿入 (E-11)
@@ -307,8 +312,12 @@ void SceneInGame::ReadAndSend(session::SessionContext& ctx,
     // 計測開始
     s_frameProcessStartUs = QPCNowUs();
 
-    // ローカル入力取得 + フィルタ
-    uint16_t localInput = GC::ReadLocal(ctx.isHost);
+    // ローカル入力取得 (DirectInputHook から直接) + フィルタ
+    cccaster::game_interface::DirectInputHook::Poll();
+    uint32_t rawInput2 = ctx.isHost
+        ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
+        : cccaster::game_interface::DirectInputHook::GetPlayer2Input();
+    uint16_t localInput = static_cast<uint16_t>(rawInput2 & 0xFFFF);
     localInput = Filter::FilterBlockedButtons(localInput);
     s_lastLocalInput = localInput;
 

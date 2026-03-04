@@ -12,8 +12,4 @@ namespace cccaster::domain::session {
 // format: (direction << 16) | buttons
 void WriteInputToMemory(uint32_t p1Input, uint32_t p2Input);
 
-// ローカルプレイヤーの入力をゲームメモリから読み取る
-// format: (direction << 16) | buttons
-uint32_t ReadLocalInput(bool isHost);
-
 } // namespace cccaster::domain::session

@@ -160,19 +160,6 @@ public:
         WriteInput(0, 0);
     }
 
-    /**
-     * @brief ローカルプレイヤーの入力をゲームメモリから読み取る
-     * @param[in] isHost  true: P1として読取, false: P2として読取
-     * @return (direction << 16) | buttons 形式の入力値
-     */
-    static uint32_t ReadLocal(bool isHost) {
-        char* base = GetInputBasePtr();
-        if (!base) return 0;
-        uint32_t offset = isHost ? CC_P1_OFFSET_DIRECTION : CC_P2_OFFSET_DIRECTION;
-        uint32_t dir = *reinterpret_cast<uint32_t*>(base + offset) & 0xFFFF;
-        uint16_t btn = *reinterpret_cast<uint16_t*>(base + offset + 4);
-        return (dir << 16) | btn;
-    }
 
     // -------------------- ゲーム終了 --------------------
 

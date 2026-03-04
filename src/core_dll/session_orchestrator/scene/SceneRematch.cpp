@@ -35,6 +35,7 @@
 #include "core_dll/session_orchestrator/session/DebugLog.hpp"
 #include "core_dll/session_orchestrator/session/GameControl.hpp"
 #include "core_dll/game_memory_accessor/MbaaConstants.hpp"
+#include "core_dll/adapter_os_hooks/input/DirectInputHook.hpp"
 #include <atomic>
 #include <cstring>
 
@@ -284,8 +285,12 @@ void SceneRematch::ReadAndSend(session::SessionContext& ctx,
         return;
     }
 
-    // ステップ 2: 入力取得
-    uint16_t input = GC::ReadLocal(ctx.isHost);
+    // ステップ 2: 入力取得 (DirectInputHook から直接)
+    cccaster::game_interface::DirectInputHook::Poll();
+    uint32_t rawInput = ctx.isHost
+        ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
+        : cccaster::game_interface::DirectInputHook::GetPlayer2Input();
+    uint16_t input = static_cast<uint16_t>(rawInput & 0xFFFF);
 
     // ステップ 3: メニューゲート
     if (HandleMenuGate(ctx, input)) {
