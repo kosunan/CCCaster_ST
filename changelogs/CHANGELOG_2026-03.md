@@ -1,4 +1,19 @@
-# fix: オーバーレイが1Fに複数回描画される問題を修正 — Present最終描画方式
+# fix: マッピングUI点滅がフック高速化タイムで高速化する問題を修正
+
+## 2026-03-05: PRESS LEFT/RIGHT TO ASSIGN 点滅アニメーション修正
+
+### 問題
+`ImGui::GetTime()` がDLLのタイムフック高速化の影響を受け、
+「PRESS LEFT/RIGHT TO ASSIGN」テキストの点滅が異常に高速になっていた。
+
+### 修正内容
+- [MODIFY] `Controller_Ui_View.cpp`:
+  - `ImGui::GetTime()` ベースから static フレームカウンタベースに変更
+  - `s_pulseFrame * (2π / 60)` で60F=1周期のゆるやかなパルスに
+
+---
+
+
 
 ## 2026-03-05: オーバーレイ 1F1回描画（Present最終描画方式）
 

@@ -128,7 +128,9 @@ static void DrawDeviceSelectionTable() {
             OverlayRenderer::DrawFittedText("ASCII Keyboard", ImVec4(1,1,1,1), false);
             if (p1Pos > 0) OverlayRenderer::DrawFittedText("(Binding...)", ImVec4(1.0f, 0.8f, 0.2f, 1.0f), false);
         } else {
-            float alpha = 0.5f + 0.5f * sinf((float)ImGui::GetTime() * 5.0f);
+            static uint32_t s_pulseFrame = 0;
+            ++s_pulseFrame;
+            float alpha = 0.5f + 0.5f * sinf(s_pulseFrame * (6.2831853f / 60.0f));
             OverlayRenderer::DrawFittedText("< PRESS LEFT TO ASSIGN", ImVec4(1.0f, 0.4f, 0.4f, alpha), false);
         }
 
@@ -152,7 +154,9 @@ static void DrawDeviceSelectionTable() {
             OverlayRenderer::DrawFittedText("ASCII Keyboard", ImVec4(1,1,1,1), true);
             if (p2Pos > 0) OverlayRenderer::DrawFittedText("(Binding...)", ImVec4(0.2f, 0.9f, 1.0f, 1.0f), true);
         } else {
-            float alpha = 0.5f + 0.5f * sinf((float)ImGui::GetTime() * 5.0f);
+            static uint32_t s_pulseFrame2 = 0;
+            ++s_pulseFrame2;
+            float alpha = 0.5f + 0.5f * sinf(s_pulseFrame2 * (6.2831853f / 60.0f));
             OverlayRenderer::DrawFittedText("PRESS RIGHT TO ASSIGN >", ImVec4(0.4f, 0.6f, 1.0f, alpha), true);
         }
         ImGui::EndTable();
