@@ -98,10 +98,12 @@ public:
      * @brief 次フレームまで待機する
      * @details
      *   worldTimer（ゲームエンジン側フレームカウンタ）が
-     *   currentFrame（通信スレッド側フレームカウンタ）に追従する。
+     *   effectiveHead（ディレイ+ロールバック補正+リモート確定）に追従する。
      *
-     *   gap = currentFrame - worldTimer として:
-     *     gap <= 0: worldTimer が追いついた → currentFrame 変化を待機
+     *   effectiveHead = min(writeHead - (delay+maxRollback), confirmedRemoteFrame)
+     *
+     *   gap = effectiveHead - worldTimer として:
+     *     gap <= 0: worldTimer が追いついた → effectiveHead 変化を待機
      *     gap == 1: 通常速度で 1F 進める
      *     gap >= 2: 描画OFF で高速に追いつかせる
      *
@@ -110,19 +112,19 @@ public:
      */
     static void SleepFrame() {
         auto& buf = cccaster::core::sync::CentralBuffer::GetInstance();
-        uint32_t cf = buf.GetWriteHead();
+        uint32_t ef = buf.GetEffectiveHead();
         uint32_t wt = *CC_WORLD_TIMER_ADDR;
 
-        // gap = writeHead - worldTimer (符号なし演算に注意)
-        int32_t gap = static_cast<int32_t>(cf) - static_cast<int32_t>(wt);
+        // gap = effectiveHead - worldTimer
+        int32_t gap = static_cast<int32_t>(ef) - static_cast<int32_t>(wt);
 
         if (gap <= 0) {
-            // worldTimer が writeHead に追いついている → 次の writeHead 変化を待つ
+            // worldTimer が effectiveHead に追いついている → 変化を待つ
             MbaaSpeedController::RenderSkip().store(false, std::memory_order_release);
             MbaaSpeedController::TickBypass().store(false, std::memory_order_release);
             for (;;) {
-                uint32_t now = buf.GetWriteHead();
-                if (now != cf) break;
+                uint32_t now = buf.GetEffectiveHead();
+                if (now != ef) break;
                 Sleep(1);
             }
         } else if (gap == 1) {

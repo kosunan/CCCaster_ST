@@ -83,6 +83,12 @@ public:
 
         slot.remoteInput = input;
         slot.confirmed   = true;
+
+        // 確定済みリモートフレーム最大値を追跡
+        uint32_t prev = _confirmedRemoteFrame.load(std::memory_order_relaxed);
+        if (frame > prev) {
+            _confirmedRemoteFrame.store(frame, std::memory_order_release);
+        }
     }
 
     /// writeHead（最新フレーム番号）を取得
@@ -123,6 +129,24 @@ public:
         return (pos >= 0) ? static_cast<uint32_t>(pos) : 0;
     }
 
+    /// リモート入力が確定している最新フレーム
+    uint32_t GetConfirmedRemoteFrame() const {
+        return _confirmedRemoteFrame.load(std::memory_order_acquire);
+    }
+
+    /// ゲームが進行可能な実効フレーム: min(writeHead-(D+R), confirmedRemoteFrame)
+    uint32_t GetEffectiveHead() const {
+        uint32_t wh = _writeHead.load(std::memory_order_acquire);
+        int32_t offset = static_cast<int32_t>(_delay) + static_cast<int32_t>(_maxRollback);
+        if (offset < 1) offset = 1;  // 最侎1Fオフセット
+        int32_t delayAdjusted = static_cast<int32_t>(wh) - offset;
+        if (delayAdjusted < 0) delayAdjusted = 0;
+
+        uint32_t confirmed = _confirmedRemoteFrame.load(std::memory_order_acquire);
+        uint32_t da = static_cast<uint32_t>(delayAdjusted);
+        return (da < confirmed) ? da : confirmed;
+    }
+
     /// 指定フレームのスロットを取得（読取り専用）
     const FrameSlot& GetSlot(uint32_t frame) const {
         return _ring[frame % RING_SIZE];
@@ -139,6 +163,7 @@ public:
         std::memset(_ring, 0, sizeof(_ring));
         _writeHead.store(0, std::memory_order_relaxed);
         _mismatchFrame.store(0, std::memory_order_relaxed);
+        _confirmedRemoteFrame.store(0, std::memory_order_relaxed);
         _delay = 0;
         _maxRollback = 0;
     }
@@ -149,6 +174,7 @@ private:
     FrameSlot _ring[RING_SIZE] = {};
     std::atomic<uint32_t> _writeHead{0};       // 通信スレッド書込み位置（= 旧 currentFrame）
     std::atomic<uint32_t> _mismatchFrame{0};   // 予測外れフレーム (0=なし)
+    std::atomic<uint32_t> _confirmedRemoteFrame{0}; // リモート入力確定済み最新フレーム
 
     // 同期パラメータ（SyncCoordinator::Start で設定、以後不変）
     int16_t _delay       = 0;
