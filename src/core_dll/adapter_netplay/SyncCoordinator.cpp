@@ -122,7 +122,7 @@ void SyncCoordinator::Start(bool isHost,
 
     // CentralBuffer リセット + writeHead 初期値
     cccaster::core::sync::CentralBuffer::GetInstance().Reset();
-    cccaster::core::sync::CentralBuffer::GetInstance().SetWriteHead(2000);
+    cccaster::core::sync::CentralBuffer::GetInstance().SetWriteHead(200);
 
     // 内部状態リセット
     _clock.Reset();
