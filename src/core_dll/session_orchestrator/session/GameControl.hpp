@@ -33,7 +33,7 @@
  * @see MbaaConstants.hpp     メモリアドレス定義
  */
 
-#include "core_dll/game_memory_accessor/MbaaSpeedController.hpp"
+#include "core_dll/game_memory_accessor/speed/MbaaSpeedController.hpp"
 #include "core_dll/pure_sync_engine/CentralBuffer.hpp"
 #include "core_dll/game_memory_accessor/MbaaConstants.hpp"
 #include <cstdint>

@@ -27,7 +27,7 @@
 #include "core_dll/adapter_netplay/timer/WasapiClock.hpp"
 #include "core_dll/adapter_netplay/NetplayManager.hpp"
 #include "core_dll/pure_sync_engine/CentralBuffer.hpp"
-#include "core_dll/game_memory_accessor/GamePhaseDetector.hpp"
+#include "core_dll/game_memory_accessor/monitor/GamePhaseDetector.hpp"
 #include "core_dll/game_memory_accessor/MbaaConstants.hpp"
 #include "core_dll/session_orchestrator/session/DebugLog.hpp"
 #include "core_dll/session_orchestrator/session/GameControl.hpp"

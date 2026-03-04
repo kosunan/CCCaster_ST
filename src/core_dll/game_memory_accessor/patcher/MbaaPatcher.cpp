@@ -2,9 +2,9 @@
 // MbaaPatcher.cpp — MBAA 固有メモリパッチの実装
 // ============================================================================
 
-#include "core_dll/game_memory_accessor/MbaaPatcher.hpp"
+#include "core_dll/game_memory_accessor/patcher/MbaaPatcher.hpp"
 #include "core_dll/game_memory_accessor/patcher/MemoryPatcher.hpp"
-#include "core_dll/game_memory_accessor/MbaaConstants.hpp"
+#include "core_dll/game_memory_accessor/constants/MbaaAddresses.hpp"
 #include "core_dll/session_orchestrator/session/DebugLog.hpp"
 
 namespace cccaster::game_memory {

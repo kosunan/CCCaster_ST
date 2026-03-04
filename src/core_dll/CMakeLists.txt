@@ -36,9 +36,9 @@ add_library(cccaster_hook SHARED
     adapter_netplay/NetplayManager.cpp
     adapter_netplay/PacketRouter.cpp
     # === game_memory_accessor (MBAAメモリへの直接介入) ===
-    game_memory_accessor/GameMonitor.cpp
-    game_memory_accessor/StateBuffer.cpp
-    game_memory_accessor/MbaaPatcher.cpp
+    game_memory_accessor/monitor/GameMonitor.cpp
+    game_memory_accessor/state/StateBuffer.cpp
+    game_memory_accessor/patcher/MbaaPatcher.cpp
     session_orchestrator/scene/SceneFastBoot.cpp
     # === session_orchestrator (業務とシーンの統括) ===
     session_orchestrator/session/SceneRunner.cpp

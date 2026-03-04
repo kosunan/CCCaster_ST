@@ -16,7 +16,7 @@
 #include "core_dll/feature_overlay_ui/UIManager.hpp"
 #include "core_dll/feature_overlay_ui/State_Ui_Logic.hpp"
 #include "core_dll/adapter_netplay/SyncCoordinator.hpp"
-#include "core_dll/game_memory_accessor/MbaaSpeedController.hpp"
+#include "core_dll/game_memory_accessor/speed/MbaaSpeedController.hpp"
 #include "core_dll/game_memory_accessor/MbaaConstants.hpp"
 #include <imgui.h>
 #include <imgui_impl_dx9.h>

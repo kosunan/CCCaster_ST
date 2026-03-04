@@ -29,7 +29,7 @@
 #include "core_dll/adapter_netplay/SyncCoordinator.hpp"
 #include "core_dll/session_orchestrator/scene/SceneInGame.hpp"
 #include "core_dll/session_orchestrator/scene/SceneRematch.hpp"
-#include "core_dll/game_memory_accessor/GamePhaseDetector.hpp"
+#include "core_dll/game_memory_accessor/monitor/GamePhaseDetector.hpp"
 #include "core_dll/pure_sync_engine/RollbackEngine.hpp"
 #include "core_dll/pure_sync_engine/RemoteInputQueue.hpp"
 #include "core_dll/game_memory_accessor/MbaaConstants.hpp"

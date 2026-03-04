@@ -17,7 +17,7 @@
 #include <string>
 #include "core_dll/adapter_netplay/NetplayManager.hpp"
 #include "core_dll/adapter_os_hooks/api_hook/TimeHooks.hpp"
-#include "core_dll/game_memory_accessor/MbaaPatcher.hpp"
+#include "core_dll/game_memory_accessor/patcher/MbaaPatcher.hpp"
 #include "core_dll/adapter_os_hooks/api_hook/DxHook.hpp"
 #include "core_dll/session_orchestrator/session/SceneRunner.hpp"
 #include "core_dll/session_orchestrator/session/SessionContext.hpp"

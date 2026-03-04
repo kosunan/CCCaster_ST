@@ -1,3 +1,33 @@
+# refactor: game_memory_accessor ディレクトリ再構成 — MbaaConstants分割・サブディレクトリ化
+
+## 2026-03-05: game_memory_accessor リファクタリング
+
+### 変更内容
+
+#### A. MbaaConstants.hpp の分割
+- [NEW] `constants/MbaaAddresses.hpp`: メモリアドレス・定数定義を抽出
+- [NEW] `constants/MbaaInputDefs.hpp`: 入力ボタン・方向キー・入力合成マクロを抽出
+- [MODIFY] `MbaaConstants.hpp`: 互換転送ヘッダに変換（既存コードの後方互換を維持）
+- [DELETE] `IndexedFrame` union — `NetplayState.hpp` に同一定義あり（重複除去）
+- [DELETE] `gameModeStr()` — 呼出箇所0のデッドコード
+
+#### B. ディレクトリ再構成（7サブディレクトリ）
+- `constants/` — MbaaAddresses.hpp, MbaaInputDefs.hpp
+- `monitor/` — GamePhaseDetector.hpp, GameMonitor.cpp
+- `speed/` — MbaaSpeedController.hpp
+- `boot/` — FastBootRunner.hpp/.cpp
+- `patcher/` — MemoryPatcher.hpp, MbaaPatcher.hpp/.cpp
+- `dump/` — MemDumper.hpp, DumpEntryList.hpp
+- `state/` — StateBuffer.hpp/.cpp, StateRingBuffer.hpp
+
+#### C. include パス更新
+- CMakeLists.txt: .cppパス3件更新
+- 内部ファイル: 7件のincludeパス更新
+- 外部参照: 6件のincludeパス更新（直接参照のみ）
+- 残り12件の外部参照は互換転送ヘッダ経由で変更不要
+
+---
+
 # chore: tools/ ディレクトリをGit追跡対象から除外
 
 ## 2026-03-04: tools/ を .gitignore に追加

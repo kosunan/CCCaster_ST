@@ -22,7 +22,7 @@
 #include "core_dll/adapter_netplay/SyncCoordinator.hpp"
 #include "core_dll/session_orchestrator/session/GameControl.hpp"
 #include "core_dll/pure_sync_engine/RollbackEngine.hpp"
-#include "core_dll/game_memory_accessor/DumpEntryList.hpp"
+#include "core_dll/game_memory_accessor/dump/DumpEntryList.hpp"
 #include "core_dll/pure_sync_engine/InputFilter.hpp"
 #include "core_dll/pure_sync_engine/RemoteInputQueue.hpp"
 #include "core_dll/game_memory_accessor/MbaaConstants.hpp"

@@ -28,7 +28,7 @@
  */
 
 #include "core_dll/adapter_os_hooks/api_hook/ISpeedController.hpp"
-#include "core_dll/game_memory_accessor/MbaaConstants.hpp"
+#include "core_dll/game_memory_accessor/constants/MbaaAddresses.hpp"
 #include "core_dll/adapter_os_hooks/api_hook/TimeHooks.hpp"
 #include <cstdio>
 #include <atomic>

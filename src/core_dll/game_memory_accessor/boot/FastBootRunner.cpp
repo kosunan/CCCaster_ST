@@ -4,9 +4,10 @@
 // GameHooks::NetworkSyncLoop() から FastBoot フェーズを分離・移設したもの。
 // ============================================================================
 
-#include "core_dll/game_memory_accessor/FastBootRunner.hpp"
+#include "core_dll/game_memory_accessor/boot/FastBootRunner.hpp"
 #include "core_dll/game_memory_accessor/patcher/MemoryPatcher.hpp"
-#include "core_dll/game_memory_accessor/MbaaConstants.hpp"
+#include "core_dll/game_memory_accessor/constants/MbaaAddresses.hpp"
+#include "core_dll/game_memory_accessor/constants/MbaaInputDefs.hpp"
 #include "core_dll/session_orchestrator/session/DebugLog.hpp"
 #include "shared_contracts/IpcData.hpp"
 

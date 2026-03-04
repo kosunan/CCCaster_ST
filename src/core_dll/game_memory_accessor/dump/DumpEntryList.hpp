@@ -4,8 +4,8 @@
 // ============================================================================
 
 #include <vector>
-#include "core_dll/game_memory_accessor/MemDumper.hpp"
-#include "core_dll/game_memory_accessor/MbaaConstants.hpp"
+#include "core_dll/game_memory_accessor/dump/MemDumper.hpp"
+#include "core_dll/game_memory_accessor/constants/MbaaAddresses.hpp"
 
 namespace cccaster::sync {
 
