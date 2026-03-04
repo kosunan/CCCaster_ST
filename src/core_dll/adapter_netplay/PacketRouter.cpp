@@ -138,6 +138,16 @@ void PacketRouter::OnPacket(const std::vector<uint8_t>& data, const std::string&
             const int     payloadOffset = UNIFIED_HEADER_SIZE;
             const int     payloadSize   = static_cast<int>(data.size()) - payloadOffset;
 
+            // SyncCoordinator 専用パケットは SyncCoordinator が処理済み
+            // ※ PKT_GAME_TICK(0x20) と TYPE_LOADING_INPUT(0x20) が衝突するため
+            //    SyncCoordinator 管轄タイプを明示的にスキップする
+            if (type == 0x00 ||   // PING
+                type == 0x15 ||   // READY
+                type == 0x16 ||   // START
+                type == 0x20) {   // GAME_TICK ← TYPE_LOADING_INPUT と衝突！
+                return;           // SyncCoordinator 側で処理済み
+            }
+
             switch (type) {
 
             case TYPE_CS_INPUT: {

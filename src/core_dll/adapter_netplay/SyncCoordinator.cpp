@@ -137,19 +137,13 @@ void SyncCoordinator::Start(bool isHost,
     _lastRecvUs = timer::WasapiClock::GetTimeUs();
     _lastPeerT1 = 0;
     _lastPeerRecvUs = 0;
-    _currentInputButtons = 0;
-    _currentInputDirection = 0;
+    _lastLocalInput = 0;
 
     // キュークリア
     {
         std::lock_guard<std::mutex> lock(_recvMutex);
         _recvQueue.clear();
         _recvQueueSwap.clear();
-    }
-    {
-        std::lock_guard<std::mutex> lock(_localMutex);
-        _localQueue.clear();
-        _localQueueSwap.clear();
     }
 
     cccaster::domain::session::DebugLog(
@@ -182,13 +176,6 @@ void SyncCoordinator::OnPacketReceived(const std::vector<uint8_t>& data,
     _recvQueue.push_back({data, fromIp, fromPort, receiveTime});
 }
 
-// ============================================================================
-// PushLocalInput — DLLスレッドからローカル入力を送信キューに追加
-// ============================================================================
-void SyncCoordinator::PushLocalInput(const LocalInputEntry& entry) {
-    std::lock_guard<std::mutex> lock(_localMutex);
-    _localQueue.push_back(entry);
-}
 
 // ============================================================================
 // DrainAndProcessPackets — 受信キューを drain して処理
@@ -325,7 +312,7 @@ void SyncCoordinator::SendPing() {
 // ============================================================================
 // SendGameTick — GAME_TICK パケット送信（入力 + NTPエコー）
 // ============================================================================
-void SyncCoordinator::SendGameTick(uint32_t frame) {
+void SyncCoordinator::SendGameTick(uint32_t frame, uint32_t localInput) {
     int64_t now = timer::WasapiClock::GetTimeUs();
 
     GameTickPayload gtp{};
@@ -333,8 +320,8 @@ void SyncCoordinator::SendGameTick(uint32_t frame) {
     gtp.t_send    = now;
     gtp.echo_t1   = _lastPeerT1;     // 最後に受信した相手の t_send をエコー
     gtp.echo_t2   = _lastPeerRecvUs; // そのパケットの受信時刻をエコー
-    gtp.buttons   = _currentInputButtons;
-    gtp.direction = _currentInputDirection;
+    gtp.buttons   = static_cast<uint16_t>(localInput & 0xFFFF);
+    gtp.direction = static_cast<uint16_t>((localInput >> 16) & 0xFFFF);
 
     auto pkt = BuildUnifiedPacket(0x00, PKT_GAME_TICK, now, &gtp, sizeof(gtp));
     SendPacket(pkt);
@@ -487,6 +474,7 @@ void SyncCoordinator::ThreadMain() {
                 uint32_t localInput = _isHost
                     ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
                     : cccaster::game_interface::DirectInputHook::GetPlayer2Input();
+                _lastLocalInput = localInput;  // サブティック間で保持
 
                 // ── CentralBuffer にスロット書込み ──
                 uint8_t phase = static_cast<uint8_t>(
@@ -526,7 +514,7 @@ void SyncCoordinator::ThreadMain() {
 
             // ── 3連パケット送信: 全サブティックで GAME_TICK ──
             // baseFrame と input はフレーム内で固定、t_send のみサブティックごとに異なる
-            SendGameTick(frame);
+            SendGameTick(frame, _lastLocalInput);
 
             // サブティックインデックスを巡回
             subTickIdx = (subTickIdx + 1) % SUB_TICKS_PER_FRAME;

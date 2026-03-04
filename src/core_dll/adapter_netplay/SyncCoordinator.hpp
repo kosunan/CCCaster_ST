@@ -107,7 +107,7 @@ public:
                           const std::string& fromIp, uint16_t fromPort);
 
     // ─── DLLスレッドからの入力送信 ──────────────────────
-    void PushLocalInput(const LocalInputEntry& entry);
+    // PushLocalInput 廃止 — 通信スレッドが DirectInputHook から直接読取り
 
     // ─── 定数 ──────────────────────────────────────────
     static constexpr int     MAX_SENDS_PER_FRAME    = 3;
@@ -138,7 +138,7 @@ private:
     void SendPing();
     void SendReady();
     void SendStart(int64_t startTimeUs);
-    void SendGameTick(uint32_t frame);
+    void SendGameTick(uint32_t frame, uint32_t localInput);
     static void SleepUntil(int64_t targetUs);
 
     // ─── 状態 ──────────────────────────────────────────
@@ -163,14 +163,8 @@ private:
     std::vector<ReceivedPacket> _recvQueue;
     std::vector<ReceivedPacket> _recvQueueSwap;
 
-    // ─── ローカル入力キュー ─────────────────────────────
-    std::mutex _localMutex;
-    std::vector<LocalInputEntry> _localQueue;
-    std::vector<LocalInputEntry> _localQueueSwap;
-
     // ─── 現フレームの確定入力（3サブティックで同一内容を送信）───
-    uint16_t _currentInputButtons   = 0;
-    uint16_t _currentInputDirection = 0;
+    uint32_t _lastLocalInput = 0;  // (direction<<16)|buttons
 
     // ─── NTP T1-T4 エコー追跡 ─────────────────────────
     int64_t _lastPeerT1     = 0;  // 最後に受信した相手パケットの t_send（= 相手の T1）
