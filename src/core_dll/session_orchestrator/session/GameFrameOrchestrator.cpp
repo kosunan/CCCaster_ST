@@ -31,6 +31,12 @@ using namespace cccaster::domain::session;
 // ─── ImGui 状態管理 ─────────────────────────────────
 static bool s_imguiInitialized = false;
 
+// ─── フレーム単位描画ガード ─────────────────────────
+// MBAAは1Fに~8回 EndScene を呼び、バックバッファに複数回描画する。
+// 最初のEndSceneでImGuiを描画しても後続のゲーム描画で上書きされるため、
+// EndSceneではデータ準備のみ行い、OnPresentで最終描画する。
+static bool s_imguiFrameReady = false;
+
 // ============================================================================
 // Register — DxHook にコールバックを登録
 // ============================================================================
@@ -65,8 +71,6 @@ void GameFrameOrchestrator::Shutdown() {
 //   1. SceneRunner::Step() — ゲームセッションロジック
 //   2. DirectInputHook::Poll() — ジョイスティック状態取得
 void GameFrameOrchestrator::OnPresent(LPDIRECT3DDEVICE9 pDevice) {
-    (void)pDevice;
-
     // SceneRunner: ゲームスレッド上で1F分のロジック処理
     if (SceneRunner::IsReady()) {
         SceneRunner::Step();
@@ -74,6 +78,16 @@ void GameFrameOrchestrator::OnPresent(LPDIRECT3DDEVICE9 pDevice) {
 
     // ジョイスティック状態を毎フレームポーリング
     cccaster::game_interface::DirectInputHook::Poll();
+
+    // ── ImGui 最終描画（全ゲーム描画の後、Present直前） ──
+    // EndScene で準備したImGuiドローデータを、バックバッファの最上位レイヤーとして描画。
+    // これによりゲームの後続描画パスに上書きされない。
+    if (s_imguiFrameReady) {
+        pDevice->BeginScene();
+        ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
+        pDevice->EndScene();
+        s_imguiFrameReady = false;
+    }
 }
 
 // ============================================================================
@@ -144,6 +158,11 @@ void GameFrameOrchestrator::OnEndScene(LPDIRECT3DDEVICE9 pDevice) {
     }
 
     if (isBackBuffer) {
+        // 1Fに1回だけデータ準備（MBAAは1Fに~8回EndSceneを呼ぶため）
+        if (s_imguiFrameReady) {
+            return;
+        }
+
         ImGui_ImplDX9_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
@@ -198,7 +217,8 @@ void GameFrameOrchestrator::OnEndScene(LPDIRECT3DDEVICE9 pDevice) {
 
         ImGui::EndFrame();
         ImGui::Render();
-        ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
+        // RenderDrawData は OnPresent で実行（全ゲーム描画の後に最上位レイヤーとして描画）
+        s_imguiFrameReady = true;
     }
 }
 

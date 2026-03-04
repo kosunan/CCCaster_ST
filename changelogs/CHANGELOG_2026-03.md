@@ -1,4 +1,29 @@
-# refactor: game_memory_accessor ディレクトリ再構成 — MbaaConstants分割・サブディレクトリ化
+# fix: オーバーレイが1Fに複数回描画される問題を修正 — Present最終描画方式
+
+## 2026-03-05: オーバーレイ 1F1回描画（Present最終描画方式）
+
+### 問題
+MBAAは1フレームで EndScene を約8回呼び、バックバッファに複数回描画する。
+最初のEndSceneでImGuiを描画しても後続のゲーム描画パスで上書きされるため、
+EndScene内でのImGui描画はそのままでは機能しない。
+
+### 修正内容
+- [MODIFY] `GameFrameOrchestrator.cpp`:
+  - `s_imguiFrameReady` フラグを追加
+  - OnEndScene: 最初のバックバッファヒット時にImGuiフレームデータを準備（NewFrame/Render）
+    → `RenderDrawData` は呼ばず、`s_imguiFrameReady = true` をセット
+  - OnPresent: `s_imguiFrameReady` が true なら
+    `BeginScene → RenderDrawData → EndScene` で全ゲーム描画の上に最終描画
+    → `s_imguiFrameReady = false` にリセット
+
+### 設計メモ
+D3D9の呼び出し順は EndScene×N → Present×1。
+Present直前にBeginScene/EndSceneで再描画することで、ゲームの全描画の上に
+ImGuiオーバーレイが最上位レイヤーとして確実に表示される。
+
+---
+
+
 
 ## 2026-03-05: game_memory_accessor リファクタリング
 
