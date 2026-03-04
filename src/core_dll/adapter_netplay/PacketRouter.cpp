@@ -79,13 +79,13 @@ static constexpr uint8_t TYPE_REMATCH_MENU  = 0x50; ///< Rematch メニュー選
 /// CS_INPUT ペイロード (仕様書 §4.1)
 struct CsInputPayload {
     uint32_t frame;
-    uint16_t input;
+    uint32_t input;   // (direction<<16)|buttons — uint32_t に拡張
 };
 
 /// LOADING_INPUT ペイロード (仕様書 §4.2)
 struct LoadingInputPayload {
     uint32_t frame;
-    uint16_t input;
+    uint32_t input;   // (direction<<16)|buttons — uint32_t に拡張
     int32_t  delay;
 };
 

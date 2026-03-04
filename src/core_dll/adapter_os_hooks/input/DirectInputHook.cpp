@@ -328,7 +328,7 @@ void DirectInputHook::ReloadConfigs() {
 }
 
 static uint32_t BuildPlayerInput(int joyId, const cccaster::main_app::Config& deviceConfig) {
-    if (joyId == -1) return 0xFFFFFFFF;
+    if (joyId == -1) return 0;  // デバイス未接続 → ニュートラル
     uint16_t buttons = 0;
 
     // Evaluate buttons
