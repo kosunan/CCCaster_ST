@@ -252,19 +252,25 @@ void SyncCoordinator::DrainAndProcessPackets() {
             cccaster::core::sync::CentralBuffer::GetInstance().ConfirmRemote(
                 gtp.baseFrame, remoteInput);
 
-            // (4) 相手の D/R 値を受信 → last-write-wins で即反映
-            if (gtp.delay != static_cast<uint8_t>(_delayFrames) ||
-                gtp.maxRollback != static_cast<uint8_t>(_maxRollback)) {
+            // (4) 相手の D/R 値を受信 — 0xFF=変更なし、実値=変更通知
+            static constexpr uint8_t DR_NO_CHANGE = 0xFF;
+            bool drChanged = false;
+            if (gtp.delay != DR_NO_CHANGE) {
                 _delayFrames = gtp.delay;
+                drChanged = true;
+            }
+            if (gtp.maxRollback != DR_NO_CHANGE) {
                 _maxRollback = gtp.maxRollback;
+                drChanged = true;
+            }
+            if (drChanged) {
                 cccaster::core::sync::CentralBuffer::GetInstance().SetSyncParams(
-                    gtp.delay, gtp.maxRollback);
+                    _delayFrames, _maxRollback);
                 cccaster::domain::session::DebugLog(
                     "[SyncCoordinator] Peer D/R update: delay=%d maxRB=%d",
-                    gtp.delay, gtp.maxRollback);
-                // UI オーバーレイにも反映
-                cccaster::domain::ui::StateUiLogic::SetDelay(gtp.delay);
-                cccaster::domain::ui::StateUiLogic::SetRollback(gtp.maxRollback);
+                    _delayFrames, _maxRollback);
+                cccaster::domain::ui::StateUiLogic::SetDelay(_delayFrames);
+                cccaster::domain::ui::StateUiLogic::SetRollback(_maxRollback);
             }
 
             // (5) 相手フレーム追跡（キャッチアップ用）
@@ -340,8 +346,13 @@ void SyncCoordinator::SendGameTick(uint32_t frame, uint32_t localInput) {
     gtp.echo_t2     = _lastPeerRecvUs; // そのパケットの受信時刻をエコー
     gtp.buttons     = static_cast<uint16_t>(localInput & 0xFFFF);
     gtp.direction   = static_cast<uint16_t>((localInput >> 16) & 0xFFFF);
-    gtp.delay       = static_cast<uint8_t>(_delayFrames);
-    gtp.maxRollback = static_cast<uint8_t>(_maxRollback);
+
+    // D/R: dirty 時のみ実値を送信、それ以外は 0xFF(変更なし)
+    static constexpr uint8_t DR_NO_CHANGE = 0xFF;
+    gtp.delay       = _delayDirty    ? static_cast<uint8_t>(_delayFrames) : DR_NO_CHANGE;
+    gtp.maxRollback = _rollbackDirty ? static_cast<uint8_t>(_maxRollback) : DR_NO_CHANGE;
+    _delayDirty    = false;
+    _rollbackDirty = false;
 
     auto pkt = BuildUnifiedPacket(0x00, PKT_GAME_TICK, now, &gtp, sizeof(gtp));
     SendPacket(pkt);

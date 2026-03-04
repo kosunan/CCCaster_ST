@@ -108,8 +108,8 @@ public:
     int64_t GetBaselineTheta() const { return _clock.GetBaselineTheta(); }
 
     // ─── D/R 動的変更（UIキー入力 → 通信スレッド → パケット送信）───
-    void SetDelayFrames(int d)  { _delayFrames = d; }
-    void SetMaxRollback(int r)  { _maxRollback = r; }
+    void SetDelayFrames(int d)  { _delayFrames = d; _delayDirty = true; }
+    void SetMaxRollback(int r)  { _maxRollback = r; _rollbackDirty = true; }
 
     // ─── 受信パケットキュー ─────────────────────────────
     void OnPacketReceived(const std::vector<uint8_t>& data,
@@ -166,6 +166,8 @@ private:
     uint16_t _localPort  = 0;
     int      _delayFrames = 0;
     int      _maxRollback = 0;
+    bool     _delayDirty    = false;  // D値変更済み→次のパケットで実値送信
+    bool     _rollbackDirty = false;  // R値変更済み→次のパケットで実値送信
 
     // ─── 受信パケットキュー ─────────────────────────────
     std::mutex _recvMutex;
