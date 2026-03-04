@@ -120,9 +120,10 @@ void SyncCoordinator::Start(bool isHost,
     _state.clockOffsetUs.store(0);
     _state.lastRttUs.store(0);
 
-    // CentralBuffer リセット + writeHead 初期値
+    // CentralBuffer リセット + writeHead 初期値 + 同期パラメータ
     cccaster::core::sync::CentralBuffer::GetInstance().Reset();
     cccaster::core::sync::CentralBuffer::GetInstance().SetWriteHead(200);
+    cccaster::core::sync::CentralBuffer::GetInstance().SetSyncParams(delayFrames, maxRollback);
 
     // 内部状態リセット
     _clock.Reset();

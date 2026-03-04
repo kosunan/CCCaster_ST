@@ -8,12 +8,17 @@
 //
 // 【スレッド安全性】
 //   - WriteSlot / ConfirmRemote / SetWriteHead: 通信スレッドのみ（単一writer）
-//   - GetSlot / GetWriteHead / GetPlayHead: ゲームスレッドから読取り（atomic同期）
+//   - GetSlot / GetWriteHead / GetReadPos: ゲームスレッドから読取り（atomic同期）
 //   - ConsumeMismatch: ゲームスレッドのみ
 //
 // 【データフロー】
 //   通信スレッド → WriteSlot() → writeHead 更新
-//   DLLスレッド  ← GetSlot(playHead) → WriteInput → AdvancePlayHead
+//   DLLスレッド  ← GetReadPos() → GetSlot(readPos) → WriteInput
+//
+// 【readPos 算出方式】
+//   readPos = writeHead - delay - maxRollback
+//   非ロールバック区間: confirmed=true のスロットのみ消費（未確定なら待つ）
+//   ロールバック区間:   confirmed=false でも予測入力で進行可（後からロールバック）
 //
 // 【注意】
 //   CC_SKIP_FRAMES_ADDR は使用禁止。描画制御は API hook (RenderSkip) で行う。
@@ -52,12 +57,6 @@ public:
     // ════════════════════════════════════════════════════
 
     /// スロット書込み（フレーム確定時に1回呼ぶ）
-    /// @param frame       フレーム番号
-    /// @param gamePhase   GamePhase enum 値
-    /// @param rollbackable ロールバック可能区域か
-    /// @param localInput  フィルタ済み自入力
-    /// @param remoteInput フィルタ済み相手入力（未確定=予測コピー）
-    /// @param confirmed   相手入力が確定済みか
     void WriteSlot(uint32_t frame, uint8_t gamePhase, bool rollbackable,
                    uint32_t localInput, uint32_t remoteInput, bool confirmed) {
         auto& slot = _ring[frame % RING_SIZE];
@@ -71,8 +70,6 @@ public:
 
     /// 相手入力を確定更新（GAME_TICK 受信時）
     /// 予測と異なる確定入力が来た場合、mismatchFrame を記録する。
-    /// @param frame  確定対象フレーム
-    /// @param input  確定した相手入力
     void ConfirmRemote(uint32_t frame, uint32_t input) {
         auto& slot = _ring[frame % RING_SIZE];
 
@@ -99,27 +96,34 @@ public:
     }
 
     // ════════════════════════════════════════════════════
+    // 同期パラメータ設定（SyncCoordinator::Start で1回呼ぶ）
+    // ════════════════════════════════════════════════════
+
+    /// ディレイ + 最大ロールバック を設定
+    void SetSyncParams(int16_t delay, int16_t maxRollback) {
+        _delay = delay;
+        _maxRollback = maxRollback;
+    }
+
+    int16_t GetDelay() const { return _delay; }
+    int16_t GetMaxRollback() const { return _maxRollback; }
+
+    // ════════════════════════════════════════════════════
     // ゲームスレッドから呼ばれる (Read系)
     // ════════════════════════════════════════════════════
+
+    /// DLL の読取位置を算出: writeHead - delay - maxRollback
+    /// @return 読み取るべきフレーム番号（0 以下にはならない）
+    uint32_t GetReadPos() const {
+        uint32_t wh = _writeHead.load(std::memory_order_acquire);
+        int32_t offset = static_cast<int32_t>(_delay) + static_cast<int32_t>(_maxRollback);
+        int32_t pos = static_cast<int32_t>(wh) - offset;
+        return (pos > 0) ? static_cast<uint32_t>(pos) : 0;
+    }
 
     /// 指定フレームのスロットを取得（読取り専用）
     const FrameSlot& GetSlot(uint32_t frame) const {
         return _ring[frame % RING_SIZE];
-    }
-
-    /// 再生ヘッド（ゲームスレッドが再生中のフレーム）
-    uint32_t GetPlayHead() const {
-        return _playHead.load(std::memory_order_acquire);
-    }
-
-    /// 再生ヘッドを進める
-    void AdvancePlayHead() {
-        _playHead.fetch_add(1, std::memory_order_release);
-    }
-
-    /// 再生ヘッドを指定フレームに設定（ロールバック用）
-    void SetPlayHead(uint32_t frame) {
-        _playHead.store(frame, std::memory_order_release);
     }
 
     /// ロールバック判定: 予測外れが発生したフレームを返す (0=なし)
@@ -132,8 +136,9 @@ public:
     void Reset() {
         std::memset(_ring, 0, sizeof(_ring));
         _writeHead.store(0, std::memory_order_relaxed);
-        _playHead.store(0, std::memory_order_relaxed);
         _mismatchFrame.store(0, std::memory_order_relaxed);
+        _delay = 0;
+        _maxRollback = 0;
     }
 
 private:
@@ -141,8 +146,11 @@ private:
 
     FrameSlot _ring[RING_SIZE] = {};
     std::atomic<uint32_t> _writeHead{0};       // 通信スレッド書込み位置（= 旧 currentFrame）
-    std::atomic<uint32_t> _playHead{0};        // ゲームスレッド再生位置
     std::atomic<uint32_t> _mismatchFrame{0};   // 予測外れフレーム (0=なし)
+
+    // 同期パラメータ（SyncCoordinator::Start で設定、以後不変）
+    int16_t _delay       = 0;
+    int16_t _maxRollback = 0;
 };
 
 } // namespace sync

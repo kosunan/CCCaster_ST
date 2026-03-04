@@ -1,10 +1,5 @@
 // ============================================================================
 // SceneLoading — ロード画面
-// 設計書: docs/design/core_dll/scene_business_logic.md §6
-//
-// 【3層アーキテクチャにおける位置づけ】
-//   Layer 3 (Scene ビジネスロジック)
-//   ゲーム制御は GameControl:: ファサードを通じて行う。
 //
 // 【責務】
 //   CentralBuffer から自入力・相手入力を読取り、ゲームメモリに書込む。
@@ -12,8 +7,10 @@
 //   DLL 側は一切ディレイ計算を行わない。
 //
 // 【入力ソース】
-//   CentralBuffer.GetSlot(playHead) のみ。
-//   PacketRouter 経由の SetRemoteLoadingInput は廃止。
+//   CentralBuffer.GetReadPos() → GetSlot(readPos) のみ。
+//   readPos = writeHead - delay - maxRollback
+//   非ロールバック区間のため confirmed=true のスロットのみ消費。
+//   未確定なら入力クリアして待つ。
 // ============================================================================
 
 #include "core_dll/session_orchestrator/scene/SceneLoading.hpp"
@@ -37,25 +34,23 @@ void SceneLoading::ReadAndSend(session::SessionContext& ctx,
                                 const SceneRunner::SendFunc& send) {
     (void)ctx;
     (void)send;
-    // 通信スレッドが CentralBuffer に書込み + パケット送信済み
 }
 
 // ProcessFrame — Phase B: CentralBuffer からの入力読取り + ゲームメモリ書込み
 void SceneLoading::ProcessFrame(session::SessionContext& ctx) {
     auto& buf = cccaster::core::sync::CentralBuffer::GetInstance();
 
-    uint32_t playHead = buf.GetPlayHead();
-    uint32_t writeHead = buf.GetWriteHead();
+    uint32_t readPos = buf.GetReadPos();
 
-    // バッファに未処理データがなければスキップ
-    if (playHead >= writeHead) {
+    // readPos が有効範囲外（初期状態で writeHead < delay+maxRollback）
+    if (readPos == 0) {
         GC::ClearInput();
         return;
     }
 
-    const auto& slot = buf.GetSlot(playHead);
+    const auto& slot = buf.GetSlot(readPos);
 
-    // 非ロールバック区域では confirmed スロットのみ使用
+    // 非ロールバック区間: confirmed のみ消費。未確定なら待つ。
     if (!slot.confirmed) {
         GC::ClearInput();
         return;
@@ -71,7 +66,6 @@ void SceneLoading::ProcessFrame(session::SessionContext& ctx) {
         p2 = slot.localInput;
     }
     GC::WriteInput(p1, p2);
-    buf.AdvancePlayHead();
 }
 
 } // namespace cccaster::domain::scene

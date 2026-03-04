@@ -11,7 +11,25 @@ tools/ 配下（dummy_peer, lan_test 等）はローカル開発ツールであ�
 
 ---
 
-# refactor: 全Scene入力をCentralBuffer一元化 — 独自ディレイバッファ/atomicリモート全削除
+# refactor: CentralBuffer readPos算出方式 — playHead廃止、readPos=writeHead-delay-maxRollback
+
+## 2026-03-04: CentralBuffer readPos 算出方式への変更
+
+### 設計変更
+- playHead (独立カウンタ) を廃止
+- DLL読取位置を `GetReadPos() = writeHead - delay - maxRollback` で毎フレーム算出
+- 非ロールバック区間: confirmed=true のスロットのみ消費（未確定なら待つ）
+- ロールバック区間: 予測入力で進行可（後からロールバック）
+
+### 変更ファイル
+- [MODIFY] `CentralBuffer.hpp`: playHead削除、GetReadPos()/SetSyncParams() 追加、AdvancePlayHead/SetPlayHead/GetPlayHead 削除
+- [MODIFY] `SyncCoordinator.cpp`: SetSyncParams(delayFrames, maxRollback) 呼出追加
+- [MODIFY] `SceneLoading.cpp`: GetReadPos() + confirmed チェック方式に更新
+- [MODIFY] `SceneCharaSelect.cpp`: 同上
+
+---
+
+
 
 ## 2026-03-04: 全Scene入力をCentralBuffer一元化
 
