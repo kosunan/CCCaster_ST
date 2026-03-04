@@ -16,8 +16,7 @@
 //     (C) 遷移検出 → OnPhaseChanged
 //     (D) SyncCoordinator ベースの同期状態チェック
 //     (E) Scene ディスパッチ
-//     (F) autoTestMode 入力注入
-//     (G) 中断チェック (F12)
+//     (F) 中断チェック (F12)
 // ============================================================================
 
 #include <windows.h>
@@ -34,13 +33,10 @@
 #include "core_dll/pure_sync_engine/RollbackEngine.hpp"
 #include "core_dll/pure_sync_engine/RemoteInputQueue.hpp"
 #include "core_dll/game_memory_accessor/MbaaConstants.hpp"
-#include "core_dll/adapter_os_hooks/input/DirectInputHook.hpp"
 #include "core_dll/adapter_os_hooks/api_hook/TimeHooks.hpp"
 #include "shared_contracts/IpcData.hpp"
 #include "core_dll/session_orchestrator/scene/SceneFastBoot.hpp"
 #include <atomic>
-#include <cstdlib>
-#include <ctime>
 
 namespace cccaster::domain::session {
 
@@ -49,7 +45,6 @@ using GC = GameControl;
 
 // ===== 重いオブジェクト: SessionContext外に static 配置 =====
 static cccaster::sync::RollbackEngine    s_rollbackEngine;
-static std::atomic<uint16_t>              s_latestRemoteFrame{0}; // オーバーレイ監視用
 static cccaster::sync::RemoteInputQueue   s_remoteInputQueue;     // E-12: SPSCキュー
 static std::atomic<uint64_t>              s_lastPacketReceiveTimeMs{0}; // タイムアウト監視用
 
@@ -81,8 +76,6 @@ struct GameInputEntryCompat {
 void OnRemoteInputPacket(uint32_t latestFrame,
                          const void* historyRaw, int count) {
     using namespace cccaster::domain::session;
-    s_latestRemoteFrame.store(latestFrame, std::memory_order_relaxed);
-    
     // パケットを正常受信した時刻を記録
     s_lastPacketReceiveTimeMs.store(GetCurrentTimeMs(), std::memory_order_relaxed);
 
@@ -107,27 +100,6 @@ namespace cccaster::domain::session {
 // ================================================================
 namespace cccaster::domain::session {
 
-// ================================================================
-// autoTestMode 用ランダム入力生成
-// ================================================================
-static uint32_t GenerateRandomTestInput() {
-    enum MeltyInput : uint32_t {
-        A = 0x0020, B = 0x0010, C = 0x0040, D = 0x0080,
-        Up = 0x4000, Down = 0x1000, Left = 0x8000, Right = 0x2000,
-        Confirm = 0x0800
-    };
-
-    const uint32_t directions[] = { 0, Up, Down, Left, Right,
-                                    Up | Right, Up | Left, Down | Right, Down | Left };
-    const uint32_t buttons[]    = { A, B, C, D, A | B, A | C, B | C };
-
-    uint32_t input = 0;
-    if (rand() % 4 == 0) input |= directions[rand() % 9];
-    if (rand() % 3 == 0) input |= buttons[rand() % 7];
-    if (input == 0)      input = A | Confirm;
-
-    return input;
-}
 
 // ================================================================
 // Gate 1: ロールバック巻き戻しゲート
@@ -177,17 +149,17 @@ void SceneRunner::Init(SessionContext& ctx, SendFunc send) {
     s_send = std::move(send);
     s_ctx = &ctx;
 
-    DebugLog("[SceneRunner] Init... appMode=%u isHost=%s autoTest=%d",
-             ctx.appMode, ctx.isHost ? "true" : "false", ctx.autoTestMode);
+    DebugLog("[SceneRunner] Init... appMode=%u isHost=%s",
+             ctx.appMode, ctx.isHost ? "true" : "false");
 
-    // autoTestMode 初期化
-    if (ctx.autoTestMode) {
-        srand(static_cast<unsigned>(time(nullptr)));
-        cccaster::game_interface::DirectInputHook::SetTestModeEnabled(true);
-        DebugLog("[SceneRunner] ** AUTO TEST MODE ** Random input injection active.");
-    }
-
-    // SyncCoordinator がティック管理を担当（DLLスレッドは時間管理しない）
+    // SyncCoordinator 通信スレッド起動
+    cccaster::core::netplay::SyncCoordinator::GetInstance().Start(
+        ctx.isHost,
+        std::string(ctx.peerIp),
+        ctx.peerPort,
+        ctx.localPort,
+        ctx.delay,
+        ctx.maxRollback);
 
     GC::SetModeHighSpeedSkip();  // 起動直後は高速化ON
 
@@ -335,38 +307,6 @@ void SceneRunner::Step() {
         }
     }
 
-    // (F) autoTestMode: ローカル側のみランダム入力注入
-    if (ctx.autoTestMode) {
-        uint32_t localInput = GenerateRandomTestInput();
-        uint16_t remoteBtn = s_latestRemoteFrame.load(std::memory_order_relaxed);
-        uint32_t remoteInput = static_cast<uint32_t>(remoteBtn);
-
-        uint32_t p1, p2;
-        if (ctx.isHost) {
-            p1 = localInput;
-            p2 = remoteInput;
-        } else {
-            p1 = remoteInput;
-            p2 = localInput;
-        }
-
-        cccaster::game_interface::DirectInputHook::SetTestInputP1(p1);
-        cccaster::game_interface::DirectInputHook::SetTestInputP2(p2);
-        GC::WriteInput(p1, p2);
-
-        if (ctx.framesInPhase % 60 == 0) {
-            static LARGE_INTEGER s_freq = {0};
-            static int64_t s_autoTestStartUs = 0;
-            if (s_freq.QuadPart == 0) QueryPerformanceFrequency(&s_freq);
-            LARGE_INTEGER nowQpc;
-            cccaster::core::hooks::TimeHooks::RealQueryPerformanceCounter(&nowQpc);
-            int64_t nowUs = (nowQpc.QuadPart * 1000000LL) / s_freq.QuadPart;
-            if (s_autoTestStartUs == 0) s_autoTestStartUs = nowUs;
-            int64_t elapsedMs = (nowUs - s_autoTestStartUs) / 1000;
-            DebugLog("[AutoTest] t=%lldms phase=%d frame=%u P1=0x%08X P2=0x%08X remote=0x%04X",
-                     elapsedMs, static_cast<int>(phase), ctx.framesInPhase, p1, p2, remoteBtn);
-        }
-    }
 
     s_prev = phase;
     ctx.framesInPhase++;

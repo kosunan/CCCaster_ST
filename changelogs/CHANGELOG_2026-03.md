@@ -1,4 +1,18 @@
-# refactor: CentralBuffer統合 — writeHead/WriteSlot/ConfirmRemote に一本化
+# refactor: autoTestMode/ランダム入力生成/バッファ外入力取得を全削除
+
+## 2026-03-04: autoTest 関連コード削除
+
+### 削除対象
+- `SceneRunner.cpp`: `GenerateRandomTestInput()` 関数、autoTestMode 入力注入ブロック、`s_latestRemoteFrame`、`DirectInputHook` include、`cstdlib`/`ctime` include
+- `SessionContext.hpp`: `autoTestMode` フィールド
+- `dllmain.cpp`: `ctx.autoTestMode = state.headlessMode` 設定行、ログ出力の autoTest パラメータ
+
+### 理由
+通信スレッドが蓄積した CentralBuffer 以外からの入力取得パスを排除。入力はすべて CentralBuffer 経由で一元管理する。
+
+---
+
+
 
 ## 2026-03-04: CentralBuffer 統合 (Phase 1-3)
 

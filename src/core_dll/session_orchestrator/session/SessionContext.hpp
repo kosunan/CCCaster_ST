@@ -17,7 +17,6 @@ struct SessionContext {
     // ---- 起動時確定（不変）----
     uint8_t  appMode      = 0;    // 0=Versus, 1=Training, 2=Spectator (IpcGameModeと一致)
     bool     isHost       = false;
-    bool     autoTestMode = false; // ゲーム内自動テスト入力（CLIヘッドレスとは別概念）
     uint8_t  _pad0        = 0;
 
     // ---- ネットワーク接続先 ----

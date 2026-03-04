@@ -88,8 +88,7 @@ DWORD WINAPI InitThread(LPVOID lpParam) {
         if (state.maxRollbackFrames > 0)
             ctx.maxRollback = static_cast<int16_t>(state.maxRollbackFrames);
 
-        // headlessモード（AIテスト用ランダム入力）
-        ctx.autoTestMode = state.headlessMode;
+
 
         // ネットワーク接続先情報（SceneRunner/NetplayManager が使用）
         ctx.peerPort = (state.peerPort != 0) ? state.peerPort : state.port;
@@ -111,9 +110,9 @@ DWORD WINAPI InitThread(LPVOID lpParam) {
 
         char log[256];
         snprintf(log, sizeof(log),
-                 "[InitThread] Config -> mode=%u host=%d delay=%d maxRB=%d autoTest=%d peer=%s:%u",
+                 "[InitThread] Config -> mode=%u host=%d delay=%d maxRB=%d peer=%s:%u",
                  ctx.appMode, ctx.isHost, ctx.delay, ctx.maxRollback,
-                 ctx.autoTestMode, ctx.peerIp, ctx.peerPort);
+                 ctx.peerIp, ctx.peerPort);
         HookLog(log);
     } else {
         HookLog("[InitThread] IPC Shared Memory Read FAILED. Using defaults.");
