@@ -36,6 +36,7 @@
 #include "core_dll/session_orchestrator/scene/SceneLoading.hpp"
 #include "core_dll/session_orchestrator/scene/SceneRematch.hpp"
 #include "core_dll/session_orchestrator/session/DebugLog.hpp"
+#include "core_dll/pure_sync_engine/CentralBuffer.hpp"
 #include <cstring>
 #include <iostream>
 
@@ -149,7 +150,8 @@ void PacketRouter::OnPacket(const std::vector<uint8_t>& data, const std::string&
                 cccaster::domain::session::DebugLog(
                     "[PacketRouter] UNIFIED:CS_INPUT phase=0x%02X frame=%u input=0x%04X from=%s:%u",
                     phase, pl.frame, pl.input, fromIp.c_str(), fromPort);
-                // 入力は CentralBuffer 経由で管理されるため、直接の SetRemoteInput は廃止
+                cccaster::core::sync::CentralBuffer::GetInstance().ConfirmRemote(
+                    pl.frame, static_cast<uint32_t>(pl.input));
                 break;
             }
 
@@ -163,7 +165,8 @@ void PacketRouter::OnPacket(const std::vector<uint8_t>& data, const std::string&
                 cccaster::domain::session::DebugLog(
                     "[PacketRouter] UNIFIED:LOADING_INPUT phase=0x%02X frame=%u input=0x%04X delay=%d from=%s:%u",
                     phase, pl.frame, pl.input, pl.delay, fromIp.c_str(), fromPort);
-                // 入力は CentralBuffer 経由で管理されるため、直接の SetRemoteLoadingInput は廃止
+                cccaster::core::sync::CentralBuffer::GetInstance().ConfirmRemote(
+                    pl.frame, static_cast<uint32_t>(pl.input));
                 break;
             }
 
@@ -244,14 +247,16 @@ void PacketRouter::OnPacket(const std::vector<uint8_t>& data, const std::string&
             cccaster::domain::session::DebugLog(
                 "[PacketRouter] LEGACY:CS_INPUT val=0x%04X from=%s:%u",
                 payload, fromIp.c_str(), fromPort);
-            // 入力は CentralBuffer 経由で管理されるため、直接の SetRemoteInput は廃止
+            cccaster::core::sync::CentralBuffer::GetInstance().ConfirmRemote(
+                0, static_cast<uint32_t>(payload));  // 旧形式はフレーム番号なし
             break;
 
         case 0x21: // 旧 LOADING_INPUT
             cccaster::domain::session::DebugLog(
                 "[PacketRouter] LEGACY:LOADING_INPUT val=0x%04X from=%s:%u",
                 payload, fromIp.c_str(), fromPort);
-            // 入力は CentralBuffer 経由で管理されるため、直接の SetRemoteLoadingInput は廃止
+            cccaster::core::sync::CentralBuffer::GetInstance().ConfirmRemote(
+                0, static_cast<uint32_t>(payload));  // 旧形式はフレーム番号なし
             break;
 
         case 0x22: // 旧 REMATCH_MENU
