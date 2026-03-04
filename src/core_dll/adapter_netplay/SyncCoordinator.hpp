@@ -102,6 +102,11 @@ public:
     void Stop();
     bool IsRunning() const { return _running.load(); }
 
+    // ─── 時計データ読取り（オーバーレイ用）───────────────
+    int64_t GetRttUs() const { return _clock.GetRttUs(); }
+    int64_t GetThetaUs() const { return _clock.GetThetaUs(); }
+    int64_t GetBaselineTheta() const { return _clock.GetBaselineTheta(); }
+
     // ─── 受信パケットキュー ─────────────────────────────
     void OnPacketReceived(const std::vector<uint8_t>& data,
                           const std::string& fromIp, uint16_t fromPort);

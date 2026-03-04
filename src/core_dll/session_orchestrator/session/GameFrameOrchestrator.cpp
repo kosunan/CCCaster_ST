@@ -14,6 +14,8 @@
 #include "core_dll/adapter_os_hooks/input/InputHook.hpp"
 #include "core_dll/adapter_os_hooks/input/DirectInputHook.hpp"
 #include "core_dll/feature_overlay_ui/UIManager.hpp"
+#include "core_dll/feature_overlay_ui/State_Ui_Logic.hpp"
+#include "core_dll/adapter_netplay/SyncCoordinator.hpp"
 #include "core_dll/game_memory_accessor/MbaaSpeedController.hpp"
 #include "core_dll/game_memory_accessor/MbaaConstants.hpp"
 #include <imgui.h>
@@ -169,6 +171,23 @@ void GameFrameOrchestrator::OnEndScene(LPDIRECT3DDEVICE9 pDevice) {
                 HookLog(buf2);
                 lastLoggedGameMode = gameMode;
             }
+        }
+
+        // ── SyncCoordinator → オーバーレイ ステータス供給 ──
+        if (cccaster::core::netplay::SyncCoordinator::GetInstance().IsRunning()) {
+            auto& sync = cccaster::core::netplay::SyncCoordinator::GetInstance();
+            auto& state = cccaster::core::netplay::SyncCoordinator::GetState();
+
+            int64_t tickUs = state.currentTickUs.load(std::memory_order_relaxed);
+            double fps = (tickUs > 0) ? 1000000.0 / tickUs : 60.0;
+            float rttMs = sync.GetRttUs() / 1000.0f;
+            float thetaMs = static_cast<float>(
+                sync.GetThetaUs() - sync.GetBaselineTheta()) / 1000.0f;
+
+            cccaster::domain::ui::StateUiLogic::SetFps(fps);
+            cccaster::domain::ui::StateUiLogic::SetFrameTimeUs(tickUs);
+            cccaster::domain::ui::StateUiLogic::SetTimeOffsetMs(thetaMs);
+            cccaster::domain::ui::StateUiLogic::UpdateNetworkMetrics(rttMs, 0.0f);
         }
 
         try {
