@@ -25,8 +25,8 @@ struct SessionContext {
     uint16_t localPort    = 0;     // 自バインドポート (Host=指定, Client=OS割当済み)
 
     // ---- 同期パラメータ ----
-    int16_t  delay        = 3;    // 共有ディレイ (default: 3F)
-    int16_t  maxRollback  = 7;    // 最大ロールバック深度 (default: 7F)
+    int16_t  delay        = 2;    // 共有ディレイ (default: 2F — CLI DefaultDelay と一致)
+    int16_t  maxRollback  = 4;    // 最大ロールバック深度 (default: 4F — CLI MaxRollback と一致)
 
     // ---- フェーズ進行フラグ ----
     bool     charaSelectSyncDone  = false;  // キャラセレ時刻同期完了

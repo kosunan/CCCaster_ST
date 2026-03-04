@@ -118,7 +118,7 @@ public:
         uint32_t wh = _writeHead.load(std::memory_order_acquire);
         int32_t offset = static_cast<int32_t>(_delay) + static_cast<int32_t>(_maxRollback);
         int32_t pos = static_cast<int32_t>(wh) - offset;
-        return (pos > 0) ? static_cast<uint32_t>(pos) : 0;
+        return (pos >= 0) ? static_cast<uint32_t>(pos) : 0;
     }
 
     /// 指定フレームのスロットを取得（読取り専用）

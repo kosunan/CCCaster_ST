@@ -82,11 +82,9 @@ DWORD WINAPI InitThread(LPVOID lpParam) {
         // ネットワーク情報
         ctx.isHost = state.isHost;
 
-        // 同期パラメータ
-        if (state.delayFrames > 0)
-            ctx.delay = static_cast<int16_t>(state.delayFrames);
-        if (state.maxRollbackFrames > 0)
-            ctx.maxRollback = static_cast<int16_t>(state.maxRollbackFrames);
+        // 同期パラメータ（IPC値を無条件反映）
+        ctx.delay       = static_cast<int16_t>(state.delayFrames);
+        ctx.maxRollback = static_cast<int16_t>(state.maxRollbackFrames);
 
 
 
