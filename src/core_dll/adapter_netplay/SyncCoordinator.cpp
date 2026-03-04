@@ -27,6 +27,8 @@
 #include "core_dll/adapter_netplay/timer/WasapiClock.hpp"
 #include "core_dll/adapter_netplay/NetplayManager.hpp"
 #include "core_dll/pure_sync_engine/CentralBuffer.hpp"
+#include "core_dll/game_memory_accessor/GamePhaseDetector.hpp"
+#include "core_dll/game_memory_accessor/MbaaConstants.hpp"
 #include "core_dll/session_orchestrator/session/DebugLog.hpp"
 #include <algorithm>
 #include <cstring>
@@ -111,18 +113,16 @@ void SyncCoordinator::Start(bool isHost,
     _maxRollback  = maxRollback;
 
     // SharedSyncState リセット
-    _state.currentFrame.store(2000);  // 初期値: worldTimerより先行しておく
     _state.currentTickUs.store(timer::NetplayClock::BASE_TICK_US);
     _state.isSynced.store(false);
     _state.isPeerAlive.store(false);
     _state.peerReady.store(false);
     _state.clockOffsetUs.store(0);
     _state.lastRttUs.store(0);
-    _state.remoteWriteIndex.store(0);
-    for (int i = 0; i < SharedSyncState::RING_SIZE; i++) {
-        _state.remoteInputs[i].frame.store(0);
-        _state.remoteInputs[i].input.store(0);
-    }
+
+    // CentralBuffer リセット + writeHead 初期値
+    cccaster::core::sync::CentralBuffer::GetInstance().Reset();
+    cccaster::core::sync::CentralBuffer::GetInstance().SetWriteHead(2000);
 
     // 内部状態リセット
     _clock.Reset();
@@ -254,19 +254,10 @@ void SyncCoordinator::DrainAndProcessPackets() {
             _lastPeerT1 = gtp.t_send;
             _lastPeerRecvUs = pkt.receiveTimeUs;
 
-            // (3) 入力データを CentralBuffer と SharedSyncState に書き込み
+            // (3) 相手入力を CentralBuffer に確定書込み
             uint32_t remoteInput = static_cast<uint32_t>(gtp.buttons) | (static_cast<uint32_t>(gtp.direction) << 16);
-
-            // CentralBuffer への書込み
-            cccaster::core::sync::CentralBuffer::GetInstance().WriteRemoteInput(
-                gtp.baseFrame, remoteInput, gtp.baseFrame);
-
-            // SharedSyncState への書込み（既存互換）
-            int idx = _state.remoteWriteIndex.load(std::memory_order_relaxed);
-            auto& slot = _state.remoteInputs[idx % SharedSyncState::RING_SIZE];
-            slot.frame.store(gtp.baseFrame, std::memory_order_relaxed);
-            slot.input.store(remoteInput, std::memory_order_release);
-            _state.remoteWriteIndex.store(idx + 1, std::memory_order_release);
+            cccaster::core::sync::CentralBuffer::GetInstance().ConfirmRemote(
+                gtp.baseFrame, remoteInput);
 
             // (4) 相手フレーム追跡（キャッチアップ用）
             if (gtp.baseFrame > _latestPeerFrame) {
@@ -458,9 +449,9 @@ void SyncCoordinator::ThreadMain() {
 
                 subTickIdx = 0;  // フレームカウント開始位置をリセット
                 cccaster::domain::session::DebugLog(
-                    "[SyncCoordinator] Mode -> Counting. startTime=%lld us θ=%lld us currentFrame=%u",
+                    "[SyncCoordinator] Mode -> Counting. startTime=%lld us θ=%lld us writeHead=%u",
                     agreedStart, _clock.GetThetaUs(),
-                    _state.currentFrame.load(std::memory_order_relaxed));
+                    cccaster::core::sync::CentralBuffer::GetInstance().GetWriteHead());
             }
             break;
         }
@@ -469,12 +460,12 @@ void SyncCoordinator::ThreadMain() {
         // Mode::Counting — フレームカウント中 + 3連パケット送信
         // ================================================================
         case SyncMode::Counting: {
-            uint32_t frame = _state.currentFrame.load(std::memory_order_relaxed);
+            auto& buf = cccaster::core::sync::CentralBuffer::GetInstance();
+            uint32_t frame = buf.GetWriteHead();
 
             // ── フレーム進行: 3サブティックに1回 (subTickIdx==0) ──
             if (subTickIdx == 0) {
                 frame = frame + 1;
-                _state.currentFrame.store(frame, std::memory_order_release);
 
                 // 疎通カウンタ
                 _framesSinceLastRecv++;
@@ -499,10 +490,16 @@ void SyncCoordinator::ThreadMain() {
                 }
                 _localQueueSwap.clear();
 
-                // ── CentralBuffer にローカル入力を書込み ──
+                // ── CentralBuffer にスロット書込み ──
                 uint32_t localInput = static_cast<uint32_t>(_currentInputButtons)
                                    | (static_cast<uint32_t>(_currentInputDirection) << 16);
-                cccaster::core::sync::CentralBuffer::GetInstance().WriteLocalInput(frame, localInput);
+                uint8_t phase = static_cast<uint8_t>(
+                    cccaster::game_interface::GameMonitor::GetCurrentPhase());
+                bool rb = (phase == static_cast<uint8_t>(
+                    cccaster::game_interface::GamePhase::InGame))
+                    && (*CC_INTRO_STATE_ADDR == 0);
+                buf.WriteSlot(frame, phase, rb, localInput, 0, false);
+                buf.SetWriteHead(frame);
 
                 // フレーム進捗ログ（60Fごと）
                 if (frame % 60 == 0) {
@@ -522,8 +519,8 @@ void SyncCoordinator::ThreadMain() {
                     uint32_t startFrame = frame;
                     while (frame < catchupTarget) {
                         frame++;
-                        _state.currentFrame.store(frame, std::memory_order_release);
-                        cccaster::core::sync::CentralBuffer::GetInstance().WriteLocalInput(frame, localInput);
+                        buf.WriteSlot(frame, phase, rb, localInput, 0, false);
+                        buf.SetWriteHead(frame);
                     }
                     cccaster::domain::session::DebugLog(
                         "[SyncCoordinator] Catch-up burst: F=%u -> F=%u (skipped %u frames)",

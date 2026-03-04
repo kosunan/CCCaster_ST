@@ -34,7 +34,7 @@
  */
 
 #include "core_dll/game_memory_accessor/MbaaSpeedController.hpp"
-#include "core_dll/adapter_netplay/SyncCoordinator.hpp"
+#include "core_dll/pure_sync_engine/CentralBuffer.hpp"
 #include "core_dll/game_memory_accessor/MbaaConstants.hpp"
 #include <cstdint>
 #include <windows.h>
@@ -109,19 +109,19 @@ public:
      *   描画の ON/OFF は API hook (RenderSkip → OnPresentSkip) で制御する。
      */
     static void SleepFrame() {
-        auto& syncState = cccaster::core::netplay::SyncCoordinator::GetState();
-        uint32_t cf = syncState.currentFrame.load(std::memory_order_acquire);
+        auto& buf = cccaster::core::sync::CentralBuffer::GetInstance();
+        uint32_t cf = buf.GetWriteHead();
         uint32_t wt = *CC_WORLD_TIMER_ADDR;
 
-        // gap = currentFrame - worldTimer (符号なし演算に注意)
+        // gap = writeHead - worldTimer (符号なし演算に注意)
         int32_t gap = static_cast<int32_t>(cf) - static_cast<int32_t>(wt);
 
         if (gap <= 0) {
-            // worldTimer が currentFrame に追いついている → 次の currentFrame 変化を待つ
+            // worldTimer が writeHead に追いついている → 次の writeHead 変化を待つ
             MbaaSpeedController::RenderSkip().store(false, std::memory_order_release);
             MbaaSpeedController::TickBypass().store(false, std::memory_order_release);
             for (;;) {
-                uint32_t now = syncState.currentFrame.load(std::memory_order_acquire);
+                uint32_t now = buf.GetWriteHead();
                 if (now != cf) break;
                 Sleep(1);
             }

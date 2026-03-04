@@ -1,4 +1,20 @@
-# fix: 描画OFFをAPI hook経由に統一、CC_SKIP_FRAMES_ADDR使用禁止
+# refactor: CentralBuffer統合 — writeHead/WriteSlot/ConfirmRemote に一本化
+
+## 2026-03-04: CentralBuffer 統合 (Phase 1-3)
+
+### 変更方針
+- CentralBuffer を唯一のフレームデータパスとして再定義
+- SharedSyncState.currentFrame → CentralBuffer.writeHead に統一
+- FrameSlot = {frame, gamePhase, rollbackable, localInput, remoteInput, confirmed}
+
+### 変更ファイル
+- [MODIFY] `CentralBuffer.hpp`: FrameSlot 再定義 + WriteSlot/ConfirmRemote/GetWriteHead/SetWriteHead API
+- [MODIFY] `SyncCoordinator.cpp`: currentFrame→writeHead、WriteLocalInput→WriteSlot、WriteRemoteInput→ConfirmRemote、SharedSyncState.remoteInputs削除
+- [MODIFY] `GameControl.hpp`: SleepFrame の参照先を CentralBuffer.GetWriteHead() に変更
+
+---
+
+
 
 ## 2026-03-04: 描画制御の統一
 
