@@ -31,6 +31,7 @@
 #include "core_dll/game_memory_accessor/MbaaConstants.hpp"
 #include "core_dll/session_orchestrator/session/DebugLog.hpp"
 #include "core_dll/session_orchestrator/session/GameControl.hpp"
+#include "core_dll/adapter_os_hooks/input/DirectInputHook.hpp"
 #include <algorithm>
 #include <cstring>
 #include <windows.h>
@@ -480,9 +481,12 @@ void SyncCoordinator::ThreadMain() {
                 _state.currentTickUs.store(tickUs, std::memory_order_release);
                 subTickUs = tickUs / SUB_TICKS_PER_FRAME;
 
-                // ── ローカル入力をゲームメモリから直接読取り ──
-                // 通信スレッドが直接メモリ読取りを行う（PushLocalInput キュー廃止）
-                uint32_t localInput = cccaster::domain::session::GameControl::ReadLocal(_isHost);
+                // ── ローカル入力をデバイスAPIから直接読取り ──
+                // DirectInputHook 経由でコントローラ/キーボードの生入力を取得
+                cccaster::game_interface::DirectInputHook::Poll();
+                uint32_t localInput = _isHost
+                    ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
+                    : cccaster::game_interface::DirectInputHook::GetPlayer2Input();
 
                 // ── CentralBuffer にスロット書込み ──
                 uint8_t phase = static_cast<uint8_t>(
