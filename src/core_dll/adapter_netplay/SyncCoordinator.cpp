@@ -30,6 +30,7 @@
 #include "core_dll/game_memory_accessor/GamePhaseDetector.hpp"
 #include "core_dll/game_memory_accessor/MbaaConstants.hpp"
 #include "core_dll/session_orchestrator/session/DebugLog.hpp"
+#include "core_dll/session_orchestrator/session/GameControl.hpp"
 #include <algorithm>
 #include <cstring>
 #include <windows.h>
@@ -479,21 +480,11 @@ void SyncCoordinator::ThreadMain() {
                 _state.currentTickUs.store(tickUs, std::memory_order_release);
                 subTickUs = tickUs / SUB_TICKS_PER_FRAME;
 
-                // ── ローカル入力を確定（フレーム内で固定）──
-                {
-                    std::lock_guard<std::mutex> lock(_localMutex);
-                    std::swap(_localQueue, _localQueueSwap);
-                }
-                if (!_localQueueSwap.empty()) {
-                    const auto& latest = _localQueueSwap.back();
-                    _currentInputButtons   = static_cast<uint16_t>(latest.input & 0xFFFF);
-                    _currentInputDirection = static_cast<uint16_t>((latest.input >> 16) & 0xFFFF);
-                }
-                _localQueueSwap.clear();
+                // ── ローカル入力をゲームメモリから直接読取り ──
+                // 通信スレッドが直接メモリ読取りを行う（PushLocalInput キュー廃止）
+                uint32_t localInput = cccaster::domain::session::GameControl::ReadLocal(_isHost);
 
                 // ── CentralBuffer にスロット書込み ──
-                uint32_t localInput = static_cast<uint32_t>(_currentInputButtons)
-                                   | (static_cast<uint32_t>(_currentInputDirection) << 16);
                 uint8_t phase = static_cast<uint8_t>(
                     cccaster::game_interface::GameMonitor::GetCurrentPhase());
                 bool rb = (phase == static_cast<uint8_t>(
