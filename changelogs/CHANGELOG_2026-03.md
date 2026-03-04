@@ -1,3 +1,21 @@
+# fix: オーバーレイが1Fに複数回描画される問題を修正 — EndScene描画ガード追加
+
+## 2026-03-05: オーバーレイ 1F1回描画ガード
+
+### 問題
+MBAAは1フレームで EndScene を約8回呼び出す。バックバッファ判定
+（`pRenderTarget == pBackBuffer`）が複数回ヒットし、ImGui描画
+（UIManager::Render）が1Fに複数回実行されていた。
+
+### 修正内容
+- [MODIFY] `GameFrameOrchestrator.cpp`:
+  - `s_presentFrameCount`（OnPresent で1F1回インクリメント）と
+    `s_lastRenderedFrame`（描画済みフレーム番号）の2つの static 変数を追加
+  - OnEndScene のバックバッファ描画ブロック先頭で
+    `s_lastRenderedFrame == s_presentFrameCount` なら即 return するガードを追加
+
+---
+
 # refactor: game_memory_accessor ディレクトリ再構成 — MbaaConstants分割・サブディレクトリ化
 
 ## 2026-03-05: game_memory_accessor リファクタリング

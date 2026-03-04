@@ -31,6 +31,12 @@ using namespace cccaster::domain::session;
 // ─── ImGui 状態管理 ─────────────────────────────────
 static bool s_imguiInitialized = false;
 
+// ─── フレーム単位描画ガード ─────────────────────────
+// MBAAは1Fに~8回 EndScene を呼ぶため、ImGui描画を1F1回に制限する。
+// OnPresent（1F1回保証）でカウンタを進め、OnEndScene で照合する。
+static uint64_t s_presentFrameCount = 0;
+static uint64_t s_lastRenderedFrame = 0;
+
 // ============================================================================
 // Register — DxHook にコールバックを登録
 // ============================================================================
@@ -74,6 +80,9 @@ void GameFrameOrchestrator::OnPresent(LPDIRECT3DDEVICE9 pDevice) {
 
     // ジョイスティック状態を毎フレームポーリング
     cccaster::game_interface::DirectInputHook::Poll();
+
+    // フレームカウンタ進行（EndScene描画ガード用）
+    ++s_presentFrameCount;
 }
 
 // ============================================================================
@@ -144,6 +153,12 @@ void GameFrameOrchestrator::OnEndScene(LPDIRECT3DDEVICE9 pDevice) {
     }
 
     if (isBackBuffer) {
+        // 1Fに1回だけ描画（MBAAは1Fに~8回EndSceneを呼ぶため）
+        if (s_lastRenderedFrame == s_presentFrameCount) {
+            return;
+        }
+        s_lastRenderedFrame = s_presentFrameCount;
+
         ImGui_ImplDX9_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
