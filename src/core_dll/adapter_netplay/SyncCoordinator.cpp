@@ -32,6 +32,7 @@
 #include "core_dll/session_orchestrator/session/DebugLog.hpp"
 #include "core_dll/session_orchestrator/session/GameControl.hpp"
 #include "core_dll/adapter_os_hooks/input/DirectInputHook.hpp"
+#include "core_dll/feature_overlay_ui/State_Ui_Logic.hpp"
 #include <algorithm>
 #include <cstring>
 #include <windows.h>
@@ -52,7 +53,7 @@ struct StartPayload {
     int64_t startTimeUs;  // WASAPIクロックによる開始時刻 (μs)
 };
 
-/// GAME_TICK ペイロード: 入力 + NTPタイミング
+/// GAME_TICK ペイロード: 入力 + NTPタイミング + D/R同期
 struct GameTickPayload {
     uint32_t baseFrame;       // 送信側の現在フレーム番号
     int64_t  t_send;          // 送信時刻 (WASAPI μs) ← サブティックごとに異なる
@@ -60,6 +61,8 @@ struct GameTickPayload {
     int64_t  echo_t2;         // エコー: そのパケットを受信した自分の時刻
     uint16_t buttons;         // 入力ボタン（フレーム内で固定）
     uint16_t direction;       // 入力方向（フレーム内で固定）
+    uint8_t  delay;           // 送信者のディレイF (last-write-wins)
+    uint8_t  maxRollback;     // 送信者のロールバックF (last-write-wins)
 };
 
 /// PING ペイロード: NTPエコー（WaitStart中のθ推定用）
@@ -249,7 +252,22 @@ void SyncCoordinator::DrainAndProcessPackets() {
             cccaster::core::sync::CentralBuffer::GetInstance().ConfirmRemote(
                 gtp.baseFrame, remoteInput);
 
-            // (4) 相手フレーム追跡（キャッチアップ用）
+            // (4) 相手の D/R 値を受信 → last-write-wins で即反映
+            if (gtp.delay != static_cast<uint8_t>(_delayFrames) ||
+                gtp.maxRollback != static_cast<uint8_t>(_maxRollback)) {
+                _delayFrames = gtp.delay;
+                _maxRollback = gtp.maxRollback;
+                cccaster::core::sync::CentralBuffer::GetInstance().SetSyncParams(
+                    gtp.delay, gtp.maxRollback);
+                cccaster::domain::session::DebugLog(
+                    "[SyncCoordinator] Peer D/R update: delay=%d maxRB=%d",
+                    gtp.delay, gtp.maxRollback);
+                // UI オーバーレイにも反映
+                cccaster::domain::ui::StateUiLogic::SetDelay(gtp.delay);
+                cccaster::domain::ui::StateUiLogic::SetRollback(gtp.maxRollback);
+            }
+
+            // (5) 相手フレーム追跡（キャッチアップ用）
             if (gtp.baseFrame > _latestPeerFrame) {
                 _latestPeerFrame = gtp.baseFrame;
             }
@@ -316,12 +334,14 @@ void SyncCoordinator::SendGameTick(uint32_t frame, uint32_t localInput) {
     int64_t now = timer::WasapiClock::GetTimeUs();
 
     GameTickPayload gtp{};
-    gtp.baseFrame = frame;
-    gtp.t_send    = now;
-    gtp.echo_t1   = _lastPeerT1;     // 最後に受信した相手の t_send をエコー
-    gtp.echo_t2   = _lastPeerRecvUs; // そのパケットの受信時刻をエコー
-    gtp.buttons   = static_cast<uint16_t>(localInput & 0xFFFF);
-    gtp.direction = static_cast<uint16_t>((localInput >> 16) & 0xFFFF);
+    gtp.baseFrame   = frame;
+    gtp.t_send      = now;
+    gtp.echo_t1     = _lastPeerT1;     // 最後に受信した相手の t_send をエコー
+    gtp.echo_t2     = _lastPeerRecvUs; // そのパケットの受信時刻をエコー
+    gtp.buttons     = static_cast<uint16_t>(localInput & 0xFFFF);
+    gtp.direction   = static_cast<uint16_t>((localInput >> 16) & 0xFFFF);
+    gtp.delay       = static_cast<uint8_t>(_delayFrames);
+    gtp.maxRollback = static_cast<uint8_t>(_maxRollback);
 
     auto pkt = BuildUnifiedPacket(0x00, PKT_GAME_TICK, now, &gtp, sizeof(gtp));
     SendPacket(pkt);

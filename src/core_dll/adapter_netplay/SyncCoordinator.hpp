@@ -107,6 +107,10 @@ public:
     int64_t GetThetaUs() const { return _clock.GetThetaUs(); }
     int64_t GetBaselineTheta() const { return _clock.GetBaselineTheta(); }
 
+    // ─── D/R 動的変更（UIキー入力 → 通信スレッド → パケット送信）───
+    void SetDelayFrames(int d)  { _delayFrames = d; }
+    void SetMaxRollback(int r)  { _maxRollback = r; }
+
     // ─── 受信パケットキュー ─────────────────────────────
     void OnPacketReceived(const std::vector<uint8_t>& data,
                           const std::string& fromIp, uint16_t fromPort);

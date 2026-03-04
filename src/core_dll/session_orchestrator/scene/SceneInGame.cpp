@@ -22,6 +22,7 @@
 #include "core_dll/adapter_netplay/SyncCoordinator.hpp"
 #include "core_dll/session_orchestrator/session/GameControl.hpp"
 #include "core_dll/pure_sync_engine/RollbackEngine.hpp"
+#include "core_dll/pure_sync_engine/CentralBuffer.hpp"
 #include "core_dll/game_memory_accessor/dump/DumpEntryList.hpp"
 #include "core_dll/pure_sync_engine/InputFilter.hpp"
 #include "core_dll/pure_sync_engine/RemoteInputQueue.hpp"
@@ -201,7 +202,7 @@ static void ProcessRollbackFrame(session::SessionContext& ctx,
         // GameInputPayload(61B)構築
         uint8_t* pl = pkt.data() + 20;  // ペイロード先頭
         std::memcpy(pl, &currentFrame, 4);           // latestFrame(4B)
-        pl[4] = 0;                                    // inputDelay(1B) - TODO: 設定値を反映
+        pl[4] = static_cast<uint8_t>(cccaster::core::sync::CentralBuffer::GetInstance().GetDelay());
         uint32_t roundTimer = currentFrame;            // roundTimer(4B)
         std::memcpy(pl + 5, &roundTimer, 4);
         uint64_t wasapiClock = static_cast<uint64_t>(QPCNowUs());
