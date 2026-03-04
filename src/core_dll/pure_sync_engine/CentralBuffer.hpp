@@ -112,11 +112,13 @@ public:
     // ゲームスレッドから呼ばれる (Read系)
     // ════════════════════════════════════════════════════
 
-    /// DLL の読取位置を算出: writeHead - delay - maxRollback
+    /// DLL の読取位置を算出: writeHead - max(delay + maxRollback, 1)
+    /// 最低1フレームのオフセットを保証（D=0,R=0でもリモート未確定フレーム読取を防止）
     /// @return 読み取るべきフレーム番号（0 以下にはならない）
     uint32_t GetReadPos() const {
         uint32_t wh = _writeHead.load(std::memory_order_acquire);
         int32_t offset = static_cast<int32_t>(_delay) + static_cast<int32_t>(_maxRollback);
+        if (offset < 1) offset = 1;  // 最低1フレーム遅延を保証
         int32_t pos = static_cast<int32_t>(wh) - offset;
         return (pos >= 0) ? static_cast<uint32_t>(pos) : 0;
     }

@@ -130,6 +130,10 @@ void SyncCoordinator::Start(bool isHost,
     cccaster::core::sync::CentralBuffer::GetInstance().SetWriteHead(200);
     cccaster::core::sync::CentralBuffer::GetInstance().SetSyncParams(delayFrames, maxRollback);
 
+    // オーバーレイ初期表示を実設定値に合わせる
+    cccaster::domain::ui::StateUiLogic::SetDelay(delayFrames);
+    cccaster::domain::ui::StateUiLogic::SetRollback(maxRollback);
+
     // 内部状態リセット
     _clock.Reset();
     _mode = SyncMode::WaitReady;
