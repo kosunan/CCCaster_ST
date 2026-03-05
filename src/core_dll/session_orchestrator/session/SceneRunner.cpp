@@ -22,7 +22,7 @@
 #include <windows.h>
 #include "core_dll/session_orchestrator/session/SceneRunner.hpp"
 #include "core_dll/session_orchestrator/session/SessionContext.hpp"
-#include "core_dll/session_orchestrator/session/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 #include "core_dll/session_orchestrator/session/GameControl.hpp"
 #include "core_dll/session_orchestrator/scene/SceneCharaSelect.hpp"
 #include "core_dll/session_orchestrator/scene/SceneLoading.hpp"

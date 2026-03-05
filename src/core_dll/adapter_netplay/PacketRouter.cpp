@@ -35,7 +35,7 @@
 #include "core_dll/session_orchestrator/scene/SceneCharaSelect.hpp"
 #include "core_dll/session_orchestrator/scene/SceneLoading.hpp"
 #include "core_dll/session_orchestrator/scene/SceneRematch.hpp"
-#include "core_dll/session_orchestrator/session/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 #include "core_dll/pure_sync_engine/CentralBuffer.hpp"
 #include <cstring>
 #include <iostream>

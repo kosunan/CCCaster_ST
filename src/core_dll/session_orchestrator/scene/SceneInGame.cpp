@@ -18,7 +18,7 @@
 // ============================================================================
 #include <windows.h>
 #include "core_dll/session_orchestrator/scene/SceneInGame.hpp"
-#include "core_dll/session_orchestrator/session/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 #include "core_dll/adapter_netplay/SyncCoordinator.hpp"
 #include "core_dll/session_orchestrator/session/GameControl.hpp"
 #include "core_dll/pure_sync_engine/RollbackEngine.hpp"

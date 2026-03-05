@@ -7,7 +7,7 @@
 
 #include "core_dll/adapter_netplay/Metronome.hpp"
 #include "core_dll/adapter_netplay/timer/WasapiClock.hpp"
-#include "core_dll/session_orchestrator/session/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 #include <windows.h>
 
 namespace cccaster {

@@ -10,7 +10,7 @@
 #include "core_dll/session_orchestrator/scene/SceneFastBoot.hpp"
 #include "core_dll/session_orchestrator/session/GameControl.hpp"
 #include "core_dll/game_memory_accessor/MbaaConstants.hpp"
-#include "core_dll/session_orchestrator/session/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 
 #include <cstring>
 
@@ -90,7 +90,7 @@ bool SceneFastBoot::ProcessFrame(bool isHost) {
     // キャラセレ到達判定
     if (gameMode == CC_GAME_MODE_CHARA_SELECT) {
         s_complete = true;
-        DebugLog("[FastBoot] CharaSelect reached! (frame=%u) Switching to NormalSpeed.",
+        DebugLog("[FastBoot] ★ CharaSelect reached! (frame=%u) Switching to NormalSpeed.",
                  s_frameCount);
         GC::SetModeNormalSpeed();
         return true;
@@ -99,6 +99,11 @@ bool SceneFastBoot::ProcessFrame(bool isHost) {
     // 無効なゲームモード（起動初期）
     if (gameMode == 65535 || gameMode == 0) {
         return false;
+    }
+
+    // 30F ごとに進行ログ出力
+    if (s_frameCount % 30 == 0) {
+        DebugLog("[FastBoot] frame=%u gameMode=%u", s_frameCount, gameMode);
     }
 
     // ================================================================
@@ -144,6 +149,11 @@ bool SceneFastBoot::ProcessFrame(bool isHost) {
             GC::WriteInput(input, 0);
         } else {
             GC::WriteInput(0, input);
+        }
+
+        if (s_toggle && s_frameCount % 10 == 0) {
+            DebugLog("[FastBoot] MainMenu nav=%d/%d input=0x%08X",
+                     s_menuNavCount, targetNav, input);
         }
 
         s_toggle = !s_toggle;

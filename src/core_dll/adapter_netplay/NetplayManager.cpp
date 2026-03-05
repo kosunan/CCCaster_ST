@@ -6,7 +6,7 @@
 
 #include "core_dll/adapter_netplay/NetplayManager.hpp"
 #include "core_dll/adapter_netplay/PacketRouter.hpp"
-#include "core_dll/session_orchestrator/session/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 
 namespace cccaster::netplay {
 

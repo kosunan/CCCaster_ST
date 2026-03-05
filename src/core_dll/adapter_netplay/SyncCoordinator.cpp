@@ -11,7 +11,7 @@
 #include "core_dll/adapter_netplay/timer/WasapiClock.hpp"
 #include "core_dll/adapter_netplay/NetplayManager.hpp"
 #include "core_dll/pure_sync_engine/CentralBuffer.hpp"
-#include "core_dll/session_orchestrator/session/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 #include "core_dll/adapter_os_hooks/input/DirectInputHook.hpp"
 #include "core_dll/feature_overlay_ui/State_Ui_Logic.hpp"
 #include <cstring>

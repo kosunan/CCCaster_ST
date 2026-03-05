@@ -8,7 +8,7 @@
 #include "core_dll/game_memory_accessor/patcher/MemoryPatcher.hpp"
 #include "core_dll/game_memory_accessor/constants/MbaaAddresses.hpp"
 #include "core_dll/game_memory_accessor/constants/MbaaInputDefs.hpp"
-#include "core_dll/session_orchestrator/session/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 #include "shared_contracts/IpcData.hpp"
 
 #include <chrono>

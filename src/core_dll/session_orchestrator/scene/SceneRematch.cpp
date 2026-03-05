@@ -32,7 +32,7 @@
 // ============================================================================
 
 #include "core_dll/session_orchestrator/scene/SceneRematch.hpp"
-#include "core_dll/session_orchestrator/session/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 #include "core_dll/session_orchestrator/session/GameControl.hpp"
 #include "core_dll/game_memory_accessor/MbaaConstants.hpp"
 #include "core_dll/adapter_os_hooks/input/DirectInputHook.hpp"

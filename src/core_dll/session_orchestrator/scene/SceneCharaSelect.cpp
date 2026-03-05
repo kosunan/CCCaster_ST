@@ -14,7 +14,7 @@
 // ============================================================================
 
 #include "core_dll/session_orchestrator/scene/SceneCharaSelect.hpp"
-#include "core_dll/session_orchestrator/session/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 #include "core_dll/session_orchestrator/session/GameControl.hpp"
 #include "core_dll/pure_sync_engine/CentralBuffer.hpp"
 

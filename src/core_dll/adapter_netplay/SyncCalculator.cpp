@@ -8,7 +8,7 @@
 #include "core_dll/pure_sync_engine/CentralBuffer.hpp"
 #include "core_dll/game_memory_accessor/monitor/GamePhaseDetector.hpp"
 #include "core_dll/game_memory_accessor/MbaaConstants.hpp"
-#include "core_dll/session_orchestrator/session/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 #include "core_dll/feature_overlay_ui/State_Ui_Logic.hpp"
 #include <cstring>
 
