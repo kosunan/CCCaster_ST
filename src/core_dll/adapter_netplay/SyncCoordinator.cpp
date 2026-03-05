@@ -1,99 +1,25 @@
 // ============================================================================
-// SyncCoordinator.cpp — ネットプレイ通信同期の統括（実装）
+// SyncCoordinator.cpp — 通信スレッド統括（4層分離版）
 //
-// 【モード遷移ステートマシン】
-//   WaitReady  → (双方READY) → WaitStart → (合意時刻到達) → Counting
-//
-// 【パケット送受信】
-//   READY     (0x15): 準備完了信号
-//   START     (0x16): スタート時刻通知（WASAPIクロック値）
-//   GAME_TICK (0x20): ゲームティック（入力+NTPタイミング）
-//   PING      (0x00): ハートビート（WaitReady/WaitStart 用）
-//
-// 【3連パケット送信】
-//   1F周期を3サブティックに分割し、各サブティックで同一入力の
-//   GAME_TICK パケットを送信。t_send のみサブティックごとに異なる。
-//
-// 【NTP T1-T4 θ推定】
-//   各パケットにエコー情報 (echo_t1, echo_t2) を載せ、
-//   受信側で T1-T4 からRTT/θを算出。最小RTTサンプルのθを採用。
-//
-// 【計算エンジン分離】
-//   θ推定・α算出は NetplayClock に委譲。
-//   本クラスはモード遷移とパケットI/Oのみ。
+// 【設計】
+//   通信スレッドはパケット送受信に専念する。
+//   パケット解析・Θ計算・α補正・CentralBuffer操作は SyncCalculator に委譲。
+//   フレームリズム生成は Metronome に委譲。
 // ============================================================================
 
 #include "core_dll/adapter_netplay/SyncCoordinator.hpp"
 #include "core_dll/adapter_netplay/timer/WasapiClock.hpp"
 #include "core_dll/adapter_netplay/NetplayManager.hpp"
 #include "core_dll/pure_sync_engine/CentralBuffer.hpp"
-#include "core_dll/game_memory_accessor/monitor/GamePhaseDetector.hpp"
-#include "core_dll/game_memory_accessor/MbaaConstants.hpp"
 #include "core_dll/session_orchestrator/session/DebugLog.hpp"
-#include "core_dll/session_orchestrator/session/GameControl.hpp"
 #include "core_dll/adapter_os_hooks/input/DirectInputHook.hpp"
 #include "core_dll/feature_overlay_ui/State_Ui_Logic.hpp"
-#include <algorithm>
 #include <cstring>
 #include <windows.h>
 
 namespace cccaster {
 namespace core {
 namespace netplay {
-
-// ============================================================================
-// パケットペイロード構造体（統一プロトコル実形式）
-// ============================================================================
-#pragma pack(push, 1)
-/// READY ペイロード: 空（ヘッダのみで十分）
-// type=0x15, ペイロードなし
-
-/// START ペイロード: スタート時刻 (8bytes)
-struct StartPayload {
-    int64_t startTimeUs;  // WASAPIクロックによる開始時刻 (μs)
-};
-
-/// GAME_TICK ペイロード: 入力 + NTPタイミング + D/R同期
-struct GameTickPayload {
-    uint32_t baseFrame;       // 送信側の現在フレーム番号
-    int64_t  t_send;          // 送信時刻 (WASAPI μs) ← サブティックごとに異なる
-    int64_t  echo_t1;         // エコー: 最後に受信した相手パケットの t_send
-    int64_t  echo_t2;         // エコー: そのパケットを受信した自分の時刻
-    uint16_t buttons;         // 入力ボタン（フレーム内で固定）
-    uint16_t direction;       // 入力方向（フレーム内で固定）
-    uint8_t  delay;           // 送信者のディレイF (last-write-wins)
-    uint8_t  maxRollback;     // 送信者のロールバックF (last-write-wins)
-};
-
-/// PING ペイロード: NTPエコー（WaitStart中のθ推定用）
-struct PingPayload {
-    int64_t t_send;      // 送信時刻 (WASAPI μs)
-    int64_t echo_t1;     // エコー: 最後に受信した相手の t_send
-    int64_t echo_t2;     // エコー: そのパケットを受信した自分の時刻
-};
-#pragma pack(pop)
-
-// ============================================================================
-// BuildUnifiedPacket — CC10統一ヘッダ + ペイロードを組み立てる
-// ============================================================================
-static std::vector<uint8_t> BuildUnifiedPacket(
-    uint8_t phase, uint8_t type,
-    int64_t timestampUs,
-    const void* payload = nullptr, size_t payloadSize = 0)
-{
-    std::vector<uint8_t> pkt(SyncCoordinator::UNIFIED_HEADER_SIZE + payloadSize, 0);
-    uint32_t magic = SyncCoordinator::CC10_MAGIC;
-    std::memcpy(pkt.data(), &magic, sizeof(magic));
-    pkt[4] = phase;
-    pkt[5] = type;
-    std::memcpy(pkt.data() + SyncCoordinator::HDR_TIMESTAMP_OFFSET,
-                &timestampUs, sizeof(timestampUs));
-    if (payload && payloadSize > 0) {
-        std::memcpy(pkt.data() + SyncCoordinator::UNIFIED_HEADER_SIZE,
-                    payload, payloadSize);
-    }
-    return pkt;
-}
 
 // ─── シングルトン ──────────────────────────────────────
 SyncCoordinator& SyncCoordinator::GetInstance() {
@@ -102,7 +28,7 @@ SyncCoordinator& SyncCoordinator::GetInstance() {
 }
 
 // ============================================================================
-// Start — 通信スレッドを起動する
+// Start — 通信スレッド + メトロノームを起動
 // ============================================================================
 void SyncCoordinator::Start(bool isHost,
                             const std::string& targetIp, uint16_t targetPort,
@@ -114,37 +40,29 @@ void SyncCoordinator::Start(bool isHost,
     _targetIp     = targetIp;
     _targetPort   = targetPort;
     _localPort    = localPort;
-    _delayFrames  = delayFrames;
-    _maxRollback  = maxRollback;
+    _startSent    = false;
+    _lastLocalInput = 0;
+    _peerActualPort = 0;
 
     // SharedSyncState リセット
-    _state.currentTickUs.store(timer::NetplayClock::BASE_TICK_US);
+    _state.currentTickUs.store(Metronome::BASE_TICK_US);
     _state.isSynced.store(false);
     _state.isPeerAlive.store(false);
     _state.peerReady.store(false);
     _state.clockOffsetUs.store(0);
     _state.lastRttUs.store(0);
 
-    // CentralBuffer リセット + writeHead 初期値 + 同期パラメータ
+    // CentralBuffer リセット
     cccaster::core::sync::CentralBuffer::GetInstance().Reset();
     cccaster::core::sync::CentralBuffer::GetInstance().SetWriteHead(200);
     cccaster::core::sync::CentralBuffer::GetInstance().SetSyncParams(delayFrames, maxRollback);
 
-    // オーバーレイ初期表示を実設定値に合わせる
+    // オーバーレイ初期表示
     cccaster::domain::ui::StateUiLogic::SetDelay(delayFrames);
     cccaster::domain::ui::StateUiLogic::SetRollback(maxRollback);
 
-    // 内部状態リセット
-    _clock.Reset();
-    _mode = SyncMode::WaitReady;
-    _peerReady = false;
-    _startSent = false;
-    _framesSinceLastRecv = 0;
-    _peerActualPort = 0;
-    _lastRecvUs = timer::WasapiClock::GetTimeUs();
-    _lastPeerT1 = 0;
-    _lastPeerRecvUs = 0;
-    _lastLocalInput = 0;
+    // SyncCalculator 初期化
+    _calc.Initialize(isHost, delayFrames, maxRollback, &_metronome);
 
     // キュークリア
     {
@@ -152,6 +70,9 @@ void SyncCoordinator::Start(bool isHost,
         _recvQueue.clear();
         _recvQueueSwap.clear();
     }
+
+    // モード初期化
+    _mode = SyncMode::WaitReady;
 
     cccaster::domain::session::DebugLog(
         "[SyncCoordinator] Starting. host=%d target=%s:%u localPort=%u delay=%d maxRB=%d",
@@ -162,11 +83,12 @@ void SyncCoordinator::Start(bool isHost,
 }
 
 // ============================================================================
-// Stop — 通信スレッドを停止する
+// Stop — 通信スレッド + メトロノームを停止
 // ============================================================================
 void SyncCoordinator::Stop() {
     if (!_running.load()) return;
     _running.store(false);
+    _metronome.Stop();
     if (_thread.joinable()) {
         _thread.join();
     }
@@ -183,9 +105,8 @@ void SyncCoordinator::OnPacketReceived(const std::vector<uint8_t>& data,
     _recvQueue.push_back({data, fromIp, fromPort, receiveTime});
 }
 
-
 // ============================================================================
-// DrainAndProcessPackets — 受信キューを drain して処理
+// DrainAndProcessPackets — 受信キューを drain して SyncCalculator に委譲
 // ============================================================================
 void SyncCoordinator::DrainAndProcessPackets() {
     {
@@ -195,125 +116,25 @@ void SyncCoordinator::DrainAndProcessPackets() {
 
     for (const auto& pkt : _recvQueueSwap) {
         // 疎通更新
-        _lastRecvUs = pkt.receiveTimeUs;
         _state.isPeerAlive.store(true, std::memory_order_release);
-        _framesSinceLastRecv = 0;
-
-        // 実ピアポートを記録（NAT越え用）
         _peerActualPort = pkt.fromPort;
 
-        // ── 統一ヘッダ (CC10) パケットのみ処理 ──
-        if (static_cast<int>(pkt.data.size()) < UNIFIED_HEADER_SIZE) continue;
+        // SyncCalculator に処理を委譲
+        _calc.ProcessReceivedPacket(pkt.data, pkt.fromIp, pkt.fromPort, pkt.receiveTimeUs);
 
-        uint32_t magic = 0;
-        std::memcpy(&magic, pkt.data.data(), sizeof(magic));
-        if (magic != CC10_MAGIC) continue;
-
-        uint8_t pktType = pkt.data[5]; // type フィールド
-
-        // ── READY パケット (type=0x15) ──
-        if (pktType == PKT_READY) {
-            if (!_peerReady) {
-                _peerReady = true;
-                _state.peerReady.store(true, std::memory_order_release);
-                cccaster::domain::session::DebugLog("[SyncCoordinator] Received READY from peer.");
-            }
-            continue;
+        // SharedSyncState 更新
+        _state.clockOffsetUs.store(_calc.GetThetaUs(), std::memory_order_release);
+        _state.lastRttUs.store(_calc.GetRttUs(), std::memory_order_release);
+        if (_calc.IsPeerReady()) {
+            _state.peerReady.store(true, std::memory_order_release);
         }
-
-        // ── START パケット (type=0x16, ペイロードに8bytes startTime) ──
-        if (pktType == PKT_START && pkt.data.size() >= UNIFIED_HEADER_SIZE + sizeof(StartPayload)) {
-            StartPayload sp{};
-            std::memcpy(&sp, pkt.data.data() + UNIFIED_HEADER_SIZE, sizeof(sp));
-            _clock.SetPeerStartTime(sp.startTimeUs);
-            cccaster::domain::session::DebugLog(
-                "[SyncCoordinator] Received START from peer. peerStartTime=%lld us", sp.startTimeUs);
-            continue;
-        }
-
-        // ── GAME_TICK パケット (type=0x20) ──
-        if (pktType == PKT_GAME_TICK && pkt.data.size() >= UNIFIED_HEADER_SIZE + sizeof(GameTickPayload)) {
-            GameTickPayload gtp{};
-            std::memcpy(&gtp, pkt.data.data() + UNIFIED_HEADER_SIZE, sizeof(gtp));
-
-            // (1) NTP T1-T4 θ推定: 相手がエコーしてきた T1(=自分の送信時刻), T2(=相手の受信時刻)
-            if (gtp.echo_t1 > 0 && gtp.echo_t2 > 0) {
-                // T1 = echo_t1 (自分の元の送信時刻、エコーされたもの)
-                // T2 = echo_t2 (相手の受信時刻)
-                // T3 = gtp.t_send (相手の送信時刻)
-                // T4 = pkt.receiveTimeUs (自分の受信時刻)
-                _clock.AddNtpSample(gtp.echo_t1, gtp.echo_t2, gtp.t_send, pkt.receiveTimeUs);
-                _state.clockOffsetUs.store(_clock.GetThetaUs(), std::memory_order_release);
-                _state.lastRttUs.store(_clock.GetRttUs(), std::memory_order_release);
-            }
-
-            // (2) エコー追跡更新: このパケットの t_send と受信時刻を記録
-            _lastPeerT1 = gtp.t_send;
-            _lastPeerRecvUs = pkt.receiveTimeUs;
-
-            // (3) 相手入力を CentralBuffer に確定書込み
-            uint32_t remoteInput = static_cast<uint32_t>(gtp.buttons) | (static_cast<uint32_t>(gtp.direction) << 16);
-            cccaster::core::sync::CentralBuffer::GetInstance().ConfirmRemote(
-                gtp.baseFrame, remoteInput);
-
-            // (4) 相手の D/R 値を受信 — 0xFF=変更なし、実値=変更通知
-            static constexpr uint8_t DR_NO_CHANGE = 0xFF;
-            bool drChanged = false;
-            if (gtp.delay != DR_NO_CHANGE) {
-                _delayFrames = gtp.delay;
-                drChanged = true;
-            }
-            if (gtp.maxRollback != DR_NO_CHANGE) {
-                _maxRollback = gtp.maxRollback;
-                drChanged = true;
-            }
-            if (drChanged) {
-                cccaster::core::sync::CentralBuffer::GetInstance().SetSyncParams(
-                    _delayFrames, _maxRollback);
-                cccaster::domain::session::DebugLog(
-                    "[SyncCoordinator] Peer D/R update: delay=%d maxRB=%d",
-                    _delayFrames, _maxRollback);
-                cccaster::domain::ui::StateUiLogic::SetDelay(_delayFrames);
-                cccaster::domain::ui::StateUiLogic::SetRollback(_maxRollback);
-            }
-
-            // (5) 相手フレーム追跡（キャッチアップ用）
-            if (gtp.baseFrame > _latestPeerFrame) {
-                _latestPeerFrame = gtp.baseFrame;
-            }
-
-            continue;
-        }
-
-        // ── PING パケット (type=0x00) — WaitStart 用 NTPエコー付き ──
-        if (pktType == 0x00 && pkt.data.size() >= UNIFIED_HEADER_SIZE + sizeof(PingPayload)) {
-            PingPayload pp{};
-            std::memcpy(&pp, pkt.data.data() + UNIFIED_HEADER_SIZE, sizeof(pp));
-
-            // (1) NTP T1-T4 θ推定
-            if (pp.echo_t1 > 0 && pp.echo_t2 > 0) {
-                _clock.AddNtpSample(pp.echo_t1, pp.echo_t2, pp.t_send, pkt.receiveTimeUs);
-                _state.clockOffsetUs.store(_clock.GetThetaUs(), std::memory_order_release);
-                _state.lastRttUs.store(_clock.GetRttUs(), std::memory_order_release);
-            }
-
-            // (2) エコー追跡更新
-            _lastPeerT1 = pp.t_send;
-            _lastPeerRecvUs = pkt.receiveTimeUs;
-            continue;
-        }
-
-        // ── その他: 未知タイプ（疎通は冒頭で処理済み）──
     }
 
     _recvQueueSwap.clear();
 }
 
 // ============================================================================
-// SendPacket — NetplayManager の送信関数経由でパケットを送る
-//
-// CS_INPUT 等と同一の送信先を使うため、NetplayManager::GetSendFunc() を利用。
-// SyncCoordinator 独自の _targetIp/_targetPort は使わない。
+// SendPacket — NetplayManager 経由で送信
 // ============================================================================
 void SyncCoordinator::SendPacket(const std::vector<uint8_t>& data) {
     auto sendFunc = cccaster::netplay::NetplayManager::GetInstance().GetSendFunc();
@@ -323,75 +144,8 @@ void SyncCoordinator::SendPacket(const std::vector<uint8_t>& data) {
 }
 
 // ============================================================================
-// SendPing — PING パケット送信（CC10ヘッダ type=0x00, ペイロードなし）
+// SleepUntil — 精密スリープ
 // ============================================================================
-void SyncCoordinator::SendPing() {
-    int64_t now = timer::WasapiClock::GetTimeUs();
-
-    PingPayload pp{};
-    pp.t_send  = now;
-    pp.echo_t1 = _lastPeerT1;     // 最後に受信した相手の t_send をエコー
-    pp.echo_t2 = _lastPeerRecvUs; // そのパケットの受信時刻をエコー
-
-    auto pkt = BuildUnifiedPacket(0x00, 0x00, now, &pp, sizeof(pp));
-    SendPacket(pkt);
-}
-
-// ============================================================================
-// SendGameTick — GAME_TICK パケット送信（入力 + NTPエコー）
-// ============================================================================
-void SyncCoordinator::SendGameTick(uint32_t frame, uint32_t localInput) {
-    int64_t now = timer::WasapiClock::GetTimeUs();
-
-    GameTickPayload gtp{};
-    gtp.baseFrame   = frame;
-    gtp.t_send      = now;
-    gtp.echo_t1     = _lastPeerT1;     // 最後に受信した相手の t_send をエコー
-    gtp.echo_t2     = _lastPeerRecvUs; // そのパケットの受信時刻をエコー
-    gtp.buttons     = static_cast<uint16_t>(localInput & 0xFFFF);
-    gtp.direction   = static_cast<uint16_t>((localInput >> 16) & 0xFFFF);
-
-    // D/R: dirty 時のみ実値を送信、それ以外は 0xFF(変更なし)
-    static constexpr uint8_t DR_NO_CHANGE = 0xFF;
-    gtp.delay       = _delayDirty    ? static_cast<uint8_t>(_delayFrames) : DR_NO_CHANGE;
-    gtp.maxRollback = _rollbackDirty ? static_cast<uint8_t>(_maxRollback) : DR_NO_CHANGE;
-    _delayDirty    = false;
-    _rollbackDirty = false;
-
-    auto pkt = BuildUnifiedPacket(0x00, PKT_GAME_TICK, now, &gtp, sizeof(gtp));
-    SendPacket(pkt);
-}
-
-// ============================================================================
-// SendReady — READY 信号送信（CC10ヘッダ type=0x15, ペイロードなし）
-// ============================================================================
-void SyncCoordinator::SendReady() {
-    int64_t now = timer::WasapiClock::GetTimeUs();
-    auto pkt = BuildUnifiedPacket(0x00, PKT_READY, now);
-    SendPacket(pkt);
-}
-
-// ============================================================================
-// SendStart — START 信号送信（CC10ヘッダ type=0x16 + StartPayload）
-// ============================================================================
-void SyncCoordinator::SendStart(int64_t startTimeUs) {
-    int64_t now = timer::WasapiClock::GetTimeUs();
-    StartPayload sp{};
-    sp.startTimeUs = startTimeUs;
-    auto pkt = BuildUnifiedPacket(0x00, PKT_START, now, &sp, sizeof(sp));
-    SendPacket(pkt);
-
-    cccaster::domain::session::DebugLog(
-        "[SyncCoordinator] Sent START. startTime=%lld us", startTimeUs);
-}
-
-// ============================================================================
-// SleepUntil — 精密スリープ（Sleep + スピンウェイトのハイブリッド）
-// ============================================================================
-//
-// 2ms 以上残り → Sleep(1) で CPU 節約
-// 2ms 未満     → スピンウェイトで精度優先
-//
 void SyncCoordinator::SleepUntil(int64_t targetUs) {
     while (true) {
         int64_t remain = targetUs - timer::WasapiClock::GetTimeUs();
@@ -399,29 +153,25 @@ void SyncCoordinator::SleepUntil(int64_t targetUs) {
         if (remain > 2000) {
             Sleep(1);
         } else {
-            // スピンウェイト（CPU省電力ヒント付き）
             YieldProcessor();
         }
     }
 }
 
 // ============================================================================
-// ThreadMain — 通信スレッドのメインループ（サブティック3分割方式）
+// ThreadMain — 通信スレッドのメインループ（4層分離版）
 // ============================================================================
 //
 // 【設計】
-//   1Fの基礎時間（tickUs ≈ 16666μs）を SUB_TICKS_PER_FRAME (=3) 分割。
-//   ループは ~5555μs 間隔で回り、3サブティック目でフレームを進行させる。
+//   通信スレッドはパケット送受信に専念。
+//   固定間隔（BASE_TICK_US / SUB_TICKS_PER_FRAME）でループ。
+//   α補正はメトロノームが独立管理し、通信間隔に影響しない。
 //
-//   WaitReady/WaitStart: 毎サブティックで READY/PING を送信（旧200ms→~5.5ms）
-//   Counting: subTickIndex == 0 のサブティックでフレーム進行
-//
-// ============================================================================
 void SyncCoordinator::ThreadMain() {
     cccaster::domain::session::DebugLog("[SyncCoordinator] Thread started. Mode=WaitReady");
 
-    int64_t tickUs     = timer::NetplayClock::BASE_TICK_US;
-    int64_t subTickUs  = tickUs / SUB_TICKS_PER_FRAME;
+    // 通信スレッドは固定間隔でループ（α補正の影響を受けない）
+    int64_t subTickUs  = Metronome::BASE_TICK_US / SUB_TICKS_PER_FRAME;
     int     subTickIdx = 0;
     int64_t nextSubTickUs = timer::WasapiClock::GetTimeUs();
 
@@ -430,7 +180,7 @@ void SyncCoordinator::ThreadMain() {
         SleepUntil(nextSubTickUs);
         int64_t now = timer::WasapiClock::GetTimeUs();
 
-        // ── 全モード共通: 受信パケット処理 ──
+        // ── 受信パケット処理 ──
         DrainAndProcessPackets();
 
         switch (_mode) {
@@ -438,134 +188,111 @@ void SyncCoordinator::ThreadMain() {
         // Mode::WaitReady — 準備完了待機
         // ================================================================
         case SyncMode::WaitReady: {
-            // 毎サブティックで READY 送信
-            SendReady();
+            SendPacket(_calc.BuildReadyPacket());
 
-            // 双方 READY → WaitStart へ遷移
-            if (_peerReady) {
+            if (_calc.IsPeerReady()) {
                 _mode = SyncMode::WaitStart;
-                cccaster::domain::session::DebugLog("[SyncCoordinator] Mode -> WaitStart (peer READY received)");
+                cccaster::domain::session::DebugLog(
+                    "[SyncCoordinator] Mode -> WaitStart (peer READY received)");
             }
             break;
         }
 
         // ================================================================
-        // Mode::WaitStart — 開始時刻待機（θ推定 + START 合意）
+        // Mode::WaitStart — 開始時刻待機
         // ================================================================
         case SyncMode::WaitStart: {
-            // 毎サブティックで READY + PING 送信
-            SendReady();
-            SendPing();
+            SendPacket(_calc.BuildReadyPacket());
+            SendPacket(_calc.BuildPingPacket());
 
-            // θ安定 → START 送信
-            if (!_startSent && _clock.IsThetaStable()) {
+            if (!_startSent && _calc.IsThetaStable()) {
                 int64_t startTime = now + START_MARGIN_US;
-                _clock.SetLocalStartTime(startTime);
-                SendStart(startTime);
+                _calc.SetLocalStartTime(startTime);
+                SendPacket(_calc.BuildStartPacket(startTime));
                 _startSent = true;
             }
 
-            // 合意スタート時刻が決定 + 到達 → Counting へ
-            int64_t agreedStart = _clock.GetAgreedStartTime();
+            int64_t agreedStart = _calc.GetAgreedStartTime();
             if (agreedStart > 0 && now >= agreedStart) {
                 _mode = SyncMode::Counting;
-                _clock.SetBaselineTheta();  // 絶対クロック差をベースラインとして固定
+                _calc.SetBaselineTheta();
                 _state.isSynced.store(true, std::memory_order_release);
 
-                subTickIdx = 0;  // フレームカウント開始位置をリセット
+                // メトロノーム起動（Counting開始フレームから）
+                uint32_t startFrame = cccaster::core::sync::CentralBuffer::GetInstance().GetWriteHead();
+                _metronome.Start(startFrame);
+
+                subTickIdx = 0;
                 cccaster::domain::session::DebugLog(
-                    "[SyncCoordinator] Mode -> Counting. startTime=%lld us θ=%lld us writeHead=%u",
-                    agreedStart, _clock.GetThetaUs(),
-                    cccaster::core::sync::CentralBuffer::GetInstance().GetWriteHead());
+                    "[SyncCoordinator] Mode -> Counting. startTime=%lld us θ=%lld us",
+                    agreedStart, _calc.GetThetaUs());
             }
             break;
         }
 
         // ================================================================
-        // Mode::Counting — フレームカウント中 + 3連パケット送信
+        // Mode::Counting — 通信 + CentralBuffer書込み
         // ================================================================
         case SyncMode::Counting: {
-            auto& buf = cccaster::core::sync::CentralBuffer::GetInstance();
-            uint32_t frame = buf.GetWriteHead();
+            uint32_t metroFrame = _metronome.GetFrame();
 
-            // ── フレーム進行: 3サブティックに1回 (subTickIdx==0) ──
             if (subTickIdx == 0) {
-                frame = frame + 1;
-
                 // 疎通カウンタ
-                _framesSinceLastRecv++;
-                if (_framesSinceLastRecv >= DISCONNECT_TIMEOUT_FRAMES) {
-                    _state.isPeerAlive.store(false, std::memory_order_release);
-                }
+                _calc.IncrementFrameCount();
+                _state.isPeerAlive.store(_calc.IsPeerAlive(), std::memory_order_release);
 
-                // ティック周期をα補正込みで算出 → サブティック更新
-                tickUs = _clock.GetTickUs();
-                _state.currentTickUs.store(tickUs, std::memory_order_release);
-                subTickUs = tickUs / SUB_TICKS_PER_FRAME;
+                // ティック情報更新
+                _state.currentTickUs.store(_metronome.GetCurrentIntervalUs(), std::memory_order_release);
 
-                // ── ローカル入力をデバイスAPIから直接読取り ──
-                // DirectInputHook 経由でコントローラ/キーボードの生入力を取得
+                // ローカル入力読取り
                 cccaster::game_interface::DirectInputHook::Poll();
                 uint32_t localInput = _isHost
                     ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
                     : cccaster::game_interface::DirectInputHook::GetPlayer2Input();
-                _lastLocalInput = localInput;  // サブティック間で保持
+                _lastLocalInput = localInput;
 
-                // ── CentralBuffer にスロット書込み ──
-                uint8_t phase = static_cast<uint8_t>(
-                    cccaster::game_interface::GameMonitor::GetCurrentPhase());
-                bool rb = (phase == static_cast<uint8_t>(
-                    cccaster::game_interface::GamePhase::InGame))
-                    && (*CC_INTRO_STATE_ADDR == 0);
-                buf.WriteSlot(frame, phase, rb, localInput, 0, false);
-                buf.SetWriteHead(frame);
+                // CentralBuffer 書込み（SyncCalculator 経由）
+                _calc.WriteFrameSlot(metroFrame, localInput);
+
+                // α補正更新
+                _calc.UpdateAlphaCorrections();
 
                 // フレーム進捗ログ（60Fごと）
-                if (frame % 60 == 0) {
+                if (metroFrame % 60 == 0) {
                     cccaster::domain::session::DebugLog(
-                        "[SyncCoordinator] F=%u tick=%lldus Δθ=%lldus RTT=%lldus alive=%d peerF=%u",
-                        frame, tickUs, _clock.GetThetaUs() - _clock.GetBaselineTheta(),
-                        _clock.GetRttUs(),
-                        _state.isPeerAlive.load() ? 1 : 0,
-                        _latestPeerFrame);
+                        "[SyncCoordinator] F=%u tick=%lldus α1=%lld α2=%lld RTT=%lldus peerF=%u",
+                        metroFrame, _metronome.GetCurrentIntervalUs(),
+                        _metronome.GetAlpha1(), _metronome.GetAlpha2(),
+                        _calc.GetRttUs(), _calc.GetLatestPeerFrame());
                 }
 
-                // ── キャッチアップバースト: peerFrame > myFrame + 1 ──
-                // 相手が2F以上先行している場合、現在の入力でバッファを埋めつつ
-                // フレームを一気に追いつかせる
-                if (_latestPeerFrame > frame + 1) {
-                    uint32_t catchupTarget = _latestPeerFrame;
-                    uint32_t startFrame = frame;
-                    while (frame < catchupTarget) {
-                        frame++;
-                        buf.WriteSlot(frame, phase, rb, localInput, 0, false);
-                        buf.SetWriteHead(frame);
+                // キャッチアップバースト
+                if (_calc.GetLatestPeerFrame() > metroFrame + 1) {
+                    uint32_t startF = metroFrame;
+                    while (metroFrame < _calc.GetLatestPeerFrame()) {
+                        metroFrame++;
+                        _calc.WriteFrameSlot(metroFrame, localInput);
                     }
                     cccaster::domain::session::DebugLog(
-                        "[SyncCoordinator] Catch-up burst: F=%u -> F=%u (skipped %u frames)",
-                        startFrame, frame, frame - startFrame);
+                        "[SyncCoordinator] Catch-up burst: F=%u -> F=%u",
+                        startF, metroFrame);
                 }
             }
 
-            // ── 3連パケット送信: 全サブティックで GAME_TICK ──
-            // baseFrame と input はフレーム内で固定、t_send のみサブティックごとに異なる
-            SendGameTick(frame, _lastLocalInput);
+            // 3連パケット送信
+            SendPacket(_calc.BuildGameTickPacket(metroFrame, _lastLocalInput));
 
-            // サブティックインデックスを巡回
             subTickIdx = (subTickIdx + 1) % SUB_TICKS_PER_FRAME;
             break;
         }
         } // switch
 
-        // ── 次のサブティック時刻を累積 ──
         nextSubTickUs += subTickUs;
     }
 
-    uint32_t finalFrame = _state.currentFrame.load();
-    cccaster::domain::session::DebugLog("[SyncCoordinator] Thread exiting. totalFrames=%u", finalFrame);
+    cccaster::domain::session::DebugLog("[SyncCoordinator] Thread exiting.");
 }
 
 } // namespace netplay
 } // namespace core
 } // namespace cccaster
-

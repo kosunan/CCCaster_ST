@@ -15,6 +15,8 @@ add_library(cccaster_hook SHARED
     adapter_netplay/timer/WasapiClock.cpp
     adapter_netplay/timer/NetplayClock.cpp
     adapter_netplay/SyncCoordinator.cpp
+    adapter_netplay/Metronome.cpp
+    adapter_netplay/SyncCalculator.cpp
     # === adapter_network (通信インフラ) ===
     adapter_network/UdpSocket.cpp
     # === feature_overlay_ui (旧 infra/overlay + domain_UI) ===

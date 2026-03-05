@@ -1,23 +1,19 @@
 #pragma once
 // ============================================================================
-// SyncCoordinator — ネットプレイ通信同期の統括
+// SyncCoordinator — 通信スレッド統括（4層分離版）
 //
-// 【設計思想】
-//   通信スレッドがティックマスターとして機能し、
-//   WASAPIクロックベースの高精度フレームカウントを管理する。
-//   DLLスレッド（ゲームスレッド）はSharedSyncStateを参照するだけ。
-//
-// 【2レイヤー分離】
-//   - NetplayClock (純粋関数群): θ推定、ドリフト補正、1F周期算出
-//   - SyncCoordinator (本クラス): モード遷移ステートマシン + パケットI/O
+// 【責務】
+//   パケットの送受信に専念する。
+//   計算・α補正・CentralBuffer操作は SyncCalculator に委譲。
+//   フレームリズム生成は Metronome に委譲。
 //
 // 【モード遷移】
 //   WaitReady  → (双方READY) → WaitStart → (合意時刻到達) → Counting
 //
 // 【スレッド間ルール】
-//   - 同期フラグの書き込み権限は通信スレッドのみ。
-//   - DLLスレッドは Read-only で参照。
-//   - DLLスレッドが書き込むのは localInputQueue への Push のみ。
+//   - 通信スレッドは送受信と SyncCalculator 呼出しのみ。
+//   - Metronome は独立スレッドでカウンタをカウントアップ。
+//   - ゲームスレッドは CentralBuffer を監視するだけ。
 // ============================================================================
 
 #include <atomic>
@@ -26,7 +22,8 @@
 #include <vector>
 #include <string>
 #include <mutex>
-#include "core_dll/adapter_netplay/timer/NetplayClock.hpp"
+#include "core_dll/adapter_netplay/SyncCalculator.hpp"
+#include "core_dll/adapter_netplay/Metronome.hpp"
 
 namespace cccaster {
 namespace core {
@@ -38,7 +35,7 @@ namespace netplay {
 enum class SyncMode {
     WaitReady,   // 準備完了待機 — READY信号を送り、相手のREADYを待つ
     WaitStart,   // 開始時刻待機 — θ推定→START送受信→合意時刻到達を待つ
-    Counting     // フレームカウント中 — 1F周期でカウントアップ
+    Counting     // フレームカウント中 — パケット送受信 + CentralBuffer書込み
 };
 
 // ============================================================================
@@ -50,10 +47,10 @@ struct SharedSyncState {
     std::atomic<int64_t>  currentTickUs{16666};
 
     // ─── 同期状態フラグ ─────────────────────────────────
-    std::atomic<bool>     isSynced{false};     // 対戦開始可能
-    std::atomic<bool>     isPeerAlive{false};   // 疎通確認
-    std::atomic<bool>     peerReady{false};     // 相手のREADY受信済み
-    std::atomic<int64_t>  clockOffsetUs{0};     // θ
+    std::atomic<bool>     isSynced{false};
+    std::atomic<bool>     isPeerAlive{false};
+    std::atomic<bool>     peerReady{false};
+    std::atomic<int64_t>  clockOffsetUs{0};
     std::atomic<int64_t>  lastRttUs{0};
 
     // ─── リモート入力リングバッファ ──────────────────────
@@ -67,13 +64,8 @@ struct SharedSyncState {
 };
 
 // ============================================================================
-// ローカル入力エントリ / 受信パケットエントリ
+// 受信パケットエントリ
 // ============================================================================
-struct LocalInputEntry {
-    uint32_t frame;
-    uint32_t input;
-};
-
 struct ReceivedPacket {
     std::vector<uint8_t> data;
     std::string fromIp;
@@ -82,7 +74,7 @@ struct ReceivedPacket {
 };
 
 // ============================================================================
-// SyncCoordinator 本体
+// SyncCoordinator 本体 — 通信専用
 // ============================================================================
 class SyncCoordinator {
 public:
@@ -102,37 +94,29 @@ public:
     void Stop();
     bool IsRunning() const { return _running.load(); }
 
-    // ─── 時計データ読取り（オーバーレイ用）───────────────
-    int64_t GetRttUs() const { return _clock.GetRttUs(); }
-    int64_t GetThetaUs() const { return _clock.GetThetaUs(); }
-    int64_t GetBaselineTheta() const { return _clock.GetBaselineTheta(); }
+    // ─── 時計データ読取り（オーバーレイ用、SyncCalculator 委譲）──
+    int64_t GetRttUs() const        { return _calc.GetRttUs(); }
+    int64_t GetThetaUs() const      { return _calc.GetThetaUs(); }
+    int64_t GetBaselineTheta() const { return _calc.GetBaselineTheta(); }
 
-    // ─── D/R 動的変更（UIキー入力 → 通信スレッド → パケット送信）───
-    void SetDelayFrames(int d)  { _delayFrames = d; _delayDirty = true; }
-    void SetMaxRollback(int r)  { _maxRollback = r; _rollbackDirty = true; }
+    // ─── D/R 動的変更（SyncCalculator 委譲）─────────────
+    void SetDelayFrames(int d)  { _calc.SetDelayFrames(d); }
+    void SetMaxRollback(int r)  { _calc.SetMaxRollback(r); }
 
     // ─── 受信パケットキュー ─────────────────────────────
     void OnPacketReceived(const std::vector<uint8_t>& data,
                           const std::string& fromIp, uint16_t fromPort);
 
-    // ─── DLLスレッドからの入力送信 ──────────────────────
-    // PushLocalInput 廃止 — 通信スレッドが DirectInputHook から直接読取り
-
     // ─── 定数 ──────────────────────────────────────────
-    static constexpr int     MAX_SENDS_PER_FRAME    = 3;
-    static constexpr int     SUB_TICKS_PER_FRAME    = 3;        // 1Fを3分割
-    static constexpr int64_t START_MARGIN_US        = 500000;   // 500ms
-    static constexpr int     DISCONNECT_TIMEOUT_FRAMES = 180;   // 180F = 3秒
+    static constexpr int     SUB_TICKS_PER_FRAME    = 3;
+    static constexpr int64_t START_MARGIN_US        = 500000;
 
-    // 統一ヘッダ
-    static constexpr int     HDR_TIMESTAMP_OFFSET   = 8;
-    static constexpr int     UNIFIED_HEADER_SIZE    = 20;
-    static constexpr uint32_t CC10_MAGIC            = 0x30314343u;
-
-    // パケットタイプ
-    static constexpr uint8_t PKT_READY     = 0x15;  // 準備完了信号
-    static constexpr uint8_t PKT_START     = 0x16;  // スタート時刻通知
-    static constexpr uint8_t PKT_GAME_TICK = 0x20;  // ゲームティック（入力+タイミング）
+    // パケット定数（互換用: 既存コードがこれを参照する可能性）
+    static constexpr int      UNIFIED_HEADER_SIZE   = SyncCalculator::UNIFIED_HEADER_SIZE;
+    static constexpr uint32_t CC10_MAGIC            = SyncCalculator::CC10_MAGIC;
+    static constexpr uint8_t  PKT_READY             = SyncCalculator::PKT_READY;
+    static constexpr uint8_t  PKT_START             = SyncCalculator::PKT_START;
+    static constexpr uint8_t  PKT_GAME_TICK         = SyncCalculator::PKT_GAME_TICK;
 
 private:
     SyncCoordinator() = default;
@@ -144,10 +128,6 @@ private:
     void ThreadMain();
     void DrainAndProcessPackets();
     void SendPacket(const std::vector<uint8_t>& data);
-    void SendPing();
-    void SendReady();
-    void SendStart(int64_t startTimeUs);
-    void SendGameTick(uint32_t frame, uint32_t localInput);
     static void SleepUntil(int64_t targetUs);
 
     // ─── 状態 ──────────────────────────────────────────
@@ -156,18 +136,16 @@ private:
     std::thread _thread;
     SyncMode _mode = SyncMode::WaitReady;
 
-    // ─── 計算エンジン ──────────────────────────────────
-    timer::NetplayClock _clock;
+    // ─── 委譲先 ────────────────────────────────────────
+    SyncCalculator _calc;
+    Metronome _metronome;
 
     // ─── 構成 ──────────────────────────────────────────
     bool     _isHost = false;
     std::string _targetIp;
     uint16_t _targetPort = 0;
     uint16_t _localPort  = 0;
-    int      _delayFrames = 0;
-    int      _maxRollback = 0;
-    bool     _delayDirty    = false;  // D値変更済み→次のパケットで実値送信
-    bool     _rollbackDirty = false;  // R値変更済み→次のパケットで実値送信
+    bool     _startSent = false;
 
     // ─── 受信パケットキュー ─────────────────────────────
     std::mutex _recvMutex;
@@ -175,18 +153,7 @@ private:
     std::vector<ReceivedPacket> _recvQueueSwap;
 
     // ─── 現フレームの確定入力（3サブティックで同一内容を送信）───
-    uint32_t _lastLocalInput = 0;  // (direction<<16)|buttons
-
-    // ─── NTP T1-T4 エコー追跡 ─────────────────────────
-    int64_t _lastPeerT1     = 0;  // 最後に受信した相手パケットの t_send（= 相手の T1）
-    int64_t _lastPeerRecvUs = 0;  // そのパケットを受信した自分の WASAPI 時刻（= T2）
-
-    // ─── 内部タイマー ──────────────────────────────────
-    int64_t _lastRecvUs = 0;
-    bool    _peerReady = false;
-    bool    _startSent = false;
-    int     _framesSinceLastRecv = 0;  // 疎通カウンタ
-    uint32_t _latestPeerFrame = 0;     // 最後に受信した相手の baseFrame（キャッチアップ用）
+    uint32_t _lastLocalInput = 0;
 
     // ─── 実ピアポート（NAT越え用）──────────────────────
     uint16_t _peerActualPort = 0;
