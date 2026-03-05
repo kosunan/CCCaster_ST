@@ -33,7 +33,6 @@ add_library(cccaster_hook SHARED
     feature_overlay_ui/NetplayOverlay.cpp
     # === pure_sync_engine (同期/ロールバック計算) ===
     pure_sync_engine/RollbackEngine.cpp
-    pure_sync_engine/InputFilter.cpp
     # === adapter_netplay (接続・パケットルーティング) ===
     adapter_netplay/NetplayManager.cpp
     adapter_netplay/PacketRouter.cpp
@@ -42,13 +41,11 @@ add_library(cccaster_hook SHARED
     game_memory_accessor/state/StateBuffer.cpp
     game_memory_accessor/patcher/MbaaPatcher.cpp
     session_orchestrator/scene/SceneFastBoot.cpp
+    session_orchestrator/scene/SceneInputFilter.cpp
+    session_orchestrator/scene/SceneBusiness.cpp
     # === session_orchestrator (業務とシーンの統括) ===
     session_orchestrator/session/SceneRunner.cpp
     session_orchestrator/session/GameFrameOrchestrator.cpp
-    session_orchestrator/scene/SceneCharaSelect.cpp
-    session_orchestrator/scene/SceneLoading.cpp
-    session_orchestrator/scene/SceneInGame.cpp
-    session_orchestrator/scene/SceneRematch.cpp
     # === 外部参照 ===
     ../cli_launcher/ConfigManager.cpp
 )

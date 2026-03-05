@@ -41,9 +41,3 @@ public:
 
 } // namespace cccaster::domain::session
 
-// アクセサ: SceneRunner.cpp 内の static RemoteInputQueue を取得 (E-12)
-namespace cccaster::sync { class RemoteInputQueue; }
-namespace cccaster::domain::session {
-    cccaster::sync::RemoteInputQueue& GetRemoteInputQueue();
-}
-

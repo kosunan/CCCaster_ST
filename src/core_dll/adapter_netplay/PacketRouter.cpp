@@ -32,20 +32,13 @@
 #include "core_dll/adapter_netplay/PacketRouter.hpp"
 #include "core_dll/adapter_netplay/SyncCoordinator.hpp"
 
-#include "core_dll/session_orchestrator/scene/SceneCharaSelect.hpp"
-#include "core_dll/session_orchestrator/scene/SceneLoading.hpp"
-#include "core_dll/session_orchestrator/scene/SceneRematch.hpp"
+#include "core_dll/session_orchestrator/scene/SceneBusiness.hpp"
 #include "core_dll/common/DebugLog.hpp"
 #include "core_dll/pure_sync_engine/CentralBuffer.hpp"
 #include <cstring>
 #include <iostream>
 
-// 前方宣言: SceneRunner.cpp で定義されるリモート入力受信コールバック
-// PacketRouter.cpp ローカル型 GameInputEntry を void* 経由で渡す
-namespace cccaster::core_dll {
-    void OnRemoteInputPacket(uint32_t latestFrame,
-                             const void* history, int historyCount);
-}
+// GAME_INPUT はログ出力のみ（入力の流れは SyncCoordinator → CentralBuffer）
 
 namespace cccaster::core::network {
 
@@ -190,7 +183,7 @@ void PacketRouter::OnPacket(const std::vector<uint8_t>& data, const std::string&
                 cccaster::domain::session::DebugLog(
                     "[PacketRouter] UNIFIED:REMATCH_MENU phase=0x%02X menuIndex=%d confirmed=%u from=%s:%u",
                     phase, static_cast<int>(pl.menuIndex), pl.confirmed, fromIp.c_str(), fromPort);
-                cccaster::domain::scene::SceneRematch::SetRemoteRetryMenuIndex(pl.menuIndex);
+                cccaster::domain::scene::SceneBusiness::SetRemoteRetryMenuIndex(pl.menuIndex);
                 break;
             }
 
@@ -206,7 +199,7 @@ void PacketRouter::OnPacket(const std::vector<uint8_t>& data, const std::string&
                     phase, gi.latestFrame, gi.history[0].buttons,
                     (payloadSize >= static_cast<int>(sizeof(gi))) ? 11 : 0,
                     fromIp.c_str(), fromPort);
-                cccaster::core_dll::OnRemoteInputPacket(gi.latestFrame, gi.history, 11);
+                // 入力はSyncCoordinator→CentralBuffer経由で処理される
                 break;
             }
 
@@ -273,7 +266,7 @@ void PacketRouter::OnPacket(const std::vector<uint8_t>& data, const std::string&
             cccaster::domain::session::DebugLog(
                 "[PacketRouter] LEGACY:REMATCH_MENU val=%d from=%s:%u",
                 static_cast<int>(static_cast<int8_t>(payload & 0xFF)), fromIp.c_str(), fromPort);
-            cccaster::domain::scene::SceneRematch::SetRemoteRetryMenuIndex(
+            cccaster::domain::scene::SceneBusiness::SetRemoteRetryMenuIndex(
                 static_cast<int8_t>(payload & 0xFF));
             break;
         }
@@ -290,8 +283,7 @@ void PacketRouter::OnPacket(const std::vector<uint8_t>& data, const std::string&
             "[PacketRouter] LEGACY:INPUT val=0x%04X from=%s:%u",
             remoteInput, fromIp.c_str(), fromPort);
         // 旧2B → 単一エントリに変換して queue 経由 (E-12)
-        GameInputEntry legacy = { 0, remoteInput };
-        cccaster::core_dll::OnRemoteInputPacket(0, &legacy, 1);
+        // 入力はSyncCoordinator→CentralBuffer経由で処理される
         return;
     }
 
