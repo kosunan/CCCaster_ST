@@ -243,9 +243,9 @@ static bool ResolveMenuSelection(uint16_t& input) {
 //           false: 通常ゲート処理を続行
 // ================================================================
 static bool HandleMenuGate(session::SessionContext& ctx, uint16_t& input) {
-    // メニュー選択肢制限
+    // メニュー選択肢制限 (シーン別フィルタとして後日実装予定)
     if (AsmHacks::currentMenuIndex > static_cast<uint32_t>(MAX_RETRY_MENU_INDEX)) {
-        input &= ~(CC_BUTTON_A | CC_BUTTON_CONFIRM);
+        // TODO: シーン別フィルタとして InputFilter 経由に移行
     }
 
     // リプレイ保存サブメニュー
