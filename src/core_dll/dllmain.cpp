@@ -151,6 +151,24 @@ DWORD WINAPI InitThread(LPVOID lpParam) {
         strncpy(ctx.peerIp, ip, sizeof(ctx.peerIp) - 1);
         ctx.peerIp[sizeof(ctx.peerIp) - 1] = '\0';
 
+        // ── 同一PC検出: CLIENT が HOST と同じポートをバインドしようとする場合、ポートをずらす ──
+        // peerIp がローカルアドレス (127.x / localhost / 同一マシン) の場合に発動
+        {
+            std::string peerStr(ctx.peerIp);
+            bool isLocalPeer = (peerStr == "127.0.0.1" || peerStr == "::1"
+                             || peerStr == "localhost"
+                             || peerStr.rfind("192.168.", 0) == 0
+                             || peerStr.rfind("10.", 0) == 0);
+            if (isLocalPeer && !ctx.isHost && ctx.localPort == ctx.peerPort) {
+                ctx.localPort = ctx.peerPort + 1;
+                char shiftLog[128];
+                snprintf(shiftLog, sizeof(shiftLog),
+                         "[InitThread] Same-PC detected: CLIENT localPort shifted %u -> %u",
+                         ctx.peerPort, ctx.localPort);
+                HookLog(shiftLog);
+            }
+        }
+
         // DLL初期化完了をEXEに通知
         cccaster::public_api::IpcManager::UpdateOrReadState([](cccaster::public_api::SharedState& s) {
             s.dllInitialized = true;
@@ -158,9 +176,9 @@ DWORD WINAPI InitThread(LPVOID lpParam) {
 
         char log[256];
         snprintf(log, sizeof(log),
-                 "[InitThread] Config -> mode=%u host=%d delay=%d maxRB=%d peer=%s:%u",
+                 "[InitThread] Config -> mode=%u host=%d delay=%d maxRB=%d peer=%s:%u local=%u",
                  ctx.appMode, ctx.isHost, ctx.delay, ctx.maxRollback,
-                 ctx.peerIp, ctx.peerPort);
+                 ctx.peerIp, ctx.peerPort, ctx.localPort);
         HookLog(log);
     } else {
         HookLog("[InitThread] IPC Shared Memory Read FAILED. Using defaults.");
