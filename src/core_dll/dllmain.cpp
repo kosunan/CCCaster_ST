@@ -29,6 +29,56 @@
 static HMODULE g_hModule = nullptr;
 
 // ============================================================================
+// ApplyMultiInstanceBypass — MBAA 多重起動防止バイパス
+//
+// MBAA.exe は起動時に以下の2つのAPIで多重起動を検出する:
+//   1. FindWindowA/W — 既存ウィンドウの検出
+//   2. CreateMutexA  — 排他Mutexの存在チェック (ERROR_ALREADY_EXISTS)
+//
+// これらのAPI関数本体を直接パッチ（インラインフック）して無効化する。
+// DllMain(DLL_PROCESS_ATTACH) から呼ばれるため、ゲーム本体の初期化より先に適用される。
+// ============================================================================
+static void PatchFunctionBytes(void* target, const BYTE* patch, size_t size) {
+    DWORD oldProtect;
+    VirtualProtect(target, size, PAGE_EXECUTE_READWRITE, &oldProtect);
+    memcpy(target, patch, size);
+    VirtualProtect(target, size, oldProtect, &oldProtect);
+    FlushInstructionCache(GetCurrentProcess(), target, size);
+}
+
+static void ApplyMultiInstanceBypass() {
+    // FindWindowA: xor eax, eax; ret 8 → 常に NULL を返す
+    FARPROC pFW = GetProcAddress(GetModuleHandleA("user32.dll"), "FindWindowA");
+    if (pFW) {
+        BYTE patch[] = { 0x31, 0xC0, 0xC2, 0x08, 0x00 };
+        PatchFunctionBytes((void*)pFW, patch, sizeof(patch));
+    }
+
+    // FindWindowW: xor eax, eax; ret 8 → 常に NULL を返す
+    FARPROC pFWW = GetProcAddress(GetModuleHandleA("user32.dll"), "FindWindowW");
+    if (pFWW) {
+        BYTE patch[] = { 0x31, 0xC0, 0xC2, 0x08, 0x00 };
+        PatchFunctionBytes((void*)pFWW, patch, sizeof(patch));
+    }
+
+    // CreateMutexA: SetLastError(0) + mov eax, 0x1337 + ret 12
+    //   → ERROR_ALREADY_EXISTS を回避し、フェイクハンドルを返す
+    FARPROC pCM = GetProcAddress(GetModuleHandleA("kernel32.dll"), "CreateMutexA");
+    FARPROC pSLE = GetProcAddress(GetModuleHandleA("kernel32.dll"), "SetLastError");
+    if (pCM && pSLE) {
+        BYTE patch[16];
+        patch[0] = 0x6A; patch[1] = 0x00;                          // push 0
+        patch[2] = 0xE8;                                             // call rel32
+        INT32 rel = (INT32)((BYTE*)pSLE - ((BYTE*)pCM + 2 + 5));   // relative offset
+        memcpy(&patch[3], &rel, 4);
+        patch[7]  = 0xB8;                                            // mov eax, imm32
+        patch[8]  = 0x37; patch[9] = 0x13; patch[10] = 0x00; patch[11] = 0x00; // 0x1337
+        patch[12] = 0xC2; patch[13] = 0x0C; patch[14] = 0x00;       // ret 12
+        PatchFunctionBytes((void*)pCM, patch, 15);
+    }
+}
+
+// ============================================================================
 // HookLog — 初期化フェーズ専用ログ（DxHook 未初期化時に使用）
 // ============================================================================
 void HookLog(const char* msg) {
@@ -180,7 +230,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     case DLL_PROCESS_ATTACH:
         g_hModule = hModule; // ← ログパス解決のため最初に設定
         DisableThreadLibraryCalls(hModule);
-        HookLog("[DllMain] DLL_PROCESS_ATTACH");
+        ApplyMultiInstanceBypass(); // ← 多重起動バイパス（ゲーム初期化より先に適用）
+        HookLog("[DllMain] DLL_PROCESS_ATTACH (multi-instance bypass applied)");
         CreateThread(nullptr, 0, InitThread, hModule, 0, nullptr);
         break;
 
