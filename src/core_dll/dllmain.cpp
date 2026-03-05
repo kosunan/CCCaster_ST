@@ -151,21 +151,34 @@ DWORD WINAPI InitThread(LPVOID lpParam) {
         strncpy(ctx.peerIp, ip, sizeof(ctx.peerIp) - 1);
         ctx.peerIp[sizeof(ctx.peerIp) - 1] = '\0';
 
-        // ── 同一PC検出: CLIENT が HOST と同じポートをバインドしようとする場合、ポートをずらす ──
-        // peerIp がローカルアドレス (127.x / localhost / 同一マシン) の場合に発動
+        // ── 同一PC検出: ポート衝突を自動回避 ──
+        // peerIp がローカルアドレスの場合:
+        //   CLIENT: localPort を peerPort+1 にシフト (自バインド衝突回避)
+        //   HOST:   peerPort を peerPort+1 にシフト (CLIENT の新ポートへ送信)
         {
             std::string peerStr(ctx.peerIp);
             bool isLocalPeer = (peerStr == "127.0.0.1" || peerStr == "::1"
                              || peerStr == "localhost"
                              || peerStr.rfind("192.168.", 0) == 0
                              || peerStr.rfind("10.", 0) == 0);
-            if (isLocalPeer && !ctx.isHost && ctx.localPort == ctx.peerPort) {
-                ctx.localPort = ctx.peerPort + 1;
-                char shiftLog[128];
-                snprintf(shiftLog, sizeof(shiftLog),
-                         "[InitThread] Same-PC detected: CLIENT localPort shifted %u -> %u",
-                         ctx.peerPort, ctx.localPort);
-                HookLog(shiftLog);
+            if (isLocalPeer && ctx.localPort == ctx.peerPort) {
+                if (!ctx.isHost) {
+                    // CLIENT: 自分を +1 にずらす
+                    ctx.localPort = ctx.peerPort + 1;
+                    char shiftLog[128];
+                    snprintf(shiftLog, sizeof(shiftLog),
+                             "[InitThread] Same-PC: CLIENT localPort %u -> %u",
+                             ctx.peerPort, ctx.localPort);
+                    HookLog(shiftLog);
+                } else {
+                    // HOST: 相手(CLIENT)が +1 にずれるので送信先もずらす
+                    ctx.peerPort = ctx.peerPort + 1;
+                    char shiftLog[128];
+                    snprintf(shiftLog, sizeof(shiftLog),
+                             "[InitThread] Same-PC: HOST peerPort %u -> %u",
+                             ctx.localPort, ctx.peerPort);
+                    HookLog(shiftLog);
+                }
             }
         }
 
