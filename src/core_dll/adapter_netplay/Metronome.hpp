@@ -3,15 +3,16 @@
 // Metronome — フレームリズム生成器（独立スレッド）
 //
 // 【責務】
-//   α1 + α2 補正付き間隔でフレームカウンタをカウントアップする。
-//   通信やCentralBuffer操作は一切行わない。純粋なリズム生成のみ。
+//   α1 + α2 補正付き間隔でティック信号を発火する。
+//   フレーム番号の管理は行わない（SyncCalculator に委譲）。
+//   通信やCentralBuffer操作は一切行わない。
 //
 // 【α補正】
 //   α1: パケットディレイ不足補正 — D+R で吸収しきれない遅延分
 //   α2: 相手メトロノームとのズレ補正 — Θ変化量ベースのドリフト追従
 //
 // 【スレッド間ルール】
-//   - カウンタは atomic で公開。通信スレッド・ゲームスレッドからリード可。
+//   - ティック信号は atomic カウンタで公開。通信スレッドが消費する。
 //   - α1/α2 の設定は SyncCalculator が行う（atomic 書込み）。
 // ============================================================================
 
@@ -26,12 +27,16 @@ namespace netplay {
 class Metronome {
 public:
     // ─── ライフサイクル ─────────────────────────────────
-    void Start(uint32_t initialFrame = 0);
+    void Start();
     void Stop();
     bool IsRunning() const { return _running.load(std::memory_order_acquire); }
 
-    // ─── カウンタ読取り（他スレッドから） ────────────────
-    uint32_t GetFrame() const { return _frame.load(std::memory_order_acquire); }
+    // ─── ティック消費（通信スレッドから呼ぶ）────────────
+    /// 蓄積されたティック数を取得し、0 にリセットする。
+    /// 戻り値 = 前回消費してから何フレーム分進めるべきか。
+    uint32_t ConsumeTicks() {
+        return _pendingTicks.exchange(0, std::memory_order_acq_rel);
+    }
 
     // ─── α補正設定（SyncCalculator から呼ばれる） ───────
     void SetAlpha1(int64_t alpha1Us) { _alpha1Us.store(alpha1Us, std::memory_order_release); }
@@ -52,8 +57,8 @@ private:
     void ThreadMain();
     static void SleepUntil(int64_t targetUs);
 
-    // ─── カウンタ ──────────────────────────────────────
-    std::atomic<uint32_t> _frame{0};
+    // ─── ティック信号カウンタ ────────────────────────────
+    std::atomic<uint32_t> _pendingTicks{0};
 
     // ─── α補正（μs） ─────────────────────────────────
     std::atomic<int64_t> _alpha1Us{0};  // パケットディレイ不足補正

@@ -1,5 +1,8 @@
 // ============================================================================
 // Metronome.cpp — フレームリズム生成器（実装）
+//
+// α1 + α2 補正付き間隔でティック信号を発火する。
+// フレーム番号管理は行わない（SyncCalculator に委譲）。
 // ============================================================================
 
 #include "core_dll/adapter_netplay/Metronome.hpp"
@@ -18,7 +21,6 @@ int64_t Metronome::GetCurrentIntervalUs() const {
     int64_t interval = BASE_TICK_US
                      + _alpha1Us.load(std::memory_order_acquire)
                      + _alpha2Us.load(std::memory_order_acquire);
-    // MIN/MAX クランプ
     if (interval < MIN_TICK_US) interval = MIN_TICK_US;
     if (interval > MAX_TICK_US) interval = MAX_TICK_US;
     return interval;
@@ -27,18 +29,17 @@ int64_t Metronome::GetCurrentIntervalUs() const {
 // ============================================================================
 // Start — メトロノームスレッド起動
 // ============================================================================
-void Metronome::Start(uint32_t initialFrame) {
+void Metronome::Start() {
     if (_running.load()) return;
 
-    _frame.store(initialFrame, std::memory_order_release);
+    _pendingTicks.store(0, std::memory_order_release);
     _alpha1Us.store(0, std::memory_order_release);
     _alpha2Us.store(0, std::memory_order_release);
 
     _running.store(true, std::memory_order_release);
     _thread = std::thread(&Metronome::ThreadMain, this);
 
-    cccaster::domain::session::DebugLog(
-        "[Metronome] Started. initialFrame=%u", initialFrame);
+    cccaster::domain::session::DebugLog("[Metronome] Started.");
 }
 
 // ============================================================================
@@ -50,8 +51,7 @@ void Metronome::Stop() {
     if (_thread.joinable()) {
         _thread.join();
     }
-    cccaster::domain::session::DebugLog(
-        "[Metronome] Stopped. finalFrame=%u", _frame.load());
+    cccaster::domain::session::DebugLog("[Metronome] Stopped.");
 }
 
 // ============================================================================
@@ -73,7 +73,7 @@ void Metronome::SleepUntil(int64_t targetUs) {
 // ThreadMain — メトロノームスレッドのメインループ
 // ============================================================================
 //
-// α1 + α2 補正付き間隔でカウンタをカウントアップする。
+// α1 + α2 補正付き間隔でティック信号を蓄積する。
 // 通信やバッファ操作は一切行わない。
 //
 void Metronome::ThreadMain() {
@@ -85,18 +85,8 @@ void Metronome::ThreadMain() {
 
         SleepUntil(nextTickUs);
 
-        // カウンタをインクリメント
-        _frame.fetch_add(1, std::memory_order_release);
-
-        // 60Fごとにログ出力
-        uint32_t f = _frame.load(std::memory_order_relaxed);
-        if (f % 60 == 0) {
-            cccaster::domain::session::DebugLog(
-                "[Metronome] F=%u interval=%lldus α1=%lld α2=%lld",
-                f, intervalUs,
-                _alpha1Us.load(std::memory_order_relaxed),
-                _alpha2Us.load(std::memory_order_relaxed));
-        }
+        // ティック信号を蓄積（通信スレッドが ConsumeTicks で消費する）
+        _pendingTicks.fetch_add(1, std::memory_order_release);
     }
 }
 

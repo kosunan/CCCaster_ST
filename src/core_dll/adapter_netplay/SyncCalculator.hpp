@@ -46,8 +46,16 @@ public:
     std::vector<uint8_t> BuildStartPacket(int64_t startTimeUs);
     std::vector<uint8_t> BuildPingPacket();
 
-    // ─── フレーム進行・入力書込み ────────────────────────
-    // メトロノームのカウンタに基づき、CentralBuffer にスロットを書込む
+    // ─── フレーム番号管理 ────────────────────────────
+    /// 初期フレーム番号を設定（Start時に1回呼ぶ）
+    void SetInitialFrame(uint32_t frame) { _currentFrame = frame; }
+    /// フレームを進めてCentralBufferに書込む
+    uint32_t AdvanceFrame(uint32_t localInput);
+    /// 現在フレーム番号を取得
+    uint32_t GetCurrentFrame() const { return _currentFrame; }
+
+    // ─── CentralBuffer書込み ────────────────────────
+    // 指定フレーム番号でスロットを書込む（キャッチアップバースト用）
     void WriteFrameSlot(uint32_t frame, uint32_t localInput);
 
     // ─── α補正の更新 ────────────────────────────────────
@@ -115,6 +123,9 @@ private:
     bool     _peerReady = false;
     int      _framesSinceLastRecv = 0;
     uint32_t _latestPeerFrame = 0;
+
+    // ─── フレーム番号 ────────────────────────────
+    uint32_t _currentFrame = 0;
 };
 
 } // namespace netplay

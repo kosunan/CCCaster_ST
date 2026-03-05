@@ -212,6 +212,15 @@ std::vector<uint8_t> SyncCalculator::BuildPingPacket() {
 }
 
 // ============================================================================
+// AdvanceFrame — フレームを1つ進めて CentralBuffer に書込み
+// ============================================================================
+uint32_t SyncCalculator::AdvanceFrame(uint32_t localInput) {
+    _currentFrame++;
+    WriteFrameSlot(_currentFrame, localInput);
+    return _currentFrame;
+}
+
+// ============================================================================
 // WriteFrameSlot — CentralBuffer にフレームスロットを書込み
 // ============================================================================
 void SyncCalculator::WriteFrameSlot(uint32_t frame, uint32_t localInput) {
