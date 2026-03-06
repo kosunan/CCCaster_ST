@@ -4,7 +4,6 @@
 #include <cstring>
 #include <ctime>
 #include <random>
-#include <chrono>
 
 #ifdef _WIN32
 #include <winsock2.h>

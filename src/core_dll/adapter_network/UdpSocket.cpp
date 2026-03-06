@@ -4,7 +4,6 @@
 // 無ければ単純なWinsockに差し替えることも可能なようにPimplで隠蔽しています
 #define ASIO_STANDALONE
 #include <asio.hpp>
-#include <iostream>
 
 namespace cccaster::network {
 

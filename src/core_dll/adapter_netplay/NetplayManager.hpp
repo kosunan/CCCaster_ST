@@ -24,7 +24,6 @@
 //   - TimeHooks::Initialize() 呼び出し → dllmain.cpp に移動
 // ============================================================================
 
-#include <windows.h>
 #include <cstdint>
 #include <string>
 #include <memory>

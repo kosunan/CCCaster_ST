@@ -13,7 +13,6 @@
 // ============================================================================
 
 #include <string>
-#include <cstdint>
 
 namespace cccaster::domain::ui {
 

@@ -6,7 +6,6 @@
 #include "core_dll/adapter_os_hooks/input/DirectInputHook.hpp"
 #include "cli_launcher/ConfigManager.hpp"
 #include <imgui.h>
-#include <cmath>
 
 namespace cccaster::domain::ui {
 

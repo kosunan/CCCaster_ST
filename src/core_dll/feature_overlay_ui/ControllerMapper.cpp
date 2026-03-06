@@ -24,10 +24,8 @@
 #include "core_dll/adapter_os_hooks/input/DirectInputHook.hpp"
 #include "cli_launcher/ConfigManager.hpp"
 #include <imgui.h>
-#include <windows.h>
 #include <string>
 #include <cmath>
-#include <cstdio>
 
 using namespace cccaster::domain::ui;
 using cccaster::overlay::OverlayRenderer;

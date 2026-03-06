@@ -3,8 +3,6 @@
 
 #include "cli_launcher/network_wrapper/ConnectionHash.hpp"
 #include <iostream>
-#include <cassert>
-#include <cstring>
 
 #ifdef _WIN32
 #include <winsock2.h>

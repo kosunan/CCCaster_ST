@@ -31,7 +31,6 @@
 
 #include "core_dll/adapter_os_hooks/api_hook/DxHook.hpp"
 #include <MinHook.h>
-#include <cstdio>
 
 /// デバッグログ出力関数（dllmain.cpp で定義）
 void HookLog(const char* msg);

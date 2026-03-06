@@ -1,6 +1,5 @@
 #include "cli_launcher/ConfigManager.hpp"
 #include <fstream>
-#include <sstream>
 #include <mutex>
 
 namespace cccaster::main_app {

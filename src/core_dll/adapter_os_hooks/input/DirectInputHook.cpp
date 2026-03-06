@@ -4,7 +4,6 @@
 #include <dinput.h>
 #include <cstdint>
 #include <vector>
-#include <map>
 #include <string>
 #include <algorithm>
 #include <imgui.h>

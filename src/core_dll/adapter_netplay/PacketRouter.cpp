@@ -36,7 +36,6 @@
 #include "core_dll/common/DebugLog.hpp"
 #include "core_dll/pure_sync_engine/CentralBuffer.hpp"
 #include <cstring>
-#include <iostream>
 
 // GAME_INPUT はログ出力のみ（入力の流れは SyncCoordinator → CentralBuffer）
 

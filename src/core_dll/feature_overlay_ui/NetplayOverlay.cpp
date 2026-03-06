@@ -29,7 +29,6 @@
 #include "core_dll/feature_overlay_ui/ControllerMapper.hpp"
 #include "core_dll/feature_overlay_ui/overlay/OverlayRenderer.hpp"
 #include <imgui.h>
-#include <cstdio>
 
 /// DLL側の共通ログ関数（dllmain.cpp で定義）
 void HookLog(const char* msg);

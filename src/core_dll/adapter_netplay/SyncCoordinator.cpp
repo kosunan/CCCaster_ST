@@ -14,7 +14,6 @@
 #include "core_dll/common/DebugLog.hpp"
 #include "core_dll/adapter_os_hooks/input/DirectInputHook.hpp"
 #include "core_dll/feature_overlay_ui/State_Ui_Logic.hpp"
-#include <cstring>
 #include <windows.h>
 
 namespace cccaster {

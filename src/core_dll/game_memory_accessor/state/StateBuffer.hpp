@@ -2,7 +2,6 @@
 
 #include <vector>
 #include <cstdint>
-#include <array>
 #include <optional>
 
 namespace cccaster::sync {
