@@ -107,11 +107,6 @@ struct GameInputPayload {
 void PacketRouter::OnPacket(const std::vector<uint8_t>& data, const std::string& fromIp, uint16_t fromPort) {
     if (data.empty()) return;
 
-    // ── SyncCoordinator に全パケットを転送（θ推定 + 疎通チェック用）──
-    if (cccaster::core::netplay::SyncCoordinator::GetInstance().IsRunning()) {
-        cccaster::core::netplay::SyncCoordinator::GetInstance().OnPacketReceived(data, fromIp, fromPort);
-    }
-
     // ──────────────────────────────────────────────────────────────────────
     // 1. 統一ヘッダ (CC10) パケット
     //
@@ -131,14 +126,13 @@ void PacketRouter::OnPacket(const std::vector<uint8_t>& data, const std::string&
             const int     payloadOffset = UNIFIED_HEADER_SIZE;
             const int     payloadSize   = static_cast<int>(data.size()) - payloadOffset;
 
-            // SyncCoordinator 専用パケットは SyncCoordinator が処理済み
-            // ※ PKT_GAME_TICK(0x20) と TYPE_LOADING_INPUT(0x20) が衝突するため
-            //    SyncCoordinator 管轄タイプを明示的にスキップする
-            if (type == 0x00 ||   // PING
-                type == 0x15 ||   // READY
-                type == 0x16 ||   // START
-                type == 0x20) {   // GAME_TICK ← TYPE_LOADING_INPUT と衝突！
-                return;           // SyncCoordinator 側で処理済み
+            // SyncCoordinator 管轄パケットのみ転送
+            // PING(0x00), READY(0x15), START(0x16), GAME_TICK(0x30)
+            if (type == 0x00 || type == 0x15 || type == 0x16 || type == 0x30) {
+                if (cccaster::core::netplay::SyncCoordinator::GetInstance().IsRunning()) {
+                    cccaster::core::netplay::SyncCoordinator::GetInstance().OnPacketReceived(data, fromIp, fromPort);
+                }
+                return;  // SyncCoordinator 側で処理完了
             }
 
             switch (type) {
@@ -202,21 +196,6 @@ void PacketRouter::OnPacket(const std::vector<uint8_t>& data, const std::string&
                 // 入力はSyncCoordinator→CentralBuffer経由で処理される
                 break;
             }
-
-            case 0x00: // PING — SyncCoordinator が処理済み（ログ抑制）
-                break;
-
-            case 0x15: // READY — SyncCoordinator が処理済み
-                cccaster::domain::session::DebugLog(
-                    "[PacketRouter] UNIFIED:READY from=%s:%u",
-                    fromIp.c_str(), fromPort);
-                break;
-
-            case 0x16: // START — SyncCoordinator が処理済み
-                cccaster::domain::session::DebugLog(
-                    "[PacketRouter] UNIFIED:START from=%s:%u",
-                    fromIp.c_str(), fromPort);
-                break;
 
             default:
                 cccaster::domain::session::DebugLog(

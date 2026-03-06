@@ -97,7 +97,7 @@ public:
     // パケットタイプ
     static constexpr uint8_t PKT_READY     = 0x15;
     static constexpr uint8_t PKT_START     = 0x16;
-    static constexpr uint8_t PKT_GAME_TICK = 0x20;
+    static constexpr uint8_t PKT_GAME_TICK = 0x30;  // 旧0x20はTYPE_LOADING_INPUTと衝突するため変更
 
 private:
     static std::vector<uint8_t> BuildUnifiedPacket(

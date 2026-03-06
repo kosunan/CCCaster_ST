@@ -55,6 +55,7 @@ void SyncCoordinator::Start(bool isHost,
     // CentralBuffer リセット
     cccaster::core::sync::CentralBuffer::GetInstance().Reset();
     cccaster::core::sync::CentralBuffer::GetInstance().SetWriteHead(200);
+    cccaster::core::sync::CentralBuffer::GetInstance().InitializeConfirmedRemoteFrame(200);
     cccaster::core::sync::CentralBuffer::GetInstance().SetSyncParams(delayFrames, maxRollback);
 
     // オーバーレイ初期表示

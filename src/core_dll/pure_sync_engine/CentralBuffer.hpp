@@ -135,15 +135,21 @@ public:
     }
 
     /// ゲームが進行可能な実効フレーム: min(writeHead-(D+R), confirmedRemoteFrame)
+    /// confirmedRemoteFrame が未初期化(0)の場合は delayAdjusted のみを返す
     uint32_t GetEffectiveHead() const {
         uint32_t wh = _writeHead.load(std::memory_order_acquire);
         int32_t offset = static_cast<int32_t>(_delay) + static_cast<int32_t>(_maxRollback);
-        if (offset < 1) offset = 1;  // 最侎1Fオフセット
+        if (offset < 1) offset = 1;  // 最低1Fオフセット
         int32_t delayAdjusted = static_cast<int32_t>(wh) - offset;
         if (delayAdjusted < 0) delayAdjusted = 0;
 
         uint32_t confirmed = _confirmedRemoteFrame.load(std::memory_order_acquire);
         uint32_t da = static_cast<uint32_t>(delayAdjusted);
+
+        // confirmedRemoteFrame がまだ未初期化（0）の場合は
+        // delayAdjusted のみで制御（起動初期のフリーズを防止）
+        if (confirmed == 0) return da;
+
         return (da < confirmed) ? da : confirmed;
     }
 
@@ -166,6 +172,11 @@ public:
         _confirmedRemoteFrame.store(0, std::memory_order_relaxed);
         _delay = 0;
         _maxRollback = 0;
+    }
+
+    /// confirmedRemoteFrame の初期値を設定（SyncCoordinator::Start で呼ぶ）
+    void InitializeConfirmedRemoteFrame(uint32_t frame) {
+        _confirmedRemoteFrame.store(frame, std::memory_order_release);
     }
 
 private:

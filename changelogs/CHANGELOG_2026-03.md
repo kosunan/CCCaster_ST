@@ -1,3 +1,37 @@
+# fix: core_dll 統合問題5件修正 — パケット衝突・二重処理・初期化・処理順序
+
+## 2026-03-06: コンポーネント間統合問題の修正
+
+### 問題
+パケット通信、DLLゲーム制御、メトロノーム、セントラルバッファが個別に機能するが
+正常なリンク（対戦同期）が成立しない。5つの根本原因を特定・修正。
+
+### 修正内容
+
+#### 1. PKT_GAME_TICK と TYPE_LOADING_INPUT の 0x20 衝突 (CRITICAL)
+- [MODIFY] `SyncCalculator.hpp`: PKT_GAME_TICK を 0x20 → 0x30 に変更
+
+#### 2. PacketRouter → SyncCoordinator 二重処理経路
+- [MODIFY] `PacketRouter.cpp`: 全パケット転送を廃止し、SyncCoordinator管轄パケット(PING/READY/START/GAME_TICK)のみ選択的に転送。到達不能なswitch case(0x00/0x15/0x16)を削除。
+
+#### 3. confirmedRemoteFrame 初期値 0 によるゲームフリーズ
+- [MODIFY] `CentralBuffer.hpp`: `GetEffectiveHead()` に confirmed==0 の安全処理を追加。`InitializeConfirmedRemoteFrame()` メソッド追加。
+- [MODIFY] `SyncCoordinator.cpp`: Start() で confirmedRemoteFrame を writeHead(200) と同値で初期化。
+
+#### 4. SceneRunner の処理順序が設計と不一致
+- [MODIFY] `SceneRunner.cpp`: Step() の処理順を SleepFrame→SceneBusiness から SceneBusiness→SleepFrame に修正（設計書のInput→SleepFrame→Logicに準拠）。
+
+#### 5. 統合フロー確認ログ追加
+- [MODIFY] `SceneRunner.cpp`: 60フレームごとに writeHead/readPos/effectiveHead/confirmedRemoteFrame/synced/peerAlive を出力。
+
+### テスト結果
+- HOST/CLIENT 両方で `synced=1 peerAlive=1` を確認
+- F=2640+ まで安定フレームカウント（25秒間）
+- RTT=80-100μs（ローカルループバック）
+- α1=0 α2=0（ドリフトなし）
+
+---
+
 # refactor: SyncCoordinator 4層分離 — メトロノーム・同期計算器・通信・ゲーム
 
 ## 2026-03-05: 通信スレッドとメトロノームの分離

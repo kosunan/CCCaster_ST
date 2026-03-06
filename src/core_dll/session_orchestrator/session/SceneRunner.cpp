@@ -146,11 +146,9 @@ void SceneRunner::Step() {
         return;
     }
 
-    // (D) SleepFrame + MaintainState
-    GC::SleepFrame();
-    GC::MaintainState();
-
-    // (E) SceneBusiness ディスパッチ
+    // (D) SceneBusiness ディスパッチ（入力読取・書込み — SleepFrame の前に実行）
+    //     設計書: Phase A (Input & Send) → Phase B (SleepFrame) → Phase C (Logic)
+    //     ReadBufferAndWrite は CentralBuffer から入力を読んでゲームメモリに書き込む
     switch (phase) {
         case GamePhase::CharaSelect:
             scene::SceneBusiness::OnCharaSelect(ctx);
@@ -168,7 +166,23 @@ void SceneRunner::Step() {
             break;
     }
 
-    // (F) 同期状態チェック + 疎通チェック
+    // (E) SleepFrame + MaintainState（入力書込み後にフレーム待機）
+    GC::SleepFrame();
+    GC::MaintainState();
+
+    // (F) 統合フロー確認ログ（60フレームごと）
+    if (ctx.framesInPhase % 60 == 0 && phase >= GamePhase::CharaSelect) {
+        auto& buf = cccaster::core::sync::CentralBuffer::GetInstance();
+        auto& syncState = cccaster::core::netplay::SyncCoordinator::GetState();
+        DebugLog("[SceneRunner] phase=%d framesInPhase=%u wh=%u rp=%u ef=%u crf=%u synced=%d peerAlive=%d",
+                 static_cast<int>(phase), ctx.framesInPhase,
+                 buf.GetWriteHead(), buf.GetReadPos(), buf.GetEffectiveHead(),
+                 buf.GetConfirmedRemoteFrame(),
+                 syncState.isSynced.load() ? 1 : 0,
+                 syncState.isPeerAlive.load() ? 1 : 0);
+    }
+
+    // (G) 同期状態チェック + 疎通チェック
     if (phase >= GamePhase::CharaSelect) {
         auto& syncState = cccaster::core::netplay::SyncCoordinator::GetState();
 
@@ -200,7 +214,7 @@ void SceneRunner::Step() {
     s_prev = phase;
     ctx.framesInPhase++;
 
-    // (G) 中断チェック
+    // (H) 中断チェック
     if (GetAsyncKeyState(VK_F12) & 0x8000) {
         DebugLog("[SceneRunner] Aborted by F12.");
         cccaster::public_api::IpcManager::UpdateOrReadState([](cccaster::public_api::SharedState& s) {
