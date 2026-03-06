@@ -6,6 +6,7 @@ add_executable(CCCaster_v10
     network_wrapper/SessionNegotiator.cpp
     network_wrapper/ConnectionHash.cpp
     ${CMAKE_SOURCE_DIR}/src/core_dll/adapter_network/UdpSocket.cpp
+    ${CMAKE_SOURCE_DIR}/src/core_dll/adapter_network/NetworkSimulator.cpp
 )
 
 # Root include directory and ASIO

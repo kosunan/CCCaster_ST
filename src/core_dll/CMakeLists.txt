@@ -19,6 +19,7 @@ add_library(cccaster_hook SHARED
     adapter_netplay/SyncCalculator.cpp
     # === adapter_network (通信インフラ) ===
     adapter_network/UdpSocket.cpp
+    adapter_network/NetworkSimulator.cpp
     # === feature_overlay_ui (旧 infra/overlay + domain_UI) ===
     feature_overlay_ui/overlay/OverlayRenderer.cpp
     feature_overlay_ui/UIManager.cpp

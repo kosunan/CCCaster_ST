@@ -1,5 +1,6 @@
 #include "cli_launcher/controller/MainController.hpp"
 #include "cli_launcher/ConfigManager.hpp"
+#include "core_dll/adapter_network/NetworkSimulator.hpp"
 #include <iostream>
 #include <fstream>
 
@@ -36,6 +37,11 @@ int main(int argc, char* argv[]) {
     uint16_t port = 0;
     std::string connectionHash = "";
 
+    // ネットワークシミュレーション用
+    uint32_t simDelayMin = 0, simDelayMax = 0;
+    uint32_t simLossPercent = 0;
+    bool simEnabled = false;
+
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--headless") {
@@ -50,7 +56,30 @@ int main(int argc, char* argv[]) {
             port = static_cast<uint16_t>(std::stoi(argv[++i]));
         } else if (arg == "--hash" && i + 1 < argc) {
             connectionHash = argv[++i];
+        } else if (arg == "--sim-delay" && i + 1 < argc) {
+            // 形式: "min,max" (例: "50,90")
+            std::string val = argv[++i];
+            auto comma = val.find(',');
+            if (comma != std::string::npos) {
+                simDelayMin = static_cast<uint32_t>(std::stoi(val.substr(0, comma)));
+                simDelayMax = static_cast<uint32_t>(std::stoi(val.substr(comma + 1)));
+            } else {
+                // カンマ無しの場合は固定遅延
+                simDelayMin = simDelayMax = static_cast<uint32_t>(std::stoi(val));
+            }
+            simEnabled = true;
+        } else if (arg == "--sim-loss" && i + 1 < argc) {
+            simLossPercent = static_cast<uint32_t>(std::stoi(argv[++i]));
+            simEnabled = true;
         }
+    }
+
+    // ネットワークシミュレーションの有効化
+    if (simEnabled) {
+        cccaster::network::NetworkSimulator::Instance().Enable(simDelayMin, simDelayMax, simLossPercent);
+        std::cout << "  \x1b[35m[ SIM ]\x1b[0m ネットワークシミュレーション有効: "
+                  << "遅延=" << simDelayMin << "~" << simDelayMax << "ms, "
+                  << "パケットロス=" << simLossPercent << "%\n";
     }
 
     cccaster::main_app::controller::MainController appController(isHeadless, isIpv6, isHost, targetIp, port, connectionHash);

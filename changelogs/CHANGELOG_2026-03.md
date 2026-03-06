@@ -1,3 +1,37 @@
+# feat: ネットワーク遅延・パケットロスシミュレーション機能
+
+## 2026-03-07: 送受信パケットにランダム遅延+ランダムロスを挿入するテスト機能
+
+### 概要
+テスト用途で、パケット送信・受信の両方にランダム遅延(50~90ms)とパケットロス(20%)を
+シミュレートする機能を追加。CLI引数で有効化し、無効時はゼロオーバーヘッド。
+
+### 新規ファイル
+- [NEW] `adapter_network/NetworkSimulator.hpp`: シミュレーション設定管理シングルトン（遅延範囲/ロス率/乱数生成）
+- [NEW] `adapter_network/NetworkSimulator.cpp`: Enable/GetRandomDelayMs/ShouldDrop の実装
+
+### 変更ファイル
+- [MODIFY] `adapter_network/UdpSocket.cpp`:
+  - `Send()`: パケットロス判定（ShouldDrop→即return）+ ASIO steady_timer による非同期遅延送信
+  - `DoReceive()`: パケットロス判定（コールバックスキップ）+ steady_timer による非同期遅延受信
+  - `Impl` に `pendingTimers` リスト追加（タイマー寿命管理）
+- [MODIFY] `cli_launcher/main.cpp`: `--sim-delay min,max` / `--sim-loss N` 引数パース追加
+- [MODIFY] `core_dll/CMakeLists.txt`: NetworkSimulator.cpp 追加
+- [MODIFY] `cli_launcher/CMakeLists.txt`: NetworkSimulator.cpp 追加
+- [MODIFY] `_TEST_MBAACC/dual_test.bat`: HOST/CLIENT に `--sim-delay 50,90 --sim-loss 20` 追加
+
+### CLI使用方法
+```
+CCCaster_v10.exe --headless --host --port 7500 --sim-delay 50,90 --sim-loss 20
+```
+
+### 設計メモ
+- ASIOの `steady_timer` で遅延を実現（io_contextスレッドをブロックしない非同期設計）
+- NetworkSimulator はグローバルシングルトン（DLLとEXE両方で同一インスタンス参照）
+- シミュレーション無効時は `IsEnabled()` の atomic load のみで分岐（実質ゼロコスト）
+
+---
+
 # fix: core_dll 統合問題5件修正 — パケット衝突・二重処理・初期化・処理順序
 
 ## 2026-03-06: コンポーネント間統合問題の修正

@@ -1,9 +1,14 @@
 #include "core_dll/adapter_network/UdpSocket.hpp"
+#include "core_dll/adapter_network/NetworkSimulator.hpp"
 
 // ASIOがシステム(MinGWやvcpkg等)にインストールされている想定
 // 無ければ単純なWinsockに差し替えることも可能なようにPimplで隠蔽しています
 #define ASIO_STANDALONE
 #include <asio.hpp>
+
+#include <list>
+#include <memory>
+#include <cstdio>
 
 namespace cccaster::network {
 
@@ -16,6 +21,9 @@ struct UdpSocket::Impl {
     bool valid = false;
     std::thread ioThread;
     asio::executor_work_guard<asio::io_context::executor_type> workGuard;
+
+    // 遅延シミュレーション用: 非同期タイマーの寿命を保持するリスト
+    std::list<std::shared_ptr<asio::steady_timer>> pendingTimers;
 
     Impl(uint16_t port, bool isIpv6) 
         : socket(ioContext),
@@ -43,6 +51,14 @@ struct UdpSocket::Impl {
         }
     }
 
+    // 完了済みタイマーをクリーンアップ
+    void CleanupTimers() {
+        pendingTimers.remove_if([](const std::shared_ptr<asio::steady_timer>& t) {
+            (void)t; // expired timers are cleaned up after callback
+            return t.use_count() == 1; // only us holding it = callback done
+        });
+    }
+
     void DoReceive() {
         if (!socket.is_open()) return;
 
@@ -54,7 +70,35 @@ struct UdpSocket::Impl {
                         std::vector<uint8_t> data(recvBuffer.begin(), recvBuffer.begin() + bytes_transferred);
                         std::string ip = remoteEndpoint.address().to_string();
                         uint16_t port = remoteEndpoint.port();
-                        onReceiveCallback(data, ip, port);
+
+                        auto& sim = NetworkSimulator::Instance();
+                        if (sim.IsEnabled()) {
+                            // パケットロス判定
+                            if (sim.ShouldDrop()) {
+                                // ドロップ — コールバックを呼ばない
+                            } else {
+                                uint32_t delayMs = sim.GetRandomDelayMs();
+                                if (delayMs > 0) {
+                                    // 遅延付き受信: steady_timer で遅延後にコールバック
+                                    auto timer = std::make_shared<asio::steady_timer>(
+                                        ioContext, std::chrono::milliseconds(delayMs));
+                                    auto cb = onReceiveCallback; // コピーキャプチャ
+                                    pendingTimers.push_back(timer);
+                                    timer->async_wait([timer, data, ip, port, cb, this]
+                                        (const asio::error_code& ec) {
+                                        if (!ec && cb) {
+                                            cb(data, ip, port);
+                                        }
+                                        CleanupTimers();
+                                    });
+                                } else {
+                                    onReceiveCallback(data, ip, port);
+                                }
+                            }
+                        } else {
+                            // シミュレーション無効: 通常処理
+                            onReceiveCallback(data, ip, port);
+                        }
                     }
                 }
                 // エラー時（ポートクローズ等）以外は次に備えて再帰的に待受
@@ -110,12 +154,43 @@ UdpSocket::~UdpSocket() {
 void UdpSocket::Send(const std::string& targetIp, uint16_t targetPort, const std::vector<uint8_t>& data) {
     if (!_impl || !_impl->socket.is_open()) return;
 
+    auto& sim = NetworkSimulator::Instance();
+    if (sim.IsEnabled()) {
+        // パケットロス判定
+        if (sim.ShouldDrop()) {
+            return; // 送信しない
+        }
+    }
+
     asio::error_code ec;
     auto addr = asio::ip::make_address(targetIp, ec);
     if (!ec) {
         auto endpoint = asio::ip::udp::endpoint(addr, targetPort);
         auto bufferPtr = std::make_shared<std::vector<uint8_t>>(data);
-        
+
+        if (sim.IsEnabled()) {
+            uint32_t delayMs = sim.GetRandomDelayMs();
+            if (delayMs > 0) {
+                // 遅延付き送信: steady_timer で遅延後に送信
+                asio::post(_impl->ioContext, [this, endpoint, bufferPtr, delayMs]() {
+                    auto timer = std::make_shared<asio::steady_timer>(
+                        _impl->ioContext, std::chrono::milliseconds(delayMs));
+                    _impl->pendingTimers.push_back(timer);
+                    timer->async_wait([this, endpoint, bufferPtr, timer]
+                        (const asio::error_code& waitEc) {
+                        if (!waitEc && _impl->socket.is_open()) {
+                            _impl->socket.async_send_to(
+                                asio::buffer(*bufferPtr), endpoint,
+                                [bufferPtr](const asio::error_code&, std::size_t) {});
+                        }
+                        _impl->CleanupTimers();
+                    });
+                });
+                return;
+            }
+        }
+
+        // 遅延なし or シミュレーション無効: 即時送信
         asio::post(_impl->ioContext, [this, endpoint, bufferPtr]() {
             _impl->socket.async_send_to(
                 asio::buffer(*bufferPtr), endpoint,
