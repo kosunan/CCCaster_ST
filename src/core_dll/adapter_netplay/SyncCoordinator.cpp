@@ -51,11 +51,8 @@ void SyncCoordinator::Start(bool isHost,
     _state.clockOffsetUs.store(0);
     _state.lastRttUs.store(0);
 
-    // CentralBuffer リセット
-    cccaster::core::sync::CentralBuffer::GetInstance().Reset();
-    cccaster::core::sync::CentralBuffer::GetInstance().SetWriteHead(200);
-    cccaster::core::sync::CentralBuffer::GetInstance().InitializeConfirmedRemoteFrame(200);
-    cccaster::core::sync::CentralBuffer::GetInstance().SetSyncParams(delayFrames, maxRollback);
+    // CentralBuffer 初期化
+    cccaster::core::sync::CentralBuffer::GetInstance().Initialize(200, delayFrames, maxRollback);
 
     // オーバーレイ初期表示
     cccaster::domain::ui::StateUiLogic::SetDelay(delayFrames);

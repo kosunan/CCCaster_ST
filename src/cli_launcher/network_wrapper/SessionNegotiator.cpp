@@ -1,12 +1,12 @@
 #include "cli_launcher/network_wrapper/SessionNegotiator.hpp"
 #include "cli_launcher/network_wrapper/ConnectionHash.hpp"
 #include "cli_launcher/ui/ConsoleRenderer.hpp"
+#include "core_dll/adapter_network/UdpSocket.hpp"
 #include <iostream>
 #include <string>
 #include <vector>
 #include <chrono>
 #include <thread>
-#include <iomanip>
 #include <atomic>
 #include <mutex>
 #include <algorithm>
@@ -14,7 +14,9 @@
 #include <windows.h>
 #include <wininet.h>
 #include <mmsystem.h>
+#ifdef _MSC_VER
 #pragma comment(lib, "winmm.lib")
+#endif
 #include <conio.h>
 
 namespace cccaster::main_app::network_wrapper {

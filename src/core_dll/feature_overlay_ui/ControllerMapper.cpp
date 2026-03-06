@@ -296,12 +296,12 @@ void ControllerMapper::DrawDeviceSelectionTable() {
         ImGui::TableSetColumnIndex(1);
         const char* titleMid = "AVAILABLE DEVICES";
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (ImGui::GetColumnWidth() - ImGui::CalcTextSize(titleMid).x) * 0.5f);
-        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), titleMid);
+        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "%s", titleMid);
 
         ImGui::TableSetColumnIndex(2);
         const char* titleP2 = "PLAYER 2 CONTROLLER";
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetColumnWidth() - ImGui::CalcTextSize(titleP2).x - 10.0f);
-        ImGui::TextColored(ImVec4(0.3f, 0.6f, 1.0f, 1.0f), titleP2);
+        ImGui::TextColored(ImVec4(0.3f, 0.6f, 1.0f, 1.0f), "%s", titleP2);
 
         // 区切り線
         ImGui::TableNextRow();

@@ -230,8 +230,7 @@ void SyncCalculator::WriteFrameSlot(uint32_t frame, uint32_t localInput) {
     bool rb = (phase == static_cast<uint8_t>(
         cccaster::game_interface::GamePhase::InGame))
         && (*CC_INTRO_STATE_ADDR == 0);
-    buf.WriteSlot(frame, phase, rb, localInput, 0, false);
-    buf.SetWriteHead(frame);
+    buf.CommitFrame(frame, phase, rb, localInput, 0, false);
 }
 
 // ============================================================================

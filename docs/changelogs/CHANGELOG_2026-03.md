@@ -1,3 +1,27 @@
+# refactor: CentralBuffer 管理ルール整理 + 散発修正
+
+## 2026-03-06 (2)
+
+### Changed — CentralBuffer 統合API
+
+| ファイル | 変更内容 |
+|----------|---------|
+| `CentralBuffer.hpp` | `CommitFrame()`, `ReadFrameForGame()`, `Initialize()` 新設。全メソッドに `@thread_safety` コメント追加。Read API 使い分けガイド追加。 |
+| `SyncCalculator.cpp` | `WriteSlot()+SetWriteHead()` → `CommitFrame()` に統合 |
+| `SceneBusiness.cpp` | `GetReadPos()+GetSlot()+P1/P2振分け` → `ReadFrameForGame()` に統合 |
+| `SyncCoordinator.cpp` | 4連続CentralBuffer呼出し → `Initialize()` に統合 |
+
+### Fixed — 散発修正
+
+| ファイル | 変更内容 |
+|----------|---------|
+| `SessionNegotiator.hpp` | 未使用 `UdpSocket.hpp` include 削除 |
+| `SessionNegotiator.cpp` | `UdpSocket.hpp` include を `.cpp` に移動、`<iomanip>` 削除、`#pragma comment` に `_MSC_VER` ガード追加 |
+| `ConnectionHash.cpp` | `#pragma comment` に `_MSC_VER` ガード追加 |
+| `ControllerMapper.cpp` | `TextColored` フォーマット文字列安全化 (`"%s"` 挿入) |
+
+---
+
 # chore: 不要 #include ディレクティブの一括削除 (21件/19ファイル)
 
 ## 2026-03-06

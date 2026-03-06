@@ -2,7 +2,6 @@
 
 #include <string>
 #include <cstdint>
-#include "core_dll/adapter_network/UdpSocket.hpp"
 
 namespace cccaster::main_app::network_wrapper {
 

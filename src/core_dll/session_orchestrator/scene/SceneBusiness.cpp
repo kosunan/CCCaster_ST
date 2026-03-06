@@ -36,28 +36,10 @@ using cccaster::game_interface::GamePhase;
 static void ReadBufferAndWrite(GamePhase phase, bool isHost) {
     auto& buf = cccaster::core::sync::CentralBuffer::GetInstance();
 
-    uint32_t readPos = buf.GetReadPos();
-
-    if (readPos == 0) {
-        GC::ClearInput();
-        return;
-    }
-
-    const auto& slot = buf.GetSlot(readPos);
-
-    if (!slot.confirmed) {
-        GC::ClearInput();
-        return;
-    }
-
-    // P1/P2 振り分け
     uint32_t p1, p2;
-    if (isHost) {
-        p1 = slot.localInput;
-        p2 = slot.remoteInput;
-    } else {
-        p1 = slot.remoteInput;
-        p2 = slot.localInput;
+    if (!buf.ReadFrameForGame(isHost, p1, p2)) {
+        GC::ClearInput();
+        return;
     }
 
     // SceneInputFilter でフィルタ適用

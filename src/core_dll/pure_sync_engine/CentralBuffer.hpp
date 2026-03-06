@@ -54,9 +54,19 @@ public:
 
     // ════════════════════════════════════════════════════
     // 通信スレッドから呼ばれる (Write系)
+    // @thread_safety 通信スレッド専用（単一writer）
     // ════════════════════════════════════════════════════
 
-    /// スロット書込み（フレーム確定時に1回呼ぶ）
+    /// @brief フレーム書込み＋writeHead更新を一括で行う統合API（推奨）
+    /// @thread_safety 通信スレッド専用
+    void CommitFrame(uint32_t frame, uint8_t gamePhase, bool rollbackable,
+                     uint32_t localInput, uint32_t remoteInput, bool confirmed) {
+        WriteSlot(frame, gamePhase, rollbackable, localInput, remoteInput, confirmed);
+        SetWriteHead(frame);
+    }
+
+    /// @brief スロット書込み（低レベルAPI — 通常は CommitFrame を使うこと）
+    /// @thread_safety 通信スレッド専用
     void WriteSlot(uint32_t frame, uint8_t gamePhase, bool rollbackable,
                    uint32_t localInput, uint32_t remoteInput, bool confirmed) {
         auto& slot = _ring[frame % RING_SIZE];
@@ -68,8 +78,9 @@ public:
         slot.confirmed    = confirmed;
     }
 
-    /// 相手入力を確定更新（GAME_TICK 受信時）
-    /// 予測と異なる確定入力が来た場合、mismatchFrame を記録する。
+    /// @brief 相手入力を確定更新（GAME_TICK 受信時）
+    /// @details 予測と異なる確定入力が来た場合、mismatchFrame を記録する。
+    /// @thread_safety 通信スレッド専用
     void ConfirmRemote(uint32_t frame, uint32_t input) {
         auto& slot = _ring[frame % RING_SIZE];
 
@@ -91,21 +102,33 @@ public:
         }
     }
 
-    /// writeHead（最新フレーム番号）を取得
+    /// @brief writeHead（最新フレーム番号）を取得
+    /// @thread_safety どのスレッドからでも読取り可
     uint32_t GetWriteHead() const {
         return _writeHead.load(std::memory_order_acquire);
     }
 
-    /// writeHead を設定（通信スレッドがフレーム進行時に呼ぶ）
+    /// @brief writeHead を設定（低レベルAPI — 通常は CommitFrame を使うこと）
+    /// @thread_safety 通信スレッド専用
     void SetWriteHead(uint32_t frame) {
         _writeHead.store(frame, std::memory_order_release);
     }
 
     // ════════════════════════════════════════════════════
-    // 同期パラメータ設定（SyncCoordinator::Start で1回呼ぶ）
+    // 初期化・パラメータ設定
     // ════════════════════════════════════════════════════
 
-    /// ディレイ + 最大ロールバック を設定
+    /// @brief 全状態リセット＋初期フレーム＋同期パラメータを一括設定（推奨）
+    /// @thread_safety Start前のシングルスレッド状態で呼ぶこと
+    void Initialize(uint32_t startFrame, int16_t delay, int16_t maxRollback) {
+        Reset();
+        SetWriteHead(startFrame);
+        InitializeConfirmedRemoteFrame(startFrame);
+        SetSyncParams(delay, maxRollback);
+    }
+
+    /// @brief ディレイ + 最大ロールバック を設定
+    /// @thread_safety UIスレッドからも呼ばれる（動的変更時）
     void SetSyncParams(int16_t delay, int16_t maxRollback) {
         _delay = delay;
         _maxRollback = maxRollback;
@@ -116,11 +139,37 @@ public:
 
     // ════════════════════════════════════════════════════
     // ゲームスレッドから呼ばれる (Read系)
+    // @thread_safety ゲームスレッドから読取り（atomic同期）
+    //
+    // 【Read API 使い分けガイド】
+    //   GetReadPos()        — ディレイ/ロールバック補正のみ。単純な読取位置。
+    //   GetEffectiveHead()  — GetReadPos + confirmedRemoteFrame の min。
+    //                         SleepFrame の gap 計算に使う（ゲーム進行可能フレーム）。
+    //   ReadFrameForGame()  — 入力読取の完全パイプライン（推奨）。
+    //                         GetReadPos → confirmed チェック → P1/P2振分け。
     // ════════════════════════════════════════════════════
 
-    /// DLL の読取位置を算出: writeHead - max(delay + maxRollback, 1)
-    /// 最低1フレームのオフセットを保証（D=0,R=0でもリモート未確定フレーム読取を防止）
+    /// @brief ゲーム入力読取の完全パイプライン（推奨API）
+    /// @details GetReadPos → confirmed チェック → isHost に応じた P1/P2 振分けを一括実行。
+    /// @param isHost true=ホスト側（localInput→P1, remoteInput→P2）
+    /// @param[out] p1 P1側入力
+    /// @param[out] p2 P2側入力
+    /// @return 読取り成功なら true（readPos有効 かつ confirmed）
+    /// @thread_safety ゲームスレッド専用
+    bool ReadFrameForGame(bool isHost, uint32_t& p1, uint32_t& p2) const {
+        uint32_t readPos = GetReadPos();
+        if (readPos == 0) return false;
+        const auto& slot = _ring[readPos % RING_SIZE];
+        if (!slot.confirmed) return false;
+        if (isHost) { p1 = slot.localInput; p2 = slot.remoteInput; }
+        else        { p1 = slot.remoteInput; p2 = slot.localInput; }
+        return true;
+    }
+
+    /// @brief DLL の読取位置を算出: writeHead - max(delay + maxRollback, 1)
+    /// @details 最低1フレームのオフセットを保証（D=0,R=0でもリモート未確定フレーム読取を防止）
     /// @return 読み取るべきフレーム番号（0 以下にはならない）
+    /// @thread_safety ゲームスレッドから読取り可
     uint32_t GetReadPos() const {
         uint32_t wh = _writeHead.load(std::memory_order_acquire);
         int32_t offset = static_cast<int32_t>(_delay) + static_cast<int32_t>(_maxRollback);
@@ -129,13 +178,15 @@ public:
         return (pos >= 0) ? static_cast<uint32_t>(pos) : 0;
     }
 
-    /// リモート入力が確定している最新フレーム
+    /// @brief リモート入力が確定している最新フレーム
+    /// @thread_safety どのスレッドからでも読取り可
     uint32_t GetConfirmedRemoteFrame() const {
         return _confirmedRemoteFrame.load(std::memory_order_acquire);
     }
 
-    /// ゲームが進行可能な実効フレーム: min(writeHead-(D+R), confirmedRemoteFrame)
-    /// confirmedRemoteFrame が未初期化(0)の場合は delayAdjusted のみを返す
+    /// @brief ゲームが進行可能な実効フレーム: min(writeHead-(D+R), confirmedRemoteFrame)
+    /// @details confirmedRemoteFrame が未初期化(0)の場合は delayAdjusted のみを返す
+    /// @thread_safety ゲームスレッドから読取り可
     uint32_t GetEffectiveHead() const {
         uint32_t wh = _writeHead.load(std::memory_order_acquire);
         int32_t offset = static_cast<int32_t>(_delay) + static_cast<int32_t>(_maxRollback);
@@ -153,18 +204,21 @@ public:
         return (da < confirmed) ? da : confirmed;
     }
 
-    /// 指定フレームのスロットを取得（読取り専用）
+    /// @brief 指定フレームのスロットを取得（読取り専用・低レベルAPI）
+    /// @thread_safety ゲームスレッドから読取り可
     const FrameSlot& GetSlot(uint32_t frame) const {
         return _ring[frame % RING_SIZE];
     }
 
-    /// ロールバック判定: 予測外れが発生したフレームを返す (0=なし)
-    /// 取得後にクリアされる（consume セマンティクス）
+    /// @brief ロールバック判定: 予測外れが発生したフレームを返す (0=なし)
+    /// @details 取得後にクリアされる（consume セマンティクス）
+    /// @thread_safety ゲームスレッド専用
     uint32_t ConsumeMismatch() {
         return _mismatchFrame.exchange(0, std::memory_order_acq_rel);
     }
 
-    /// 全状態リセット
+    /// @brief 全状態リセット（低レベルAPI — 通常は Initialize を使うこと）
+    /// @thread_safety シングルスレッド状態で呼ぶこと
     void Reset() {
         std::memset(_ring, 0, sizeof(_ring));
         _writeHead.store(0, std::memory_order_relaxed);
@@ -174,7 +228,8 @@ public:
         _maxRollback = 0;
     }
 
-    /// confirmedRemoteFrame の初期値を設定（SyncCoordinator::Start で呼ぶ）
+    /// @brief confirmedRemoteFrame の初期値を設定
+    /// @thread_safety シングルスレッド状態で呼ぶこと
     void InitializeConfirmedRemoteFrame(uint32_t frame) {
         _confirmedRemoteFrame.store(frame, std::memory_order_release);
     }
