@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include "core_dll/adapter_netplay/SyncCalculator.hpp"
+#include "core_dll/adapter_netplay/SyncCoordinator.hpp"
 #include "core_dll/adapter_netplay/Metronome.hpp"
 #include "core_dll/adapter_netplay/timer/WasapiClock.hpp"
 #include "core_dll/pure_sync_engine/CentralBuffer.hpp"
@@ -30,6 +31,7 @@ struct GameTickPayload {
     uint16_t direction;
     uint8_t  delay;
     uint8_t  maxRollback;
+    uint8_t  flags;        // bit0: introComplete（introState==0 到達を通知）
 };
 struct PingPayload {
     int64_t t_send;
@@ -152,6 +154,12 @@ void SyncCalculator::ProcessReceivedPacket(const std::vector<uint8_t>& data,
         if (gtp.baseFrame > _latestPeerFrame) {
             _latestPeerFrame = gtp.baseFrame;
         }
+
+        // (6) introComplete フラグ受信
+        if (gtp.flags & 0x01) {
+            cccaster::core::netplay::SyncCoordinator::GetMutableState()
+                .peerIntroComplete.store(true, std::memory_order_release);
+        }
         return;
     }
 
@@ -186,6 +194,10 @@ std::vector<uint8_t> SyncCalculator::BuildGameTickPacket(uint32_t frame, uint32_
     gtp.maxRollback = _rollbackDirty ? static_cast<uint8_t>(_maxRollback) : DR_NO_CHANGE;
     _delayDirty    = false;
     _rollbackDirty = false;
+
+    // introComplete フラグをパケットに乗せる
+    gtp.flags = cccaster::core::netplay::SyncCoordinator::GetState()
+                    .localIntroComplete.load(std::memory_order_acquire) ? 0x01 : 0x00;
 
     return BuildUnifiedPacket(0x00, PKT_GAME_TICK, now, &gtp, sizeof(gtp));
 }
