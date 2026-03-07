@@ -66,11 +66,19 @@ public:
     /// @details (1) Phase取得 (2) 入力Poll (3) rollbackable判定 (4) スロット書込み + writeHead更新
     /// @thread_safety DLLスレッド専用
     void CommitFrame() {
-        uint32_t frame = _writeHead.load(std::memory_order_relaxed) + 1;
-
         // (1) 現在の画面フェーズ
-        uint8_t phase = static_cast<uint8_t>(
-            cccaster::game_interface::GameMonitor::GetCurrentPhase());
+        auto phase = cccaster::game_interface::GameMonitor::GetCurrentPhase();
+        uint8_t phaseU8 = static_cast<uint8_t>(phase);
+
+        // ゲームが入力を受け付けるフェーズのみCBに書込み
+        // CharaSelect(2), InGame(4), Rematch(5) → 有効
+        // Unknown(0), Title(1), Loading(3)      → スキップ（ゲームが廃棄する入力）
+        using GP = cccaster::game_interface::GamePhase;
+        if (phase != GP::CharaSelect && phase != GP::InGame && phase != GP::Rematch) {
+            return;  // 入力無効フェーズ — CB に書込まない
+        }
+
+        uint32_t frame = _writeHead.load(std::memory_order_relaxed) + 1;
 
         // (2) ローカル入力読取
         cccaster::game_interface::DirectInputHook::Poll();
@@ -78,13 +86,13 @@ public:
             ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
             : cccaster::game_interface::DirectInputHook::GetPlayer2Input();
 
-        // (3) rollbackable判定 (InGame = phase 4 のみ)
-        bool rb = (phase == 4);
+        // (3) rollbackable判定 (InGame のみ)
+        bool rb = (phase == GP::InGame);
 
         // (4) スロット書込み + writeHead 更新
         auto& slot = _ring[frame % RING_SIZE];
         slot.frame        = frame;
-        slot.gamePhase    = phase;
+        slot.gamePhase    = phaseU8;
         slot.rollbackable = rb;
         slot.localInput   = localInput;
         slot.remoteInput  = 0;      // 未確定
