@@ -1,3 +1,37 @@
+# feat: IntroBarrier — peer 双方の intro=2 到達を確認後にラウンド開始
+
+## 2026-03-08: IntroBarrier 同期ロジック追加
+
+### 概要
+ラウンド開始時に両 peer が intro=2 (イントロ完了) に到達したことを相互確認してから
+ゲーム進行を再開する IntroBarrier 機能を追加。片方のみ先行してゲームが進む問題を解消。
+
+### 変更ファイル
+- [MODIFY] `SyncCalculator.cpp`:
+  - `GameTickPayload` に `flags` フィールド追加 (bit0: introComplete)
+  - `ProcessReceivedPacket()`: flags の introComplete ビットで `peerIntroComplete` を設定
+  - `BuildGameTickPacket()`: `localIntroComplete` 状態を flags に反映
+  - `SyncCoordinator.hpp` の include 追加
+- [MODIFY] `SceneBusiness.cpp`:
+  - `OnLoading()`: Loading 中に `localIntroComplete=true` を事前シグナル
+  - `HandleRoundStartSync()`: intro=2 到達時に `localIntroComplete` 設定 + `peerIntroComplete` のバリア待機追加
+  - `ResetInGame()`: `peerIntroComplete` のみリセット（次ラウンドの peer 到達を待つため）
+  - `OnInGame()`: コメント・変数名を IntroBarrier 対応に更新
+
+---
+
+# chore: build.bat にクリーンビルドオプション + デュアルインスタンスデプロイ追加
+
+## 2026-03-08: ビルドスクリプト改善
+
+### 変更内容
+- [MODIFY] `build.bat`:
+  - `build.bat clean` でビルドディレクトリを削除するクリーンビルドオプション追加
+  - デプロイ先を `_TEST_MBAACC/cccaster/` から `_TEST_MBAACC/MBAACC_1/cccaster/` + `_TEST_MBAACC/MBAACC_2/cccaster/` のデュアルインスタンス構成に変更
+  - デプロイ先ディレクトリの存在チェック付き
+
+---
+
 # docs: GameControl.hpp の旧描画制御コメントを現行 API Hook 仕様に修正
 
 ## 2026-03-08: GameControl.hpp コメント修正（旧 CC_SKIP_FRAMES/CC_PAUSE_FLAG 時代の記述を削除）
