@@ -1,3 +1,17 @@
+# docs: GamePhase enum コメントを実装に合わせて修正
+
+## 2026-03-08: GamePhaseDetector.hpp の GamePhase コメント修正
+
+### 変更内容
+- [MODIFY] `GamePhaseDetector.hpp`: GamePhase enum の各メンバコメントに記載されていた
+  GameMode 値が実際の `GameMonitor.cpp` の switch 文と不一致だったため修正。
+  - `MainMenu`: 旧「2, 4, 6, 8, 9, 10, 16, 18, 19, 25, 26」→ 新「2=TITLE, 65535=STARTUP」
+  - `Loading`: 旧「21」→ 新「8=LOADING, 13=LOADING_DEMO」
+  - `InGame`: 旧「22」→ 新「1=IN_GAME, 26=REPLAY」
+  - `Rematch`: 旧「23」→ 新「5=RETRY」
+
+---
+
 # feat: ネットワーク遅延・パケットロスシミュレーション機能
 
 ## 2026-03-07: 送受信パケットにランダム遅延+ランダムロスを挿入するテスト機能

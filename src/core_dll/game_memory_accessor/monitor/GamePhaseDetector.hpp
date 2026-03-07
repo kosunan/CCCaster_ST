@@ -33,11 +33,11 @@ namespace cccaster::game_interface {
      */
     enum class GamePhase {
         Unknown,      ///< 不明な状態（初期化前、遷移中など）
-        MainMenu,     ///< メインメニュー（GameMode: 2, 4, 6, 8, 9, 10, 16, 18, 19, 25, 26）
-        CharaSelect,  ///< キャラクター選択画面（GameMode: 20）
-        Loading,      ///< ロード中（GameMode: 21）
-        InGame,       ///< 対戦中（GameMode: 22）
-        Rematch       ///< リマッチ画面（GameMode: 23）
+        MainMenu,     ///< メインメニュー（GameMode: 2=TITLE, 65535=STARTUP）
+        CharaSelect,  ///< キャラクター選択画面（GameMode: 20=CHARA_SELECT）
+        Loading,      ///< ロード中（GameMode: 8=LOADING, 13=LOADING_DEMO）
+        InGame,       ///< 対戦中（GameMode: 1=IN_GAME, 26=REPLAY）
+        Rematch       ///< リマッチ画面（GameMode: 5=RETRY）
     };
 
     /**
