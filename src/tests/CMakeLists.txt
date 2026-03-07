@@ -8,8 +8,8 @@ add_executable(test_overlay
     test_overlay.cpp
     stub_controller_mapper.cpp
     stub_hooklog.cpp
-    ${CMAKE_SOURCE_DIR}/src/core_dll/feature_overlay_ui/overlay/OverlayRenderer.cpp
-    ${CMAKE_SOURCE_DIR}/src/core_dll/feature_overlay_ui/NetplayOverlay.cpp
+    ${CMAKE_SOURCE_DIR}/src/core_dll/fg_netplay/overlay/OverlayRenderer.cpp
+    ${CMAKE_SOURCE_DIR}/src/core_dll/fg_netplay/overlay/NetplayOverlay.cpp
 )
 
 target_include_directories(test_overlay PRIVATE ${CMAKE_SOURCE_DIR}/src)

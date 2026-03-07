@@ -18,8 +18,8 @@
 // テストヘルパー（friend 経由で private static にアクセス）
 class NetplayOverlayTestHelper;
 
-#include "core_dll/feature_overlay_ui/overlay/OverlayRenderer.hpp"
-#include "core_dll/feature_overlay_ui/NetplayOverlay.hpp"
+#include "core_dll/fg_netplay/overlay/OverlayRenderer.hpp"
+#include "core_dll/fg_netplay/overlay/NetplayOverlay.hpp"
 
 using cccaster::overlay::OverlayRenderer;
 using cccaster::domain::ui::NetplayOverlay;

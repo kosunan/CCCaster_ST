@@ -1,7 +1,7 @@
 #include "cli_launcher/network_wrapper/SessionNegotiator.hpp"
 #include "cli_launcher/network_wrapper/ConnectionHash.hpp"
 #include "cli_launcher/ui/ConsoleRenderer.hpp"
-#include "core_dll/adapter_network/UdpSocket.hpp"
+#include "core_dll/platform/network/UdpSocket.hpp"
 #include <iostream>
 #include <string>
 #include <vector>

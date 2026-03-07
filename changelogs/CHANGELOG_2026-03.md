@@ -1,3 +1,56 @@
+# refactor: core_dll 4層アーキテクチャ再構成 — platform/fg_netplay/mbaa_sync/mbaa_game
+
+## 2026-03-08: ディレクトリ構造を4層に再編成
+
+### 概要
+core_dll の全ファイルを4つのアーキテクチャ層に再配置。ロジック変更なし、
+ディレクトリ移動 + include パス更新 + CMakeLists 更新のみ。
+
+### 4層構造
+| 層 | 概念 | 何を知っているか |
+|---|---|---|
+| `platform/` | 低レイヤー基盤 | OS, D3D9, UDP, WASAPI |
+| `fg_netplay/` | 格闘ゲームネット対戦エンジン | フレーム同期, ロールバック, NTP |
+| `mbaa_sync/` | MBAA同期処理（接合層） | fg_netplay + mbaa_game の橋渡し |
+| `mbaa_game/` | MBAAゲーム固有 | MBAAメモリレイアウト, GameMode |
+
+### 主な変更
+- [MOVE] 旧8ディレクトリ → 新4ディレクトリに全ファイル再配置 (git mv)
+- [NEW] `fg_netplay/types/GamePhase.hpp`: GamePhase enum 定義を GamePhaseDetector.hpp から分離
+- [MODIFY] `mbaa_game/monitor/GamePhaseDetector.hpp`: inline enum → include に変更
+- [MODIFY] 全 .hpp/.cpp の #include パスを新構造に更新 (157箇所)
+- [MODIFY] `core_dll/CMakeLists.txt`: 全 .cpp パスを新構造に更新
+- [MODIFY] `cli_launcher/CMakeLists.txt`: UdpSocket/NetworkSimulator パス更新
+- [MODIFY] `tests/CMakeLists.txt`: OverlayRenderer/NetplayOverlay パス更新
+- [MODIFY] `cli_launcher/*.cpp`: 3ファイルの include パス更新
+- [MODIFY] `tests/*.cpp`: 2ファイルの include パス更新
+
+### 旧→新ディレクトリ対応
+| 旧 | 新 |
+|---|---|
+| `adapter_network/` | `platform/network/` |
+| `adapter_os_hooks/api_hook/` | `platform/hooks/` |
+| `adapter_os_hooks/input/DirectInputHook` | `platform/hooks/` |
+| `adapter_os_hooks/input/InputHook` | `mbaa_sync/input/` |
+| `adapter_netplay/timer/WasapiClock` | `platform/clock/` |
+| `adapter_netplay/timer/NetplayClock` | `fg_netplay/sync/` |
+| `adapter_netplay/` (Sync*, Metronome, NetplayManager) | `fg_netplay/sync/` |
+| `adapter_netplay/` (SyncCalculator, PacketRouter) | `mbaa_sync/protocol/` |
+| `pure_sync_engine/` (CentralBuffer, Inputs, NetplayState) | `fg_netplay/buffer/` |
+| `pure_sync_engine/RollbackEngine` | `mbaa_sync/rollback/` |
+| `session_orchestrator/session/` | `mbaa_sync/orchestrator/` |
+| `session_orchestrator/scene/` | `mbaa_sync/scene/` |
+| `game_memory_accessor/patcher/MemoryPatcher` | `platform/memory/` |
+| `game_memory_accessor/dump/MemDumper` | `platform/memory/` |
+| `game_memory_accessor/` (残り全部) | `mbaa_game/` |
+| `feature_overlay_ui/` (NetplayOverlay, State_Ui_*, InGame_Ui_*, Rematch_Ui_*, OverlayRenderer) | `fg_netplay/overlay/` |
+| `feature_overlay_ui/UIManager` | `mbaa_sync/overlay/` |
+| `feature_overlay_ui/` (CharaSelect_Ui_*, Controller_Ui_*, ControllerMapper) | `mbaa_game/ui/` |
+| `common/` | `platform/common/` |
+| `dllmain.cpp` | `mbaa_sync/dllmain.cpp` |
+
+---
+
 # feat: IntroBarrier — peer 双方の intro=2 到達を確認後にラウンド開始
 
 ## 2026-03-08: IntroBarrier 同期ロジック追加

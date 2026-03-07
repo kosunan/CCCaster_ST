@@ -4,7 +4,7 @@
 // テスト時に ControllerMapper の依存 (DirectInputHook, ConfigManager) を
 // 排除するためのスタブ。リンクエラーを解消するために最小限の定義のみ提供。
 // ============================================================================
-#include "core_dll/feature_overlay_ui/ControllerMapper.hpp"
+#include "core_dll/mbaa_game/ui/ControllerMapper.hpp"
 
 namespace cccaster::domain::ui {
 

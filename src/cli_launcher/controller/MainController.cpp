@@ -4,7 +4,7 @@
 #include "cli_launcher/ConfigManager.hpp"
 #include "launcher/GameLauncher.hpp"
 #include "shared_contracts/IpcData.hpp"
-#include "core_dll/adapter_network/UdpSocket.hpp"
+#include "core_dll/platform/network/UdpSocket.hpp"
 
 #include <iostream>
 #include <conio.h>

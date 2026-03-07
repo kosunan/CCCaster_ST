@@ -6,47 +6,50 @@
 # so we only declare our local module here.
 
 add_library(cccaster_hook SHARED
-    dllmain.cpp
-    # === adapter_os_hooks (OS/DirectX非依存インフラ) ===
-    adapter_os_hooks/api_hook/DxHook.cpp
-    adapter_os_hooks/api_hook/TimeHooks.cpp
-    adapter_os_hooks/input/InputHook.cpp
-    adapter_os_hooks/input/DirectInputHook.cpp
-    adapter_netplay/timer/WasapiClock.cpp
-    adapter_netplay/timer/NetplayClock.cpp
-    adapter_netplay/SyncCoordinator.cpp
-    adapter_netplay/Metronome.cpp
-    adapter_netplay/SyncCalculator.cpp
-    # === adapter_network (通信インフラ) ===
-    adapter_network/UdpSocket.cpp
-    adapter_network/NetworkSimulator.cpp
-    # === feature_overlay_ui (旧 infra/overlay + domain_UI) ===
-    feature_overlay_ui/overlay/OverlayRenderer.cpp
-    feature_overlay_ui/UIManager.cpp
-    feature_overlay_ui/State_Ui_Logic.cpp
-    feature_overlay_ui/State_Ui_View.cpp
-    feature_overlay_ui/CharaSelect_Ui_View.cpp
-    feature_overlay_ui/InGame_Ui_View.cpp
-    feature_overlay_ui/Rematch_Ui_View.cpp
-    feature_overlay_ui/Controller_Ui_View.cpp
-    feature_overlay_ui/Controller_Ui_Logic.cpp
-    feature_overlay_ui/ControllerMapper.cpp
-    feature_overlay_ui/NetplayOverlay.cpp
-    # === pure_sync_engine (同期/ロールバック計算) ===
-    pure_sync_engine/RollbackEngine.cpp
-    # === adapter_netplay (接続・パケットルーティング) ===
-    adapter_netplay/NetplayManager.cpp
-    adapter_netplay/PacketRouter.cpp
-    # === game_memory_accessor (MBAAメモリへの直接介入) ===
-    game_memory_accessor/monitor/GameMonitor.cpp
-    game_memory_accessor/state/StateBuffer.cpp
-    game_memory_accessor/patcher/MbaaPatcher.cpp
-    session_orchestrator/scene/SceneFastBoot.cpp
-    session_orchestrator/scene/SceneInputFilter.cpp
-    session_orchestrator/scene/SceneBusiness.cpp
-    # === session_orchestrator (業務とシーンの統括) ===
-    session_orchestrator/session/SceneRunner.cpp
-    session_orchestrator/session/GameFrameOrchestrator.cpp
+    # === mbaa_sync (MBAA同期処理 — DLLエントリ) ===
+    mbaa_sync/dllmain.cpp
+
+    # === platform (低レイヤー基盤) ===
+    platform/hooks/DxHook.cpp
+    platform/hooks/TimeHooks.cpp
+    platform/hooks/DirectInputHook.cpp
+    platform/clock/WasapiClock.cpp
+    platform/network/UdpSocket.cpp
+    platform/network/NetworkSimulator.cpp
+
+    # === fg_netplay (格闘ゲームネット対戦エンジン) ===
+    fg_netplay/sync/SyncCoordinator.cpp
+    fg_netplay/sync/Metronome.cpp
+    fg_netplay/sync/NetplayClock.cpp
+    fg_netplay/sync/NetplayManager.cpp
+    fg_netplay/overlay/OverlayRenderer.cpp
+    fg_netplay/overlay/State_Ui_Logic.cpp
+    fg_netplay/overlay/State_Ui_View.cpp
+    fg_netplay/overlay/InGame_Ui_View.cpp
+    fg_netplay/overlay/Rematch_Ui_View.cpp
+    fg_netplay/overlay/NetplayOverlay.cpp
+
+    # === mbaa_sync (MBAA同期処理) ===
+    mbaa_sync/protocol/SyncCalculator.cpp
+    mbaa_sync/protocol/PacketRouter.cpp
+    mbaa_sync/orchestrator/SceneRunner.cpp
+    mbaa_sync/orchestrator/GameFrameOrchestrator.cpp
+    mbaa_sync/scene/SceneFastBoot.cpp
+    mbaa_sync/scene/SceneInputFilter.cpp
+    mbaa_sync/scene/SceneBusiness.cpp
+    mbaa_sync/rollback/RollbackEngine.cpp
+    mbaa_sync/input/InputHook.cpp
+    mbaa_sync/overlay/UIManager.cpp
+
+    # === mbaa_game (MBAAゲーム固有) ===
+    mbaa_game/monitor/GameMonitor.cpp
+    mbaa_game/state/StateBuffer.cpp
+    mbaa_game/patcher/MbaaPatcher.cpp
+    mbaa_game/ui/CharaSelect_Ui_View.cpp
+    mbaa_game/ui/Controller_Ui_View.cpp
+    mbaa_game/ui/Controller_Ui_Logic.cpp
+    mbaa_game/ui/ControllerMapper.cpp
+
     # === 外部参照 ===
     ../cli_launcher/ConfigManager.cpp
 )
