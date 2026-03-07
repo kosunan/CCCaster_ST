@@ -12,7 +12,6 @@
 #include "core_dll/adapter_netplay/NetplayManager.hpp"
 #include "core_dll/pure_sync_engine/CentralBuffer.hpp"
 #include "core_dll/common/DebugLog.hpp"
-#include "core_dll/adapter_os_hooks/input/DirectInputHook.hpp"
 #include "core_dll/feature_overlay_ui/State_Ui_Logic.hpp"
 #include <windows.h>
 
@@ -40,7 +39,8 @@ void SyncCoordinator::Start(bool isHost,
     _targetPort   = targetPort;
     _localPort    = localPort;
     _startSent    = false;
-    _lastLocalInput = 0;
+    _lastSentFrame = 0;
+    _lastLogFrame  = 0;
     _peerActualPort = 0;
 
     // SharedSyncState リセット
@@ -52,7 +52,7 @@ void SyncCoordinator::Start(bool isHost,
     _state.lastRttUs.store(0);
 
     // CentralBuffer 初期化
-    cccaster::core::sync::CentralBuffer::GetInstance().Initialize(200, delayFrames, maxRollback);
+    cccaster::core::sync::CentralBuffer::GetInstance().Initialize(200, delayFrames, maxRollback, isHost);
 
     // オーバーレイ初期表示
     cccaster::domain::ui::StateUiLogic::SetDelay(delayFrames);
@@ -229,56 +229,32 @@ void SyncCoordinator::ThreadMain() {
         }
 
         // ================================================================
-        // Mode::Counting — 通信 + CentralBuffer書込み
+        // Mode::Counting — CB writeHead 監視 → パケット送信（送信専念）
         // ================================================================
         case SyncMode::Counting: {
-            // メトロノームから蓄積されたティック信号を消費
-            uint32_t ticks = _metronome.ConsumeTicks();
+            // 疎通カウンタ + α補正
+            _calc.IncrementFrameCount();
+            _state.isPeerAlive.store(_calc.IsPeerAlive(), std::memory_order_release);
+            _state.currentTickUs.store(_metronome.GetCurrentIntervalUs(), std::memory_order_release);
+            _calc.UpdateAlphaCorrections();
 
-            for (uint32_t t = 0; t < ticks; t++) {
-                // 疎通カウンタ
-                _calc.IncrementFrameCount();
-                _state.isPeerAlive.store(_calc.IsPeerAlive(), std::memory_order_release);
-
-                // ティック情報更新
-                _state.currentTickUs.store(_metronome.GetCurrentIntervalUs(), std::memory_order_release);
-
-                // ローカル入力読取り
-                cccaster::game_interface::DirectInputHook::Poll();
-                uint32_t localInput = _isHost
-                    ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
-                    : cccaster::game_interface::DirectInputHook::GetPlayer2Input();
-                _lastLocalInput = localInput;
-
-                // フレーム進行 + CentralBuffer 書込み（SyncCalculator が管理）
-                uint32_t frame = _calc.AdvanceFrame(localInput);
-
-                // α補正更新
-                _calc.UpdateAlphaCorrections();
-
-                // フレーム進捗ログ（60Fごと）
-                if (frame % 60 == 0) {
-                    cccaster::domain::session::DebugLog(
-                        "[SyncCoordinator] F=%u tick=%lldus α1=%lld α2=%lld RTT=%lldus peerF=%u",
-                        frame, _metronome.GetCurrentIntervalUs(),
-                        _metronome.GetAlpha1(), _metronome.GetAlpha2(),
-                        _calc.GetRttUs(), _calc.GetLatestPeerFrame());
-                }
-
-                // キャッチアップバースト
-                if (_calc.GetLatestPeerFrame() > frame + 1) {
-                    uint32_t startF = frame;
-                    while (_calc.GetCurrentFrame() < _calc.GetLatestPeerFrame()) {
-                        _calc.AdvanceFrame(localInput);
-                    }
-                    cccaster::domain::session::DebugLog(
-                        "[SyncCoordinator] Catch-up burst: F=%u -> F=%u",
-                        startF, _calc.GetCurrentFrame());
-                }
+            // CB writeHead 監視 → 新フレームがあれば送信
+            uint32_t newHead = cccaster::core::sync::CentralBuffer::GetInstance().GetWriteHead();
+            if (newHead > _lastSentFrame) {
+                const auto& slot = cccaster::core::sync::CentralBuffer::GetInstance().GetSlot(newHead);
+                SendPacket(_calc.BuildGameTickPacket(newHead, slot.localInput));
+                _lastSentFrame = newHead;
             }
 
-            // 3連パケット送信（subTick 毎）
-            SendPacket(_calc.BuildGameTickPacket(_calc.GetCurrentFrame(), _lastLocalInput));
+            // 60Fごとの進捗ログ
+            if (newHead % 60 == 0 && newHead != _lastLogFrame) {
+                cccaster::domain::session::DebugLog(
+                    "[SyncCoordinator] wh=%u tick=%lldus α1=%lld α2=%lld RTT=%lldus peerF=%u",
+                    newHead, _metronome.GetCurrentIntervalUs(),
+                    _metronome.GetAlpha1(), _metronome.GetAlpha2(),
+                    _calc.GetRttUs(), _calc.GetLatestPeerFrame());
+                _lastLogFrame = newHead;
+            }
 
             subTickIdx = (subTickIdx + 1) % SUB_TICKS_PER_FRAME;
             break;

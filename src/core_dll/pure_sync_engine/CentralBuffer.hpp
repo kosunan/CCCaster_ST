@@ -4,7 +4,7 @@
 //
 // 【責務】
 //   自入力・相手入力をフレームごとにセットで管理する巨大リングバッファ。
-//   通信スレッド(SyncCoordinator)が書込み、ゲームスレッド(SceneRunner)が読取り。
+//   DLLスレッドが CommitFrame() で入力蓄積、ゲームスレッドが読取り。
 //
 // 【スレッド安全性】
 //   - WriteSlot / ConfirmRemote / SetWriteHead: 通信スレッドのみ（単一writer）
@@ -12,8 +12,9 @@
 //   - ConsumeMismatch: ゲームスレッドのみ
 //
 // 【データフロー】
-//   通信スレッド → WriteSlot() → writeHead 更新
+//   DLLスレッド  → CommitFrame() → writeHead 更新
 //   DLLスレッド  ← GetReadPos() → GetSlot(readPos) → WriteInput
+//   ioスレッド   → ConfirmRemote() (受信コールバック)
 //
 // 【readPos 算出方式】
 //   readPos = writeHead - delay - maxRollback
@@ -27,6 +28,10 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+
+// CommitFrame() 内部で使用する依存ヘッダ（前方宣言では不十分）
+#include "core_dll/game_memory_accessor/monitor/GamePhaseDetector.hpp"
+#include "core_dll/adapter_os_hooks/input/DirectInputHook.hpp"
 
 namespace cccaster {
 namespace core {
@@ -53,12 +58,41 @@ public:
     }
 
     // ════════════════════════════════════════════════════
-    // 通信スレッドから呼ばれる (Write系)
-    // @thread_safety 通信スレッド専用（単一writer）
+    // DLLスレッドから呼ばれる (Write系)
+    // @thread_safety DLLスレッド専用（単一writer）
     // ════════════════════════════════════════════════════
 
-    /// @brief フレーム書込み＋writeHead更新を一括で行う統合API（推奨）
-    /// @thread_safety 通信スレッド専用
+    /// @brief 引数なし CommitFrame — 内部で全情報を収集してスロット書込み
+    /// @details (1) Phase取得 (2) 入力Poll (3) rollbackable判定 (4) スロット書込み + writeHead更新
+    /// @thread_safety DLLスレッド専用
+    void CommitFrame() {
+        uint32_t frame = _writeHead.load(std::memory_order_relaxed) + 1;
+
+        // (1) 現在の画面フェーズ
+        uint8_t phase = static_cast<uint8_t>(
+            cccaster::game_interface::GameMonitor::GetCurrentPhase());
+
+        // (2) ローカル入力読取
+        cccaster::game_interface::DirectInputHook::Poll();
+        uint32_t localInput = _isHost
+            ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
+            : cccaster::game_interface::DirectInputHook::GetPlayer2Input();
+
+        // (3) rollbackable判定 (InGame = phase 4 のみ)
+        bool rb = (phase == 4);
+
+        // (4) スロット書込み + writeHead 更新
+        auto& slot = _ring[frame % RING_SIZE];
+        slot.frame        = frame;
+        slot.gamePhase    = phase;
+        slot.rollbackable = rb;
+        slot.localInput   = localInput;
+        slot.remoteInput  = 0;      // 未確定
+        slot.confirmed    = false;
+        _writeHead.store(frame, std::memory_order_release);
+    }
+
+    /// @brief 旧API: 引数付き CommitFrame (段階的移行用)
     void CommitFrame(uint32_t frame, uint8_t gamePhase, bool rollbackable,
                      uint32_t localInput, uint32_t remoteInput, bool confirmed) {
         WriteSlot(frame, gamePhase, rollbackable, localInput, remoteInput, confirmed);
@@ -120,8 +154,9 @@ public:
 
     /// @brief 全状態リセット＋初期フレーム＋同期パラメータを一括設定（推奨）
     /// @thread_safety Start前のシングルスレッド状態で呼ぶこと
-    void Initialize(uint32_t startFrame, int16_t delay, int16_t maxRollback) {
+    void Initialize(uint32_t startFrame, int16_t delay, int16_t maxRollback, bool isHost = false) {
         Reset();
+        _isHost = isHost;
         SetWriteHead(startFrame);
         InitializeConfirmedRemoteFrame(startFrame);
         SetSyncParams(delay, maxRollback);
@@ -245,6 +280,9 @@ private:
     // 同期パラメータ（SyncCoordinator::Start で設定、以後不変）
     int16_t _delay       = 0;
     int16_t _maxRollback = 0;
+
+    // ロール識別（CommitFrame で P1/P2 どちらの入力を読むか）
+    bool _isHost = false;
 };
 
 } // namespace sync

@@ -53,6 +53,10 @@ struct SharedSyncState {
     std::atomic<int64_t>  clockOffsetUs{0};
     std::atomic<int64_t>  lastRttUs{0};
 
+    // ─── IntroBarrier（ゲーム↔通信スレッド間）───────────────
+    std::atomic<bool>     localIntroComplete{false};  // ゲームスレッドが設定
+    std::atomic<bool>     peerIntroComplete{false};    // 通信スレッドが設定（受信時）
+
     // ─── リモート入力リングバッファ ──────────────────────
     static constexpr int RING_SIZE = 20;
     struct InputSlot {
@@ -93,6 +97,9 @@ public:
                int delayFrames, int maxRollback);
     void Stop();
     bool IsRunning() const { return _running.load(); }
+
+    /// @brief メトロノームへのアクセサ（DLLスレッドから ConsumeTicks 用）
+    Metronome& GetMetronome() { return _metronome; }
 
     // ─── 時計データ読取り（オーバーレイ用、SyncCalculator 委譲）──
     int64_t GetRttUs() const        { return _calc.GetRttUs(); }
@@ -152,8 +159,9 @@ private:
     std::vector<ReceivedPacket> _recvQueue;
     std::vector<ReceivedPacket> _recvQueueSwap;
 
-    // ─── 現フレームの確定入力（3サブティックで同一内容を送信）───
-    uint32_t _lastLocalInput = 0;
+    // ─── CB writeHead 監視用 ──────────────────────────
+    uint32_t _lastSentFrame = 0;
+    uint32_t _lastLogFrame  = 0;
 
     // ─── 実ピアポート（NAT越え用）──────────────────────
     uint16_t _peerActualPort = 0;

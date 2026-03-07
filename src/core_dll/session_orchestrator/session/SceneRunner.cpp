@@ -83,6 +83,7 @@ static GamePhase s_prev = GamePhase::Unknown;
 static bool s_running = false;
 static bool s_syncReported = false;
 static bool s_ready = false;
+static uint8_t s_prevIntroState = 255;  // introState 変化追跡用
 
 // ================================================================
 // Init — 初期化（InitThread から1回だけ呼ばれる）
@@ -146,9 +147,18 @@ void SceneRunner::Step() {
         return;
     }
 
-    // (D) SceneBusiness ディスパッチ（入力読取・書込み — SleepFrame の前に実行）
-    //     設計書: Phase A (Input & Send) → Phase B (SleepFrame) → Phase C (Logic)
-    //     ReadBufferAndWrite は CentralBuffer から入力を読んでゲームメモリに書き込む
+    // (D) メトロノーム駆動: ConsumeTicks → CommitFrame (引数なし)
+    //     CommitFrame() 内で Phase取得・入力Poll・rollbackable判定を自前収集
+    {
+        auto& metronome = cccaster::core::netplay::SyncCoordinator::GetInstance().GetMetronome();
+        uint32_t ticks = metronome.ConsumeTicks();
+        auto& buf = cccaster::core::sync::CentralBuffer::GetInstance();
+        for (uint32_t t = 0; t < ticks; t++) {
+            buf.CommitFrame();
+        }
+    }
+
+    // (D2) SceneBusiness ディスパッチ（Phase固有ロジック — 入力以外の処理）
     switch (phase) {
         case GamePhase::CharaSelect:
             scene::SceneBusiness::OnCharaSelect(ctx);
@@ -166,20 +176,49 @@ void SceneRunner::Step() {
             break;
     }
 
-    // (E) SleepFrame + MaintainState（入力書込み後にフレーム待機）
-    GC::SleepFrame();
+    // (E) CB → ゲームメモリ書込み + SleepFrame
+    {
+        auto& buf = cccaster::core::sync::CentralBuffer::GetInstance();
+        uint32_t p1 = 0, p2 = 0;
+        if (buf.ReadFrameForGame(ctx.isHost, p1, p2)) {
+            GC::WriteInput(p1, p2);
+        }
+    }
+
+    // InGame バリア待機中は SleepFrame をスキップ
+    if (phase == GamePhase::InGame && !ctx.roundStartSynced) {
+        Sleep(1);
+    } else {
+        GC::SleepFrame();
+    }
     GC::MaintainState();
 
     // (F) 統合フロー確認ログ（60フレームごと）
     if (ctx.framesInPhase % 60 == 0 && phase >= GamePhase::CharaSelect) {
         auto& buf = cccaster::core::sync::CentralBuffer::GetInstance();
         auto& syncState = cccaster::core::netplay::SyncCoordinator::GetState();
-        DebugLog("[SceneRunner] phase=%d framesInPhase=%u wh=%u rp=%u ef=%u crf=%u synced=%d peerAlive=%d",
+        uint32_t wt = *CC_WORLD_TIMER_ADDR;
+        uint32_t rt = *CC_REAL_TIMER_ADDR;
+        uint8_t intro = *CC_INTRO_STATE_ADDR;
+        DebugLog("[SceneRunner] phase=%d fip=%u wh=%u rp=%u ef=%u crf=%u WT=%u RT=%u intro=%u synced=%d alive=%d",
                  static_cast<int>(phase), ctx.framesInPhase,
                  buf.GetWriteHead(), buf.GetReadPos(), buf.GetEffectiveHead(),
                  buf.GetConfirmedRemoteFrame(),
+                 wt, rt, intro,
                  syncState.isSynced.load() ? 1 : 0,
                  syncState.isPeerAlive.load() ? 1 : 0);
+    }
+
+    // (F2) introState 変化検出（InGame 中のみ）
+    if (phase == GamePhase::InGame) {
+        uint8_t curIntro = *CC_INTRO_STATE_ADDR;
+        if (curIntro != s_prevIntroState) {
+            uint32_t wt = *CC_WORLD_TIMER_ADDR;
+            uint32_t rt = *CC_REAL_TIMER_ADDR;
+            DebugLog("[IntroTrack] intro %u->%u fip=%u WT=%u RT=%u",
+                     s_prevIntroState, curIntro, ctx.framesInPhase, wt, rt);
+            s_prevIntroState = curIntro;
+        }
     }
 
     // (G) 同期状態チェック + 疎通チェック

@@ -1,3 +1,18 @@
+# refactor: スレッドモデル再設計 — DLLスレッド駆動 + 通信スレッド送信専念化
+
+## 2026-03-08
+
+### Changed — スレッドモデル (Step 1-3)
+
+| ファイル | 変更内容 |
+|----------|----------|
+| `CentralBuffer.hpp` | `CommitFrame()` 引数なし版追加（内部で Phase取得・入力Poll・rollbackable判定を自前収集）。`_isHost`メンバ追加。`Initialize(isHost)` 引数追加 |
+| `SceneRunner.cpp` | `Step()` をメトロノーム駆動に変更: `ConsumeTicks→CommitFrame→ReadFrameForGame→WriteInput` |
+| `SyncCoordinator.cpp` | Counting モードを送信専念化: CB writeHead 監視→パケット送信のみ。入力読取・AdvanceFrame・キャッチアップバースト削除 |
+| `SyncCoordinator.hpp` | `GetMetronome()` アクセサ追加。`_lastLocalInput` → `_lastSentFrame`/`_lastLogFrame` に変更 |
+
+---
+
 # refactor: CentralBuffer 管理ルール整理 + 散発修正
 
 ## 2026-03-06 (2)
