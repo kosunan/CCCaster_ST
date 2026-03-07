@@ -1,3 +1,20 @@
+# docs: GameControl.hpp の旧描画制御コメントを現行 API Hook 仕様に修正
+
+## 2026-03-08: GameControl.hpp コメント修正（旧 CC_SKIP_FRAMES/CC_PAUSE_FLAG 時代の記述を削除）
+
+### 変更内容
+- [MODIFY] `GameControl.hpp`: 速度制御関数のコメントを現行の RenderSkip/TickBypass + SleepFrame gap 方式に統一
+  - `SetModeHighSpeedSkip()`: 旧「描画スキップ=ON(1)」→ 新「RenderSkip=ON, TickBypass=ON」
+  - `SetModeRollupSkip()`: 旧「描画スキップ=frames」→ 新「RenderSkip=ON, TickBypass=ON」
+  - `SetModeNormalSpeed()`: 旧「描画スキップ=ON(1)固定」→ 新「RenderSkip=OFF（SleepFrameが動的制御）」
+  - `SetModePause()`: 旧「描画スキップ=ON(1)固定, PauseFlag=1」→ 新「RenderSkip=OFF, SleepFrameで自然待機」
+  - `MaintainState()`: 旧「CC_SKIP_FRAMES/CC_PAUSE_FLAG再設定」→ 新「空実装（SleepFrameが動的制御）」
+  - Layer 2 例: 旧「PauseForSync()」→ 新「SetModePause()」（削除済み関数名を修正）
+  - Layer 1 例: 旧「SetPauseFlag(1), SetSkipFrames(1)」→ 新「GetInputBasePtr(), WriteP1Input()」
+  - Layer 3 例: 旧「SceneInGame, SceneCharaSelect」→ 新「SceneBusiness」
+
+---
+
 # docs: GamePhase enum コメントを実装に合わせて修正
 
 ## 2026-03-08: GamePhaseDetector.hpp の GamePhase コメント修正

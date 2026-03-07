@@ -5,15 +5,15 @@
  *
  * 【3層アーキテクチャ】
  *
- *   Layer 3 (Scene)     : SceneInGame, SceneCharaSelect 等の業務ロジック
+ *   Layer 3 (Scene)     : SceneBusiness 等の業務ロジック
  *                         → GameControl の束ねた関数を呼び出して業務を遂行
  *
- *   Layer 2 (GameControl): このファイル — 複数のメモリ操作を束ねた制御関数
- *                         例: PauseForSync() = 高速化OFF + ゲーム一時停止
- *                         Scene は「何をしたいか」だけを知り、メモリの詳細は知らない
+ *   Layer 2 (GameControl): このファイル — 複数の操作を束ねた制御関数
+ *                         例: SetModePause() = RenderSkip=OFF + 自然待機
+ *                         Scene は「何をしたいか」だけを知り、制御の詳細は知らない
  *
  *   Layer 1 (Primitive)  : 個別メモリ読み書き（このファイル下部の private セクション）
- *                         例: SetPauseFlag(1), SetSkipFrames(1)
+ *                         例: GetInputBasePtr(), WriteP1Input(), WriteP2Input()
  *                         MbaaConstants.hpp で定義された生アドレスへの直接操作
  *
  * 【設計思想】
@@ -24,9 +24,9 @@
  *   - 全メソッドは static — シングルトンへの委譲で状態管理
  *
  * 【使用例】
- *   GameControl::SetModePause();       // 同期ポイントで一時停止
- *   GameControl::SetModeHighSpeedSkip(); // ロールバック巻き戻し開始
- *   GameControl::SleepFrame();        // フレーム待機（Sleep(1)）
+ *   GameControl::SetModePause();         // 同期ポイントで一時停止
+ *   GameControl::SetModeHighSpeedSkip(); // 起動時・FastBoot 用高速化
+ *   GameControl::SleepFrame();           // gap ベースのフレーム待機
  *
  * @see MbaaSpeedController  フレームスキップ制御の実装
  * @see SyncCoordinator      通信同期（θ推定・ティックマスター）
@@ -53,8 +53,8 @@ public:
     // -------------------- 速度・進行状態制御 --------------------
 
     /**
-     * @brief 高速スキップ_通常 (起動時, キャラセレ初期用)
-     * @details 描画スキップ=ON(1), Sleep=0ms
+     * @brief 高速スキップ_通常 (起動時, FastBoot用)
+     * @details RenderSkip=ON, TickBypass=ON
      */
     static void SetModeHighSpeedSkip() {
         Speed().SetMode(cccaster::core::SpeedMode::HighSpeedSkip_Normal);
@@ -63,7 +63,7 @@ public:
     /**
      * @brief 高速スキップ_ロールアップ
      * @param frames ロールバックするフレーム数
-     * @details 描画スキップ=frames, Sleep=0ms
+     * @details RenderSkip=ON, TickBypass=ON
      */
     static void SetModeRollupSkip(uint32_t frames) {
         Speed().SetMode(cccaster::core::SpeedMode::HighSpeedSkip_Rollup, frames);
@@ -71,7 +71,7 @@ public:
 
     /**
      * @brief 通常速度
-     * @details 描画スキップ=ON(1)固定, SyncCoordinatorがティック管理
+     * @details RenderSkip=OFF（SleepFrame が gap に応じて動的に ON/OFF 制御）
      */
     static void SetModeNormalSpeed() {
         Speed().SetMode(cccaster::core::SpeedMode::NormalSpeed);
@@ -79,15 +79,15 @@ public:
 
     /**
      * @brief 一時停止
-     * @details 描画スキップ=ON(1)固定, ゲーム進行停止(PauseFlag=1)
+     * @details RenderSkip=OFF, currentFrame が進まないので SleepFrame で自然待機
      */
     static void SetModePause() {
         Speed().SetMode(cccaster::core::SpeedMode::Pause);
     }
 
     /**
-     * @brief 毎フレーム状態を維持する
-     * @details 各モードに応じて CC_SKIP_FRAMES や CC_PAUSE_FLAG を再設定
+     * @brief 毎フレーム状態を維持する（現在は空実装）
+     * @details 描画制御は SleepFrame が gap に基づいて RenderSkip を動的制御するため不要
      */
     static void MaintainState() {
         Speed().MaintainState();
