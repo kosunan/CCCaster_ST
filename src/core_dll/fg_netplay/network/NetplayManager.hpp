@@ -29,7 +29,7 @@
 #include <memory>
 #include <functional>
 #include <vector>
-#include "core_dll/fg_netplay/common/UdpSocket.hpp"
+#include "core_dll/fg_netplay/network/UdpSocket.hpp"
 
 namespace cccaster::netplay {
 

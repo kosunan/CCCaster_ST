@@ -15,7 +15,7 @@
 #include <windows.h>
 #include <cstdio>
 #include <string>
-#include "core_dll/fg_netplay/sync/NetplayManager.hpp"
+#include "core_dll/fg_netplay/network/NetplayManager.hpp"
 #include "core_dll/mbaa_sync/common/TimeHooks.hpp"
 #include "core_dll/mbaa_game/memory/MbaaPatcher.hpp"
 #include "core_dll/mbaa_sync/common/DxHook.hpp"

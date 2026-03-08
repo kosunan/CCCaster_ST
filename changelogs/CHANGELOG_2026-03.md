@@ -1,3 +1,14 @@
+# refactor: 通信処理を fg_netplay/network/ に統合
+
+## 2026-03-09: ネットワーク関連ファイルを専用フォルダに移動
+
+### 変更内容
+- [NEW] `fg_netplay/network/` ディレクトリ新設
+- [MOVE] UdpSocket, NetworkSimulator (`fg_netplay/common/` → `fg_netplay/network/`)
+- [MOVE] NetplayManager (`fg_netplay/sync/` → `fg_netplay/network/`)
+
+---
+
 # refactor: GamePhase を mbaa_game へ移動 + メモリアクセス処理を memory/ に統合
 
 ## 2026-03-09: mbaa_game 内構造再編

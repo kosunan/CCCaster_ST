@@ -4,7 +4,7 @@
 // 旧 GameHooks.cpp から UDP ソケット管理部分のみを抽出・移設。
 // ============================================================================
 
-#include "core_dll/fg_netplay/sync/NetplayManager.hpp"
+#include "core_dll/fg_netplay/network/NetplayManager.hpp"
 #include "core_dll/mbaa_sync/protocol/PacketRouter.hpp"
 #include "core_dll/common/DebugLog.hpp"
 

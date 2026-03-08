@@ -14,16 +14,18 @@ add_library(cccaster_hook SHARED
     mbaa_sync/common/TimeHooks.cpp
     mbaa_sync/common/DirectInputHook.cpp
 
-    # === fg_netplay/common (通信・クロック基盤) ===
-    fg_netplay/common/UdpSocket.cpp
-    fg_netplay/common/NetworkSimulator.cpp
+    # === fg_netplay/network (通信基盤) ===
+    fg_netplay/network/UdpSocket.cpp
+    fg_netplay/network/NetworkSimulator.cpp
+    fg_netplay/network/NetplayManager.cpp
+
+    # === fg_netplay/common (クロック基盤) ===
     fg_netplay/common/WasapiClock.cpp
 
     # === fg_netplay (格闘ゲームネット対戦エンジン) ===
     fg_netplay/sync/SyncCoordinator.cpp
     fg_netplay/sync/Metronome.cpp
     fg_netplay/sync/NetplayClock.cpp
-    fg_netplay/sync/NetplayManager.cpp
 
     # === ui (オーバーレイUI統合) ===
     ui/OverlayRenderer.cpp
