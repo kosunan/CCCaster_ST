@@ -31,7 +31,7 @@
 
 // CommitFrame() 内部で使用する依存ヘッダ（前方宣言では不十分）
 #include "core_dll/mbaa_game/monitor/GamePhaseDetector.hpp"
-#include "core_dll/mbaa_sync/common/DirectInputHook.hpp"
+#include "core_dll/mbaa_sync/hooks/DirectInputHook.hpp"
 
 namespace cccaster {
 namespace core {
@@ -67,7 +67,7 @@ public:
     /// @thread_safety DLLスレッド専用
     void CommitFrame() {
         // (1) 現在の画面フェーズ
-        auto phase = cccaster::game_interface::GameMonitor::GetCurrentPhase();
+        auto phase = cccaster::game_interface::PhaseMonitor::GetCurrentPhase();
         uint8_t phaseU8 = static_cast<uint8_t>(phase);
 
         // ゲームが入力を受け付けるフェーズのみCBに書込み

@@ -8,7 +8,7 @@
 // ============================================================================
 
 #include "core_dll/mbaa_sync/scene/SceneFastBoot.hpp"
-#include "core_dll/mbaa_sync/orchestrator/GameControl.hpp"
+#include "core_dll/mbaa_sync/orchestrator/FrameControl.hpp"
 #include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
 #include "core_dll/common/DebugLog.hpp"
 
@@ -16,7 +16,7 @@
 
 namespace cccaster::domain::scene {
 
-using GC = session::GameControl;
+using GC = session::FrameControl;
 using session::DebugLog;
 
 // ================================================================

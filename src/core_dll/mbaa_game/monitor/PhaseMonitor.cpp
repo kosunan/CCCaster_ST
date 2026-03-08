@@ -22,7 +22,7 @@ namespace cccaster::game_interface {
     // ================================================================
     // 直接ポインタキャストで読み取る。
     // DLLインジェクション環境では同一アドレス空間なので安全。
-    uint32_t GameMonitor::GetRawGameMode() {
+    uint32_t PhaseMonitor::GetRawGameMode() {
         return *CC_GAME_MODE_ADDR;
     }
 
@@ -32,7 +32,7 @@ namespace cccaster::game_interface {
     // 30以上ある生モードIDを6つのフェーズに集約する。
     // switch-case で直書き。パフォーマンスクリティカルではない
     // （毎フレーム1回、ns単位の処理時間）。
-    GamePhase GameMonitor::GetCurrentPhase() {
+    GamePhase PhaseMonitor::GetCurrentPhase() {
         uint32_t rawMode = GetRawGameMode();
         
         switch (rawMode) {
@@ -64,23 +64,23 @@ namespace cccaster::game_interface {
     // ================================================================
     // GetCurrentPhase() の薄いラッパー。可読性のために個別関数として提供。
 
-    bool GameMonitor::IsInMainMenu() {
+    bool PhaseMonitor::IsInMainMenu() {
         return GetCurrentPhase() == GamePhase::MainMenu;
     }
 
-    bool GameMonitor::IsInCharaSelect() {
+    bool PhaseMonitor::IsInCharaSelect() {
         return GetCurrentPhase() == GamePhase::CharaSelect;
     }
 
-    bool GameMonitor::IsLoading() {
+    bool PhaseMonitor::IsLoading() {
         return GetCurrentPhase() == GamePhase::Loading;
     }
 
-    bool GameMonitor::IsInGame() {
+    bool PhaseMonitor::IsInGame() {
         return GetCurrentPhase() == GamePhase::InGame;
     }
 
-    bool GameMonitor::IsInRematch() {
+    bool PhaseMonitor::IsInRematch() {
         return GetCurrentPhase() == GamePhase::Rematch;
     }
 
@@ -90,7 +90,7 @@ namespace cccaster::game_interface {
     // @return 0: 対戦進行中（ロールバック有効）
     //         1: 準備中（キャラ出現前）
     //         2: イントロ演出中（カメラワーク + キャラ名表示）
-    uint8_t GameMonitor::GetIntroState() {
+    uint8_t PhaseMonitor::GetIntroState() {
         return *CC_INTRO_STATE_ADDR;
     }
 
@@ -101,7 +101,7 @@ namespace cccaster::game_interface {
     // 用途: ロールバック方式の切り替え
     //   - IsRoundActive() == true  → ロールバック有効
     //   - IsRoundActive() == false → ディレイのみ（ロールバック無効）
-    bool GameMonitor::IsRoundActive() {
+    bool PhaseMonitor::IsRoundActive() {
         return IsInGame() && (GetIntroState() == 0);
     }
 

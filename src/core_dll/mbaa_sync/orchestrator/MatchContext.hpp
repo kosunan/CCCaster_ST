@@ -1,6 +1,6 @@
 #pragma once
 // ============================================================================
-// SessionContext — 画面間で持ち回す業務変数（POD構造体）
+// MatchContext — 画面間で持ち回す業務変数（POD構造体）
 // 
 // ★ dllmain.cpp の InitThread で IPC から構築され、
 //   SceneRunner::Run() に渡されて全Sceneで共有される
@@ -13,7 +13,7 @@
 
 namespace cccaster::domain::session {
 
-struct SessionContext {
+struct MatchContext {
     // ---- 起動時確定（不変）----
     uint8_t  appMode      = 0;    // 0=Versus, 1=Training, 2=Spectator (IpcGameModeと一致)
     bool     isHost       = false;

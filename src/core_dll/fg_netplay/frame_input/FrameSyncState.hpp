@@ -7,7 +7,7 @@ namespace cccaster {
 namespace sync {
 
     // Netplayの状態遷移を管理する列挙型
-    enum class NetplayState : uint8_t {
+    enum class FrameSyncState : uint8_t {
         Initial = 0,         // The game starting phase (FastBoot skipping)
         CharaSelect = 1,     // Character select (Synchronized)
         Loading = 2,         // Loading screen (after character select)

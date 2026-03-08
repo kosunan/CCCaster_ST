@@ -10,9 +10,9 @@ add_library(cccaster_hook SHARED
     mbaa_sync/dllmain.cpp
 
     # === mbaa_sync/common (OSフック基盤) ===
-    mbaa_sync/common/DxHook.cpp
-    mbaa_sync/common/TimeHooks.cpp
-    mbaa_sync/common/DirectInputHook.cpp
+    mbaa_sync/hooks/DxHook.cpp
+    mbaa_sync/hooks/TimeHooks.cpp
+    mbaa_sync/hooks/DirectInputHook.cpp
 
     # === fg_netplay/network (通信基盤) ===
     fg_netplay/network/UdpSocket.cpp
@@ -20,7 +20,7 @@ add_library(cccaster_hook SHARED
     fg_netplay/network/NetplayManager.cpp
 
     # === fg_netplay/common (クロック基盤) ===
-    fg_netplay/common/WasapiClock.cpp
+    fg_netplay/frame_sync/WasapiClock.cpp
 
     # === fg_netplay (格闘ゲームネット対戦エンジン) ===
     fg_netplay/frame_sync/NetplaySession.cpp
@@ -47,12 +47,12 @@ add_library(cccaster_hook SHARED
     mbaa_sync/orchestrator/GameFrameOrchestrator.cpp
     mbaa_sync/scene/SceneFastBoot.cpp
     mbaa_sync/scene/SceneInputFilter.cpp
-    mbaa_sync/scene/SceneBusiness.cpp
+    mbaa_sync/scene/MatchScene.cpp
     mbaa_sync/rollback/RollbackEngine.cpp
     mbaa_sync/input/InputHook.cpp
 
     # === mbaa_game (MBAAゲーム固有) ===
-    mbaa_game/monitor/GameMonitor.cpp
+    mbaa_game/monitor/PhaseMonitor.cpp
     mbaa_game/memory/StateBuffer.cpp
     mbaa_game/memory/MbaaPatcher.cpp
 

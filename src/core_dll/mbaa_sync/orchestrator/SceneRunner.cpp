@@ -10,7 +10,7 @@
 //   (A) Phase検出
 //   (B) 画面遷移検出 → OnPhaseChanged
 //   (C) FastBoot処理
-//   (D) SceneBusiness ディスパッチ（Phase別）
+//   (D) MatchScene ディスパッチ（Phase別）
 //   (E) SleepFrame + MaintainState
 //   (F) 同期状態チェック + 疎通チェック
 //   (G) 中断チェック (F12)
@@ -18,22 +18,22 @@
 
 #include <windows.h>
 #include "core_dll/mbaa_sync/orchestrator/SceneRunner.hpp"
-#include "core_dll/mbaa_sync/orchestrator/SessionContext.hpp"
+#include "core_dll/mbaa_sync/orchestrator/MatchContext.hpp"
 #include "core_dll/common/DebugLog.hpp"
-#include "core_dll/mbaa_sync/orchestrator/GameControl.hpp"
-#include "core_dll/mbaa_sync/scene/SceneBusiness.hpp"
+#include "core_dll/mbaa_sync/orchestrator/FrameControl.hpp"
+#include "core_dll/mbaa_sync/scene/MatchScene.hpp"
 #include "core_dll/mbaa_sync/scene/SceneFastBoot.hpp"
 #include "core_dll/fg_netplay/frame_sync/NetplaySession.hpp"
 #include "core_dll/mbaa_game/monitor/GamePhaseDetector.hpp"
 #include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
-#include "core_dll/mbaa_sync/common/TimeHooks.hpp"
+#include "core_dll/mbaa_sync/hooks/TimeHooks.hpp"
 #include "shared_contracts/IpcData.hpp"
 #include <atomic>
 
 namespace cccaster::domain::session {
 
 using GamePhase = cccaster::game_interface::GamePhase;
-using GC = GameControl;
+using GC = FrameControl;
 
 static std::atomic<uint64_t> s_lastPacketReceiveTimeMs{0};
 
@@ -52,33 +52,33 @@ static uint64_t GetCurrentTimeMs() {
 // ================================================================
 // 画面遷移ハンドラ
 // ================================================================
-static void OnPhaseChanged(GamePhase from, GamePhase to, SessionContext& ctx) {
+static void OnPhaseChanged(GamePhase from, GamePhase to, MatchContext& ctx) {
     DebugLog("[SceneRunner] Phase change: %d -> %d", static_cast<int>(from), static_cast<int>(to));
 
     if (to == GamePhase::Loading) {
         GC::SetModeNormalSpeed();
         ctx.roundStartSynced = false;
         ctx.rollbackReady = false;
-        scene::SceneBusiness::ResetLoading();
+        scene::MatchScene::ResetLoading();
         DebugLog("[SceneRunner] Loading entered.");
     }
     if (to == GamePhase::CharaSelect) {
         GC::SetModeNormalSpeed();
-        scene::SceneBusiness::ResetCharaSelect();
+        scene::MatchScene::ResetCharaSelect();
         DebugLog("[SceneRunner] CharaSelect entered.");
     }
     if (to == GamePhase::InGame) {
-        scene::SceneBusiness::ResetInGame();
+        scene::MatchScene::ResetInGame();
     }
     if (to == GamePhase::Rematch) {
-        scene::SceneBusiness::ResetRematch();
+        scene::MatchScene::ResetRematch();
     }
 }
 
 // ================================================================
 // Step() 用の状態変数（static — Init で初期化、Step で毎F更新）
 // ================================================================
-static SessionContext* s_ctx = nullptr;
+static MatchContext* s_ctx = nullptr;
 static GamePhase s_prev = GamePhase::Unknown;
 static bool s_running = false;
 static bool s_syncReported = false;
@@ -88,7 +88,7 @@ static uint8_t s_prevIntroState = 255;  // introState 変化追跡用
 // ================================================================
 // Init — 初期化（InitThread から1回だけ呼ばれる）
 // ================================================================
-void SceneRunner::Init(SessionContext& ctx, SendFunc send) {
+void SceneRunner::Init(MatchContext& ctx, SendFunc send) {
     s_send = std::move(send);
     s_ctx = &ctx;
 
@@ -126,10 +126,10 @@ void SceneRunner::Init(SessionContext& ctx, SendFunc send) {
 void SceneRunner::Step() {
     if (!s_ready || !s_running || !s_ctx) return;
 
-    SessionContext& ctx = *s_ctx;
+    MatchContext& ctx = *s_ctx;
 
     // (A) Phase検出
-    GamePhase phase = cccaster::game_interface::GameMonitor::GetCurrentPhase();
+    GamePhase phase = cccaster::game_interface::PhaseMonitor::GetCurrentPhase();
 
     // (B) 画面遷移検出
     if (phase != s_prev) {
@@ -158,19 +158,19 @@ void SceneRunner::Step() {
         }
     }
 
-    // (D2) SceneBusiness ディスパッチ（Phase固有ロジック — 入力以外の処理）
+    // (D2) MatchScene ディスパッチ（Phase固有ロジック — 入力以外の処理）
     switch (phase) {
         case GamePhase::CharaSelect:
-            scene::SceneBusiness::OnCharaSelect(ctx);
+            scene::MatchScene::OnCharaSelect(ctx);
             break;
         case GamePhase::Loading:
-            scene::SceneBusiness::OnLoading(ctx);
+            scene::MatchScene::OnLoading(ctx);
             break;
         case GamePhase::InGame:
-            scene::SceneBusiness::OnInGame(ctx);
+            scene::MatchScene::OnInGame(ctx);
             break;
         case GamePhase::Rematch:
-            scene::SceneBusiness::OnRematch(ctx);
+            scene::MatchScene::OnRematch(ctx);
             break;
         default:
             break;

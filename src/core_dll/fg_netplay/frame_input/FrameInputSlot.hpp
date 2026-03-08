@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core_dll/fg_netplay/buffer/NetplayState.hpp"
+#include "core_dll/fg_netplay/frame_input/FrameSyncState.hpp"
 #include <vector>
 #include <algorithm>
 #include <cstdint>
@@ -10,10 +10,10 @@ namespace cccaster {
 namespace sync {
 
     template<typename T>
-    class InputsContainer {
+    class FrameInputSlot {
     public:
-        InputsContainer() = default;
-        ~InputsContainer() = default;
+        FrameInputSlot() = default;
+        ~FrameInputSlot() = default;
 
         // 指定された index(フェーズ) と frame の入力を取得する。未達なら直前の有効な入力を返す
         T Get(uint32_t index, uint32_t frame) const {

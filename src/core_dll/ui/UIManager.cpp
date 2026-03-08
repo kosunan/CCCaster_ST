@@ -9,7 +9,7 @@
 #include "core_dll/ui/InGame_Ui_View.hpp"
 #include "core_dll/ui/Rematch_Ui_View.hpp"
 #include "core_dll/ui/Controller_Ui_View.hpp"
-#include "core_dll/fg_netplay/buffer/FrameInputBuffer.hpp"
+#include "core_dll/fg_netplay/frame_input/FrameInputBuffer.hpp"
 #include "core_dll/fg_netplay/frame_sync/NetplaySession.hpp"
 
 namespace cccaster::domain::ui {

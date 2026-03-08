@@ -29,7 +29,7 @@
 //     3. onPostReset コールバック呼出
 // ============================================================================
 
-#include "core_dll/mbaa_sync/common/DxHook.hpp"
+#include "core_dll/mbaa_sync/hooks/DxHook.hpp"
 #include <MinHook.h>
 
 /// デバッグログ出力関数（dllmain.cpp で定義）

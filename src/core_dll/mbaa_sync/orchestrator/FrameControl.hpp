@@ -1,14 +1,14 @@
 #pragma once
 /**
- * @file GameControl.hpp
+ * @file FrameControl.hpp
  * @brief ゲーム制御ファサード — メモリ操作を階層化した統一API
  *
  * 【3層アーキテクチャ】
  *
- *   Layer 3 (Scene)     : SceneBusiness 等の業務ロジック
- *                         → GameControl の束ねた関数を呼び出して業務を遂行
+ *   Layer 3 (Scene)     : MatchScene 等の業務ロジック
+ *                         → FrameControl の束ねた関数を呼び出して業務を遂行
  *
- *   Layer 2 (GameControl): このファイル — 複数の操作を束ねた制御関数
+ *   Layer 2 (FrameControl): このファイル — 複数の操作を束ねた制御関数
  *                         例: SetModePause() = RenderSkip=OFF + 自然待機
  *                         Scene は「何をしたいか」だけを知り、制御の詳細は知らない
  *
@@ -17,16 +17,16 @@
  *                         MbaaConstants.hpp で定義された生アドレスへの直接操作
  *
  * 【設計思想】
- *   - Scene は GameControl:: の関数のみを呼ぶ（メモリアドレスを直接触らない）
- *   - GameControl は MbaaSpeedController を内部で連携
+ *   - Scene は FrameControl:: の関数のみを呼ぶ（メモリアドレスを直接触らない）
+ *   - FrameControl は MbaaSpeedController を内部で連携
  *   - 同期制御は NetplaySession に完全委譲（DLLスレッドは Read-only）
  *   - 個別メモリ操作は private メソッドとして隠蔽
  *   - 全メソッドは static — シングルトンへの委譲で状態管理
  *
  * 【使用例】
- *   GameControl::SetModePause();         // 同期ポイントで一時停止
- *   GameControl::SetModeHighSpeedSkip(); // 起動時・FastBoot 用高速化
- *   GameControl::SleepFrame();           // gap ベースのフレーム待機
+ *   FrameControl::SetModePause();         // 同期ポイントで一時停止
+ *   FrameControl::SetModeHighSpeedSkip(); // 起動時・FastBoot 用高速化
+ *   FrameControl::SleepFrame();           // gap ベースのフレーム待機
  *
  * @see MbaaSpeedController  フレームスキップ制御の実装
  * @see NetplaySession      通信同期（θ推定・ティックマスター）
@@ -34,7 +34,7 @@
  */
 
 #include "core_dll/mbaa_game/speed/MbaaSpeedController.hpp"
-#include "core_dll/fg_netplay/buffer/FrameInputBuffer.hpp"
+#include "core_dll/fg_netplay/frame_input/FrameInputBuffer.hpp"
 #include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
 #include <cstdint>
 #include <windows.h>
@@ -44,7 +44,7 @@ namespace cccaster::domain::session {
 // 前方宣言: DebugLog（循環include回避）
 void DebugLog(const char* fmt, ...);
 
-class GameControl {
+class FrameControl {
 public:
     // =====================================================================
     //  Layer 2: 束ねた制御関数（Scene から呼ばれる公開API）
@@ -192,7 +192,7 @@ private:
     static void LogNullInputBase() {
         static uint32_t s_nullCount = 0;
         if (s_nullCount++ % 120 == 0) {
-            DebugLog("[GameControl] Input base pointer is NULL (count=%u)", s_nullCount);
+            DebugLog("[FrameControl] Input base pointer is NULL (count=%u)", s_nullCount);
         }
     }
 

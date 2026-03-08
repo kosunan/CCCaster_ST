@@ -1,5 +1,5 @@
 #include "core_dll/mbaa_sync/rollback/RollbackEngine.hpp"
-#include "core_dll/mbaa_sync/common/TimeHooks.hpp"
+#include "core_dll/mbaa_sync/hooks/TimeHooks.hpp"
 #include <algorithm>
 #include <windows.h>
 

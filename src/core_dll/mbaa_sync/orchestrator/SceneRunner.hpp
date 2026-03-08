@@ -15,7 +15,7 @@
 //        → ゲームと同一スレッドで安全にメモリアクセス
 // ============================================================================
 
-#include "core_dll/mbaa_sync/orchestrator/SessionContext.hpp"
+#include "core_dll/mbaa_sync/orchestrator/MatchContext.hpp"
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -30,7 +30,7 @@ public:
     using SendFunc = std::function<void(const std::vector<uint8_t>&)>;
 
     /// @brief 初期化（InitThread から1回だけ呼ぶ）
-    static void Init(SessionContext& ctx, SendFunc send = nullptr);
+    static void Init(MatchContext& ctx, SendFunc send = nullptr);
 
     /// @brief 1フレーム分の処理（ゲームスレッドの EndScene から毎フレーム呼ぶ）
     static void Step();

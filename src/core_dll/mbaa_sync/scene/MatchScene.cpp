@@ -1,5 +1,5 @@
 // ============================================================================
-// SceneBusiness.cpp — 画面別業務ロジック（統合版 実装）
+// MatchScene.cpp — 画面別業務ロジック（統合版 実装）
 //
 // 【設計】
 //   各画面の業務処理を1ファイルに集約。
@@ -13,20 +13,20 @@
 //   - 11F 入力履歴バッファ
 // ============================================================================
 
-#include "core_dll/mbaa_sync/scene/SceneBusiness.hpp"
+#include "core_dll/mbaa_sync/scene/MatchScene.hpp"
 #include "core_dll/mbaa_sync/scene/SceneInputFilter.hpp"
-#include "core_dll/mbaa_sync/orchestrator/GameControl.hpp"
+#include "core_dll/mbaa_sync/orchestrator/FrameControl.hpp"
 #include "core_dll/common/DebugLog.hpp"
-#include "core_dll/fg_netplay/buffer/FrameInputBuffer.hpp"
+#include "core_dll/fg_netplay/frame_input/FrameInputBuffer.hpp"
 #include "core_dll/fg_netplay/frame_sync/NetplaySession.hpp"
 #include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
 #include "core_dll/mbaa_game/monitor/GamePhaseDetector.hpp"
-#include "core_dll/mbaa_sync/common/DirectInputHook.hpp"
+#include "core_dll/mbaa_sync/hooks/DirectInputHook.hpp"
 #include <atomic>
 
 namespace cccaster::domain::scene {
 
-using GC = cccaster::domain::session::GameControl;
+using GC = cccaster::domain::session::FrameControl;
 using cccaster::domain::session::DebugLog;
 using cccaster::game_interface::GamePhase;
 
@@ -52,22 +52,22 @@ static void ReadBufferAndWrite(GamePhase phase, bool isHost) {
 // ============================================================================
 // CharaSelect — FrameInputBuffer 読取 → WriteInput
 // ============================================================================
-void SceneBusiness::ResetCharaSelect() {
+void MatchScene::ResetCharaSelect() {
     // 状態なし — FrameInputBuffer が全管理
 }
 
-void SceneBusiness::OnCharaSelect(session::SessionContext& ctx) {
+void MatchScene::OnCharaSelect(session::MatchContext& ctx) {
     ReadBufferAndWrite(GamePhase::CharaSelect, ctx.isHost);
 }
 
 // ============================================================================
 // Loading — FrameInputBuffer 読取 → WriteInput (CharaSelectと同一処理)
 // ============================================================================
-void SceneBusiness::ResetLoading() {
+void MatchScene::ResetLoading() {
     // 状態なし
 }
 
-void SceneBusiness::OnLoading(session::SessionContext& ctx) {
+void MatchScene::OnLoading(session::MatchContext& ctx) {
     // IntroBarrier 事前通知: Loading 中に localIntroComplete=true を設定し
     // GAME_TICK に乗せて peer に通知。InGame 到達時にはバリア待機ゼロを実現。
     auto& ms = cccaster::core::netplay::NetplaySession::GetMutableState();
@@ -83,7 +83,7 @@ void SceneBusiness::OnLoading(session::SessionContext& ctx) {
 // ============================================================================
 static bool s_syncInitiated = false;
 
-static bool HandleRoundStartSync(session::SessionContext& ctx) {
+static bool HandleRoundStartSync(session::MatchContext& ctx) {
     if (ctx.roundStartSynced) return false;
 
     uint8_t introState = *CC_INTRO_STATE_ADDR;
@@ -124,7 +124,7 @@ static bool HandleRoundStartSync(session::SessionContext& ctx) {
     return true;  // 同期完了フレームは待機
 }
 
-void SceneBusiness::ResetInGame() {
+void MatchScene::ResetInGame() {
     s_syncInitiated = false;
     // IntroBarrier: peerIntroComplete のみリセット（peer の次の intro=2 到達を待つため）
     // localIntroComplete は true のまま維持 → GAME_TICK で常に flags=0x01 を送信
@@ -132,7 +132,7 @@ void SceneBusiness::ResetInGame() {
     syncState.peerIntroComplete.store(false, std::memory_order_relaxed);
 }
 
-void SceneBusiness::OnInGame(session::SessionContext& ctx) {
+void MatchScene::OnInGame(session::MatchContext& ctx) {
     // ラウンド開始同期 + IntroBarrier（intro=2 で双方ブロック）
     if (HandleRoundStartSync(ctx)) return;
 
@@ -169,7 +169,7 @@ static int8_t  s_targetMenuIndex      = MENU_INDEX_NONE;
 static uint32_t s_retryMenuStateCounter = 0;
 static uint32_t s_remoteWaitFrames    = 0;
 
-void SceneBusiness::ResetRematch() {
+void MatchScene::ResetRematch() {
     s_localRetryMenuIndex  = MENU_INDEX_NONE;
     s_remoteRetryMenuIndex.store(MENU_INDEX_NONE, std::memory_order_relaxed);
     s_localIndexSent       = false;
@@ -181,7 +181,7 @@ void SceneBusiness::ResetRematch() {
     AsmHacks::menuConfirmState = 0;
 }
 
-void SceneBusiness::SetRemoteRetryMenuIndex(int8_t menuIndex) {
+void MatchScene::SetRemoteRetryMenuIndex(int8_t menuIndex) {
     s_remoteRetryMenuIndex.store(menuIndex, std::memory_order_relaxed);
     DebugLog("[Rematch] Remote selected: menuIndex=%d", menuIndex);
 }
@@ -255,7 +255,7 @@ static bool HandleMenuGate(uint16_t& input) {
     return false;
 }
 
-void SceneBusiness::OnRematch(session::SessionContext& ctx) {
+void MatchScene::OnRematch(session::MatchContext& ctx) {
     // ステップ 1: 自動ナビ中
     if (s_targetMenuState != -1 && s_targetMenuIndex != MENU_INDEX_NONE) {
         uint16_t navInput = HandleAutoNavigation();

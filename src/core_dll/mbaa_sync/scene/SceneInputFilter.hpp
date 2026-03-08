@@ -15,7 +15,7 @@
 //   - メニュー制限:        A/CONFIRM封印
 //
 // 【呼び出しタイミング】
-//   各 SceneBusiness::OnXxx() 内の GC::WriteInput() 直前。
+//   各 MatchScene::OnXxx() 内の GC::WriteInput() 直前。
 // ============================================================================
 
 #include <cstdint>

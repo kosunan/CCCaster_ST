@@ -6,7 +6,7 @@
 // ============================================================================
 
 #include "core_dll/fg_netplay/frame_sync/Metronome.hpp"
-#include "core_dll/fg_netplay/common/WasapiClock.hpp"
+#include "core_dll/fg_netplay/frame_sync/WasapiClock.hpp"
 #include "core_dll/common/DebugLog.hpp"
 #include <windows.h>
 

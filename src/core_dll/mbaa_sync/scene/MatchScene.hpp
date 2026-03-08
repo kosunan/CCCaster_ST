@@ -1,6 +1,6 @@
 #pragma once
 // ============================================================================
-// SceneBusiness — 画面別業務ロジック（統合版）
+// MatchScene — 画面別業務ロジック（統合版）
 //
 // 【責務】
 //   各画面でのネット対戦特有の業務処理を集約する。
@@ -18,17 +18,17 @@
 //   - RollbackEngine 管理 (FrameInputBuffer が自動的に処理)
 // ============================================================================
 
-#include "core_dll/mbaa_sync/orchestrator/SessionContext.hpp"
+#include "core_dll/mbaa_sync/orchestrator/MatchContext.hpp"
 
 namespace cccaster::domain::scene {
 
-class SceneBusiness {
+class MatchScene {
 public:
     // ─── 画面別業務 ─────────────────────────────────
-    static void OnCharaSelect(session::SessionContext& ctx);
-    static void OnLoading(session::SessionContext& ctx);
-    static void OnInGame(session::SessionContext& ctx);
-    static void OnRematch(session::SessionContext& ctx);
+    static void OnCharaSelect(session::MatchContext& ctx);
+    static void OnLoading(session::MatchContext& ctx);
+    static void OnInGame(session::MatchContext& ctx);
+    static void OnRematch(session::MatchContext& ctx);
 
     // ─── リセット ────────────────────────────────────
     static void ResetCharaSelect();

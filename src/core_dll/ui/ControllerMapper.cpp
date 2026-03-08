@@ -21,7 +21,7 @@
 
 #include "core_dll/ui/ControllerMapper.hpp"
 #include "core_dll/ui/OverlayRenderer.hpp"
-#include "core_dll/mbaa_sync/common/DirectInputHook.hpp"
+#include "core_dll/mbaa_sync/hooks/DirectInputHook.hpp"
 #include "cli_launcher/ConfigManager.hpp"
 #include <imgui.h>
 #include <string>

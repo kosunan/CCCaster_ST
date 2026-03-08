@@ -3,7 +3,7 @@
 // ============================================================================
 
 #include "core_dll/ui/Controller_Ui_Logic.hpp"
-#include "core_dll/mbaa_sync/common/DirectInputHook.hpp"
+#include "core_dll/mbaa_sync/hooks/DirectInputHook.hpp"
 #include "cli_launcher/ConfigManager.hpp"
 #include <imgui.h>
 

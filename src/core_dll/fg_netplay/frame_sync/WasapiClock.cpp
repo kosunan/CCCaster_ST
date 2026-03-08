@@ -14,8 +14,8 @@
 //   使用して実時間を取得する。
 // ============================================================================
 
-#include "core_dll/fg_netplay/common/WasapiClock.hpp"
-#include "core_dll/mbaa_sync/common/TimeHooks.hpp"
+#include "core_dll/fg_netplay/frame_sync/WasapiClock.hpp"
+#include "core_dll/mbaa_sync/hooks/TimeHooks.hpp"
 #include <windows.h>
 #include <initguid.h>
 #include <mmdeviceapi.h>

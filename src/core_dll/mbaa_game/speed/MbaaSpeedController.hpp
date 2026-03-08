@@ -29,7 +29,7 @@
 
 #include "core_dll/mbaa_game/speed/ISpeedController.hpp"
 #include "core_dll/mbaa_game/constants/MbaaAddresses.hpp"
-#include "core_dll/mbaa_sync/common/TimeHooks.hpp"
+#include "core_dll/mbaa_sync/hooks/TimeHooks.hpp"
 #include <cstdio>
 #include <atomic>
 

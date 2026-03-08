@@ -8,9 +8,9 @@
 // ============================================================================
 
 #include "core_dll/fg_netplay/frame_sync/NetplaySession.hpp"
-#include "core_dll/fg_netplay/common/WasapiClock.hpp"
+#include "core_dll/fg_netplay/frame_sync/WasapiClock.hpp"
 #include "core_dll/fg_netplay/network/NetplayManager.hpp"
-#include "core_dll/fg_netplay/buffer/FrameInputBuffer.hpp"
+#include "core_dll/fg_netplay/frame_input/FrameInputBuffer.hpp"
 #include "core_dll/common/DebugLog.hpp"
 #include "core_dll/ui/State_Ui_Logic.hpp"
 #include <windows.h>

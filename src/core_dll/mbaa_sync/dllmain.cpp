@@ -3,9 +3,9 @@
 //
 // 責務:
 //   1. DllMain: DLL_PROCESS_ATTACH/DETACH のOS橋渡し
-//   2. InitThread: IPC読み取り → SessionContext構築 → フック初期化 → SceneRunner起動
+//   2. InitThread: IPC読み取り → MatchContext構築 → フック初期化 → SceneRunner起動
 //
-// ★ モード分岐は行わない — SessionContext.appMode を持ち回り、
+// ★ モード分岐は行わない — MatchContext.appMode を持ち回り、
 //   SceneRunner が画面状態を読み取りながらハンドリングする
 // ============================================================================
 
@@ -16,11 +16,11 @@
 #include <cstdio>
 #include <string>
 #include "core_dll/fg_netplay/network/NetplayManager.hpp"
-#include "core_dll/mbaa_sync/common/TimeHooks.hpp"
+#include "core_dll/mbaa_sync/hooks/TimeHooks.hpp"
 #include "core_dll/mbaa_game/memory/MbaaPatcher.hpp"
-#include "core_dll/mbaa_sync/common/DxHook.hpp"
+#include "core_dll/mbaa_sync/hooks/DxHook.hpp"
 #include "core_dll/mbaa_sync/orchestrator/SceneRunner.hpp"
-#include "core_dll/mbaa_sync/orchestrator/SessionContext.hpp"
+#include "core_dll/mbaa_sync/orchestrator/MatchContext.hpp"
 #include "core_dll/mbaa_sync/orchestrator/GameFrameOrchestrator.hpp"
 #include "shared_contracts/IpcData.hpp"
 
@@ -116,10 +116,10 @@ DWORD WINAPI InitThread(LPVOID lpParam) {
     Sleep(100);
 
     // ================================================================
-    // (1) IPC 共有メモリ読み取り → SessionContext に集約
+    // (1) IPC 共有メモリ読み取り → MatchContext に集約
     // ================================================================
     // ★ static: InitThread 終了後も Step() からアクセスするため永続化が必要
-    static cccaster::domain::session::SessionContext ctx;
+    static cccaster::domain::session::MatchContext ctx;
     cccaster::public_api::SharedState state;
 
     if (cccaster::public_api::IpcManager::OpenAndRead(state)) {

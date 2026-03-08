@@ -9,8 +9,8 @@
 #include "core_dll/mbaa_sync/protocol/GameTickCodec.hpp"
 #include "core_dll/fg_netplay/frame_sync/NetplaySession.hpp"
 #include "core_dll/fg_netplay/frame_sync/Metronome.hpp"
-#include "core_dll/fg_netplay/common/WasapiClock.hpp"
-#include "core_dll/fg_netplay/buffer/FrameInputBuffer.hpp"
+#include "core_dll/fg_netplay/frame_sync/WasapiClock.hpp"
+#include "core_dll/fg_netplay/frame_input/FrameInputBuffer.hpp"
 #include "core_dll/mbaa_game/monitor/GamePhaseDetector.hpp"
 #include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
 #include "core_dll/common/DebugLog.hpp"
@@ -210,7 +210,7 @@ uint32_t GameTickCodec::AdvanceFrame(uint32_t localInput) {
 void GameTickCodec::WriteFrameSlot(uint32_t frame, uint32_t localInput) {
     auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
     uint8_t phase = static_cast<uint8_t>(
-        cccaster::game_interface::GameMonitor::GetCurrentPhase());
+        cccaster::game_interface::PhaseMonitor::GetCurrentPhase());
     bool rb = (phase == static_cast<uint8_t>(
         cccaster::game_interface::GamePhase::InGame))
         && (*CC_INTRO_STATE_ADDR == 0);

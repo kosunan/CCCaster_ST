@@ -1,3 +1,22 @@
+# refactor: 汎用的なフォルダ名/クラス名を目的がわかる名称にリネーム
+
+## 2026-03-09: フォルダ4件 + ファイル/クラス6件リネーム
+
+### フォルダ
+- `fg_netplay/buffer/` → `fg_netplay/frame_input/`
+- `fg_netplay/common/` → 廃止（WasapiClock を `frame_sync/` に統合）
+- `mbaa_sync/common/` → `mbaa_sync/hooks/`
+
+### ファイル/クラス
+- `InputsContainer` → `FrameInputSlot`
+- `NetplayState` → `FrameSyncState`
+- `SceneBusiness` → `MatchScene`
+- `GameControl` → `FrameControl`
+- `SessionContext` → `MatchContext`
+- `GameMonitor` → `PhaseMonitor`
+
+---
+
 # refactor: sync 系コンポーネントをリネーム — 目的がわかる名称に統一
 
 ## 2026-03-09: sync/ フォルダ + 3クラスをリネーム

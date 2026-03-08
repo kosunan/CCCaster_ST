@@ -33,7 +33,7 @@ namespace cccaster::game_interface {
      *     - CC_INTRO_STATE_ADDR: ラウンドイントロ状態 (uint8_t)
      *     - CC_ROUND_TIMER_ADDR: ラウンドタイマー (uint32_t)
      */
-    class GameMonitor {
+    class PhaseMonitor {
     public:
         /**
          * @brief CC_GAME_MODE_ADDR から現在の生のゲームモードIDを取得
