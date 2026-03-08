@@ -64,7 +64,7 @@ struct SharedState {
 
     // Synchronization Flags
     bool dllInitialized;
-    bool syncCompleted;        // true: DLL側SyncCoordinator同期完了
+    bool syncCompleted;        // true: DLL側NetplaySession同期完了
     bool gameShutdownRequest;
     bool headlessMode;         // true: AIテストモード (ランダム入力注入)
     

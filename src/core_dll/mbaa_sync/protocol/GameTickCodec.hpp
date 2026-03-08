@@ -1,12 +1,12 @@
 #pragma once
 // ============================================================================
-// SyncCalculator — 同期計算器
+// GameTickCodec — 同期計算器
 //
 // 【責務】
 //   - 受信パケット解析 → Θ/RTT 計算（NetplayClock 利用）
 //   - α1 算出: RTT/2 ベースのパケットディレイ不足補正
 //   - α2 算出: Θ変化量ベースの相手ドリフト補正
-//   - CentralBuffer 書込み（入力データ）
+//   - FrameInputBuffer 書込み（入力データ）
 //   - 送信パケット組立て（GAME_TICK のみ）
 //   - D/R dirty 管理
 //
@@ -22,7 +22,7 @@
 #include <cstdint>
 #include <vector>
 #include <string>
-#include "core_dll/fg_netplay/sync/NetplayClock.hpp"
+#include "core_dll/fg_netplay/frame_sync/NetplayClock.hpp"
 
 namespace cccaster {
 namespace core {
@@ -30,7 +30,7 @@ namespace netplay {
 
 class Metronome;  // 前方宣言
 
-class SyncCalculator {
+class GameTickCodec {
 public:
     // ─── 初期化 ─────────────────────────────────────────
     void Initialize(bool isHost, int delayFrames, int maxRollback,
@@ -38,7 +38,7 @@ public:
     void Reset();
 
     // ─── 受信パケット処理 ────────────────────────────────
-    // 通信スレッドから呼ばれる。パケット解析・Θ計算・CentralBuffer書込みを行う。
+    // 通信スレッドから呼ばれる。パケット解析・Θ計算・FrameInputBuffer書込みを行う。
     void ProcessReceivedPacket(const std::vector<uint8_t>& data,
                                const std::string& fromIp, uint16_t fromPort,
                                int64_t receiveTimeUs);
@@ -57,7 +57,7 @@ public:
     uint32_t AdvanceFrame(uint32_t localInput);
     uint32_t GetCurrentFrame() const { return _currentFrame; }
 
-    // ─── CentralBuffer書込み ────────────────────────
+    // ─── FrameInputBuffer書込み ────────────────────────
     void WriteFrameSlot(uint32_t frame, uint32_t localInput);
 
     // ─── α補正の更新 ────────────────────────────────────

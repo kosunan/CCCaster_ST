@@ -1,3 +1,16 @@
+# refactor: sync 系コンポーネントをリネーム — 目的がわかる名称に統一
+
+## 2026-03-09: sync/ フォルダ + 3クラスをリネーム
+
+### 変更内容
+- `fg_netplay/sync/` → `fg_netplay/frame_sync/`
+- `SyncCoordinator` → `NetplaySession` (通信スレッドのセッション管理)
+- `CentralBuffer` → `FrameInputBuffer` (フレーム番号ベースの入力バッファ)
+- `SyncCalculator` → `GameTickCodec` (GAME_TICK パケットのエンコード/デコード)
+- 全61箇所の参照を一括更新
+
+---
+
 # refactor: READY/START/PING を GAME_TICK に統合、旧互換パケットを全削除
 
 ## 2026-03-09: パケット種別を GAME_TICK 1種に統合

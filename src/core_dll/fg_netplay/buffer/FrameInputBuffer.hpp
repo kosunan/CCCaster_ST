@@ -1,6 +1,6 @@
 #pragma once
 // ============================================================================
-// CentralBuffer — 全フレーム入力管理（Central Ring Buffer）
+// FrameInputBuffer — 全フレーム入力管理（Central Ring Buffer）
 //
 // 【責務】
 //   自入力・相手入力をフレームごとにセットで管理する巨大リングバッファ。
@@ -47,13 +47,13 @@ struct FrameSlot {
     bool      confirmed    = false;  // 相手入力が実パケットで確定済みか
 };
 
-class CentralBuffer {
+class FrameInputBuffer {
 public:
     static constexpr int RING_SIZE = 600; // 10秒分 (60fps × 10s)
 
     // ── シングルトン ──
-    static CentralBuffer& GetInstance() {
-        static CentralBuffer instance;
+    static FrameInputBuffer& GetInstance() {
+        static FrameInputBuffer instance;
         return instance;
     }
 
@@ -278,14 +278,14 @@ public:
     }
 
 private:
-    CentralBuffer() = default;
+    FrameInputBuffer() = default;
 
     FrameSlot _ring[RING_SIZE] = {};
     std::atomic<uint32_t> _writeHead{0};       // 通信スレッド書込み位置（= 旧 currentFrame）
     std::atomic<uint32_t> _mismatchFrame{0};   // 予測外れフレーム (0=なし)
     std::atomic<uint32_t> _confirmedRemoteFrame{0}; // リモート入力確定済み最新フレーム
 
-    // 同期パラメータ（SyncCoordinator::Start で設定、以後不変）
+    // 同期パラメータ（NetplaySession::Start で設定、以後不変）
     int16_t _delay       = 0;
     int16_t _maxRollback = 0;
 

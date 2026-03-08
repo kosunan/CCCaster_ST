@@ -4,18 +4,18 @@
 //
 // 【責務】
 //   各画面でのネット対戦特有の業務処理を集約する。
-//   CentralBuffer からの入力読取 → SceneInputFilter → WriteInput の
+//   FrameInputBuffer からの入力読取 → SceneInputFilter → WriteInput の
 //   共通フローを内部で呼び出す。
 //
 // 【各画面の業務】
-//   CharaSelect: CentralBuffer 読取 → 入力フィルタ → WriteInput
-//   Loading:     CentralBuffer 読取 → 入力フィルタ → WriteInput
-//   InGame:      ラウンド開始同期 → CentralBuffer 読取 → 入力フィルタ → WriteInput
-//   Rematch:     メニュー選択同期 + 自動ナビ + CentralBuffer 読取
+//   CharaSelect: FrameInputBuffer 読取 → 入力フィルタ → WriteInput
+//   Loading:     FrameInputBuffer 読取 → 入力フィルタ → WriteInput
+//   InGame:      ラウンド開始同期 → FrameInputBuffer 読取 → 入力フィルタ → WriteInput
+//   Rematch:     メニュー選択同期 + 自動ナビ + FrameInputBuffer 読取
 //
 // 【削除された処理】
-//   - パケット作成/送信 (SyncCoordinator に完全委譲)
-//   - RollbackEngine 管理 (CentralBuffer が自動的に処理)
+//   - パケット作成/送信 (NetplaySession に完全委譲)
+//   - RollbackEngine 管理 (FrameInputBuffer が自動的に処理)
 // ============================================================================
 
 #include "core_dll/mbaa_sync/orchestrator/SessionContext.hpp"

@@ -2,10 +2,10 @@
 // Metronome.cpp — フレームリズム生成器（実装）
 //
 // α1 + α2 補正付き間隔でティック信号を発火する。
-// フレーム番号管理は行わない（SyncCalculator に委譲）。
+// フレーム番号管理は行わない（GameTickCodec に委譲）。
 // ============================================================================
 
-#include "core_dll/fg_netplay/sync/Metronome.hpp"
+#include "core_dll/fg_netplay/frame_sync/Metronome.hpp"
 #include "core_dll/fg_netplay/common/WasapiClock.hpp"
 #include "core_dll/common/DebugLog.hpp"
 #include <windows.h>

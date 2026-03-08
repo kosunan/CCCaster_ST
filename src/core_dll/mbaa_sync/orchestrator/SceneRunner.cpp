@@ -23,7 +23,7 @@
 #include "core_dll/mbaa_sync/orchestrator/GameControl.hpp"
 #include "core_dll/mbaa_sync/scene/SceneBusiness.hpp"
 #include "core_dll/mbaa_sync/scene/SceneFastBoot.hpp"
-#include "core_dll/fg_netplay/sync/SyncCoordinator.hpp"
+#include "core_dll/fg_netplay/frame_sync/NetplaySession.hpp"
 #include "core_dll/mbaa_game/monitor/GamePhaseDetector.hpp"
 #include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
 #include "core_dll/mbaa_sync/common/TimeHooks.hpp"
@@ -37,7 +37,7 @@ using GC = GameControl;
 
 static std::atomic<uint64_t> s_lastPacketReceiveTimeMs{0};
 
-/// @brief 送信関数（現在未使用 — パケット送信はSyncCoordinatorに完全委譲）。
+/// @brief 送信関数（現在未使用 — パケット送信はNetplaySessionに完全委譲）。
 static SceneRunner::SendFunc s_send = nullptr;
 
 /// @brief 現在の時間をミリ秒で取得するヘルパー
@@ -95,8 +95,8 @@ void SceneRunner::Init(SessionContext& ctx, SendFunc send) {
     DebugLog("[SceneRunner] Init... appMode=%u isHost=%s",
              ctx.appMode, ctx.isHost ? "true" : "false");
 
-    // SyncCoordinator 通信スレッド起動
-    cccaster::core::netplay::SyncCoordinator::GetInstance().Start(
+    // NetplaySession 通信スレッド起動
+    cccaster::core::netplay::NetplaySession::GetInstance().Start(
         ctx.isHost,
         std::string(ctx.peerIp),
         ctx.peerPort,
@@ -150,9 +150,9 @@ void SceneRunner::Step() {
     // (D) メトロノーム駆動: ConsumeTicks → CommitFrame (引数なし)
     //     CommitFrame() 内で Phase取得・入力Poll・rollbackable判定を自前収集
     {
-        auto& metronome = cccaster::core::netplay::SyncCoordinator::GetInstance().GetMetronome();
+        auto& metronome = cccaster::core::netplay::NetplaySession::GetInstance().GetMetronome();
         uint32_t ticks = metronome.ConsumeTicks();
-        auto& buf = cccaster::core::sync::CentralBuffer::GetInstance();
+        auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
         for (uint32_t t = 0; t < ticks; t++) {
             buf.CommitFrame();
         }
@@ -178,7 +178,7 @@ void SceneRunner::Step() {
 
     // (E) CB → ゲームメモリ書込み + SleepFrame
     {
-        auto& buf = cccaster::core::sync::CentralBuffer::GetInstance();
+        auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
         uint32_t p1 = 0, p2 = 0;
         if (buf.ReadFrameForGame(ctx.isHost, p1, p2)) {
             GC::WriteInput(p1, p2);
@@ -195,8 +195,8 @@ void SceneRunner::Step() {
 
     // (F) 統合フロー確認ログ（60フレームごと）
     if (ctx.framesInPhase % 60 == 0 && phase >= GamePhase::CharaSelect) {
-        auto& buf = cccaster::core::sync::CentralBuffer::GetInstance();
-        auto& syncState = cccaster::core::netplay::SyncCoordinator::GetState();
+        auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
+        auto& syncState = cccaster::core::netplay::NetplaySession::GetState();
         uint32_t wt = *CC_WORLD_TIMER_ADDR;
         uint32_t rt = *CC_REAL_TIMER_ADDR;
         uint8_t intro = *CC_INTRO_STATE_ADDR;
@@ -223,7 +223,7 @@ void SceneRunner::Step() {
 
     // (G) 同期状態チェック + 疎通チェック
     if (phase >= GamePhase::CharaSelect) {
-        auto& syncState = cccaster::core::netplay::SyncCoordinator::GetState();
+        auto& syncState = cccaster::core::netplay::NetplaySession::GetState();
 
         // 同期完了をIPCに通知（初回のみ）
         if (!s_syncReported && syncState.isSynced.load(std::memory_order_acquire)) {

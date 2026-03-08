@@ -1,16 +1,16 @@
 // ============================================================================
-// SyncCalculator.cpp — 同期計算器（実装）
+// GameTickCodec.cpp — 同期計算器（実装）
 //
 // 【パケット設計】
 //   全フェーズで GAME_TICK (0x30) のみ使用。
 //   flags.bit0=ready, startTimeUs>0 で WaitReady/WaitStart を表現。
 // ============================================================================
 
-#include "core_dll/mbaa_sync/protocol/SyncCalculator.hpp"
-#include "core_dll/fg_netplay/sync/SyncCoordinator.hpp"
-#include "core_dll/fg_netplay/sync/Metronome.hpp"
+#include "core_dll/mbaa_sync/protocol/GameTickCodec.hpp"
+#include "core_dll/fg_netplay/frame_sync/NetplaySession.hpp"
+#include "core_dll/fg_netplay/frame_sync/Metronome.hpp"
 #include "core_dll/fg_netplay/common/WasapiClock.hpp"
-#include "core_dll/fg_netplay/buffer/CentralBuffer.hpp"
+#include "core_dll/fg_netplay/buffer/FrameInputBuffer.hpp"
 #include "core_dll/mbaa_game/monitor/GamePhaseDetector.hpp"
 #include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
 #include "core_dll/common/DebugLog.hpp"
@@ -45,7 +45,7 @@ struct GameTickPayload {
 // ============================================================================
 // BuildUnifiedPacket — CC10統一ヘッダ + ペイロードを組み立てる
 // ============================================================================
-std::vector<uint8_t> SyncCalculator::BuildUnifiedPacket(
+std::vector<uint8_t> GameTickCodec::BuildUnifiedPacket(
     uint8_t phase, uint8_t type, int64_t timestampUs,
     const void* payload, size_t payloadSize)
 {
@@ -64,7 +64,7 @@ std::vector<uint8_t> SyncCalculator::BuildUnifiedPacket(
 // ============================================================================
 // Initialize / Reset
 // ============================================================================
-void SyncCalculator::Initialize(bool isHost, int delayFrames, int maxRollback,
+void GameTickCodec::Initialize(bool isHost, int delayFrames, int maxRollback,
                                  Metronome* metronome) {
     _isHost = isHost;
     _delayFrames = delayFrames;
@@ -73,7 +73,7 @@ void SyncCalculator::Initialize(bool isHost, int delayFrames, int maxRollback,
     Reset();
 }
 
-void SyncCalculator::Reset() {
+void GameTickCodec::Reset() {
     _clock.Reset();
     _peerReady = false;
     _framesSinceLastRecv = 0;
@@ -87,7 +87,7 @@ void SyncCalculator::Reset() {
 // ============================================================================
 // ProcessReceivedPacket — 受信 GAME_TICK 解析
 // ============================================================================
-void SyncCalculator::ProcessReceivedPacket(const std::vector<uint8_t>& data,
+void GameTickCodec::ProcessReceivedPacket(const std::vector<uint8_t>& data,
                                             const std::string& /*fromIp*/, uint16_t /*fromPort*/,
                                             int64_t receiveTimeUs) {
     _framesSinceLastRecv = 0;
@@ -118,7 +118,7 @@ void SyncCalculator::ProcessReceivedPacket(const std::vector<uint8_t>& data,
     if (gtp.flags & FLAG_READY) {
         if (!_peerReady) {
             _peerReady = true;
-            cccaster::domain::session::DebugLog("[SyncCalculator] Peer READY received.");
+            cccaster::domain::session::DebugLog("[GameTickCodec] Peer READY received.");
         }
     }
 
@@ -126,14 +126,14 @@ void SyncCalculator::ProcessReceivedPacket(const std::vector<uint8_t>& data,
     if (gtp.startTimeUs > 0) {
         _clock.SetPeerStartTime(gtp.startTimeUs);
         cccaster::domain::session::DebugLog(
-            "[SyncCalculator] Peer startTime=%lld us", gtp.startTimeUs);
+            "[GameTickCodec] Peer startTime=%lld us", gtp.startTimeUs);
     }
 
-    // (5) CentralBuffer に相手入力を確定書込み（フレーム>0 なら Counting 中）
+    // (5) FrameInputBuffer に相手入力を確定書込み（フレーム>0 なら Counting 中）
     if (gtp.baseFrame > 0) {
         uint32_t remoteInput = static_cast<uint32_t>(gtp.buttons)
                              | (static_cast<uint32_t>(gtp.direction) << 16);
-        cccaster::core::sync::CentralBuffer::GetInstance().ConfirmRemote(
+        cccaster::core::sync::FrameInputBuffer::GetInstance().ConfirmRemote(
             gtp.baseFrame, remoteInput);
     }
 
@@ -143,7 +143,7 @@ void SyncCalculator::ProcessReceivedPacket(const std::vector<uint8_t>& data,
     if (gtp.delay != DR_NO_CHANGE) { _delayFrames = gtp.delay; drChanged = true; }
     if (gtp.maxRollback != DR_NO_CHANGE) { _maxRollback = gtp.maxRollback; drChanged = true; }
     if (drChanged) {
-        cccaster::core::sync::CentralBuffer::GetInstance().SetSyncParams(
+        cccaster::core::sync::FrameInputBuffer::GetInstance().SetSyncParams(
             _delayFrames, _maxRollback);
         cccaster::domain::ui::StateUiLogic::SetDelay(_delayFrames);
         cccaster::domain::ui::StateUiLogic::SetRollback(_maxRollback);
@@ -156,7 +156,7 @@ void SyncCalculator::ProcessReceivedPacket(const std::vector<uint8_t>& data,
 
     // (8) introComplete フラグ受信
     if (gtp.flags & FLAG_INTRO_COMPLETE) {
-        cccaster::core::netplay::SyncCoordinator::GetMutableState()
+        cccaster::core::netplay::NetplaySession::GetMutableState()
             .peerIntroComplete.store(true, std::memory_order_release);
     }
 }
@@ -164,7 +164,7 @@ void SyncCalculator::ProcessReceivedPacket(const std::vector<uint8_t>& data,
 // ============================================================================
 // BuildGameTickPacket — 全フェーズ共通パケット組立て
 // ============================================================================
-std::vector<uint8_t> SyncCalculator::BuildGameTickPacket(
+std::vector<uint8_t> GameTickCodec::BuildGameTickPacket(
     uint32_t frame, uint32_t localInput, bool ready, int64_t startTimeUs)
 {
     int64_t now = timer::WasapiClock::GetTimeUs();
@@ -185,7 +185,7 @@ std::vector<uint8_t> SyncCalculator::BuildGameTickPacket(
     // flags
     gtp.flags = 0;
     if (ready) gtp.flags |= FLAG_READY;
-    if (cccaster::core::netplay::SyncCoordinator::GetState()
+    if (cccaster::core::netplay::NetplaySession::GetState()
             .localIntroComplete.load(std::memory_order_acquire)) {
         gtp.flags |= FLAG_INTRO_COMPLETE;
     }
@@ -196,19 +196,19 @@ std::vector<uint8_t> SyncCalculator::BuildGameTickPacket(
 }
 
 // ============================================================================
-// AdvanceFrame — フレームを1つ進めて CentralBuffer に書込み
+// AdvanceFrame — フレームを1つ進めて FrameInputBuffer に書込み
 // ============================================================================
-uint32_t SyncCalculator::AdvanceFrame(uint32_t localInput) {
+uint32_t GameTickCodec::AdvanceFrame(uint32_t localInput) {
     _currentFrame++;
     WriteFrameSlot(_currentFrame, localInput);
     return _currentFrame;
 }
 
 // ============================================================================
-// WriteFrameSlot — CentralBuffer にフレームスロットを書込み
+// WriteFrameSlot — FrameInputBuffer にフレームスロットを書込み
 // ============================================================================
-void SyncCalculator::WriteFrameSlot(uint32_t frame, uint32_t localInput) {
-    auto& buf = cccaster::core::sync::CentralBuffer::GetInstance();
+void GameTickCodec::WriteFrameSlot(uint32_t frame, uint32_t localInput) {
+    auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
     uint8_t phase = static_cast<uint8_t>(
         cccaster::game_interface::GameMonitor::GetCurrentPhase());
     bool rb = (phase == static_cast<uint8_t>(
@@ -220,7 +220,7 @@ void SyncCalculator::WriteFrameSlot(uint32_t frame, uint32_t localInput) {
 // ============================================================================
 // UpdateAlphaCorrections — α1/α2 を計算して Metronome に反映
 // ============================================================================
-void SyncCalculator::UpdateAlphaCorrections() {
+void GameTickCodec::UpdateAlphaCorrections() {
     if (!_metronome) return;
 
     int64_t halfRtt = _clock.GetRttUs() / 2;

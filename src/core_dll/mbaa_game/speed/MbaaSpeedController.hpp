@@ -8,7 +8,7 @@
  *       → 描画スキップ ON + 通信スレッド周期バイパス
  *   - HighSpeedSkip_Rollup (ロールバック巻き戻し時)
  *       → 描画スキップ ON + 通信スレッド周期バイパス
- *   - NormalSpeed (通常、SyncCoordinator がティック管理)
+ *   - NormalSpeed (通常、NetplaySession がティック管理)
  *       → 描画スキップ OFF + 通信スレッドの currentFrame をポーリング
  *   - Pause (一時停止)
  *       → 描画スキップ OFF + 通信スレッドの currentFrame が進まないので自然に停止

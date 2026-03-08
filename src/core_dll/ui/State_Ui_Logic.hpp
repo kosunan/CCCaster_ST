@@ -9,7 +9,7 @@
 //
 // 【更新元】
 //   - InputHook.cpp      : D/R 変更通知
-//   - SyncCoordinator    : FPS / フレーム時間 / RTT / Jitter / timeOffset
+//   - NetplaySession    : FPS / フレーム時間 / RTT / Jitter / timeOffset
 // ============================================================================
 
 #include <cstdint>

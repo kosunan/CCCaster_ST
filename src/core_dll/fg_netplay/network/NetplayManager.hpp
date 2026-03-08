@@ -10,7 +10,7 @@
 //   - Initialize()     : UDP ソケット生成・バインド・受信コールバック登録
 //   - Shutdown()        : ソケット破棄
 //   - GetSendFunc()     : SceneRunner 向け送信ラムダ
-//   - GetUdpSocket()    : SyncCoordinator 向けソケット直接アクセス
+//   - GetUdpSocket()    : NetplaySession 向けソケット直接アクセス
 //   - IsHost()          : ホスト/クライアント判定
 //
 // 【adapter_netplay 層の意図】

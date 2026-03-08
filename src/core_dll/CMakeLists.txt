@@ -23,9 +23,9 @@ add_library(cccaster_hook SHARED
     fg_netplay/common/WasapiClock.cpp
 
     # === fg_netplay (格闘ゲームネット対戦エンジン) ===
-    fg_netplay/sync/SyncCoordinator.cpp
-    fg_netplay/sync/Metronome.cpp
-    fg_netplay/sync/NetplayClock.cpp
+    fg_netplay/frame_sync/NetplaySession.cpp
+    fg_netplay/frame_sync/Metronome.cpp
+    fg_netplay/frame_sync/NetplayClock.cpp
 
     # === ui (オーバーレイUI統合) ===
     ui/OverlayRenderer.cpp
@@ -41,7 +41,7 @@ add_library(cccaster_hook SHARED
     ui/ControllerMapper.cpp
 
     # === mbaa_sync (MBAA同期処理) ===
-    mbaa_sync/protocol/SyncCalculator.cpp
+    mbaa_sync/protocol/GameTickCodec.cpp
     mbaa_sync/protocol/PacketRouter.cpp
     mbaa_sync/orchestrator/SceneRunner.cpp
     mbaa_sync/orchestrator/GameFrameOrchestrator.cpp

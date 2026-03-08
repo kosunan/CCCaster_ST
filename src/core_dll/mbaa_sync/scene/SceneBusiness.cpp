@@ -3,12 +3,12 @@
 //
 // 【設計】
 //   各画面の業務処理を1ファイルに集約。
-//   共通の CentralBuffer → SceneInputFilter → WriteInput フローは
+//   共通の FrameInputBuffer → SceneInputFilter → WriteInput フローは
 //   ReadBufferAndWrite() で共用する。
 //
 // 【削除された処理】
-//   - パケット作成/送信 (SyncCoordinator に完全委譲)
-//   - RollbackEngine 管理 (CentralBuffer が自動処理)
+//   - パケット作成/送信 (NetplaySession に完全委譲)
+//   - RollbackEngine 管理 (FrameInputBuffer が自動処理)
 //   - GAME_INPUT パケット構築
 //   - 11F 入力履歴バッファ
 // ============================================================================
@@ -17,8 +17,8 @@
 #include "core_dll/mbaa_sync/scene/SceneInputFilter.hpp"
 #include "core_dll/mbaa_sync/orchestrator/GameControl.hpp"
 #include "core_dll/common/DebugLog.hpp"
-#include "core_dll/fg_netplay/buffer/CentralBuffer.hpp"
-#include "core_dll/fg_netplay/sync/SyncCoordinator.hpp"
+#include "core_dll/fg_netplay/buffer/FrameInputBuffer.hpp"
+#include "core_dll/fg_netplay/frame_sync/NetplaySession.hpp"
 #include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
 #include "core_dll/mbaa_game/monitor/GamePhaseDetector.hpp"
 #include "core_dll/mbaa_sync/common/DirectInputHook.hpp"
@@ -31,10 +31,10 @@ using cccaster::domain::session::DebugLog;
 using cccaster::game_interface::GamePhase;
 
 // ============================================================================
-// 共通: CentralBuffer → SceneInputFilter → WriteInput
+// 共通: FrameInputBuffer → SceneInputFilter → WriteInput
 // ============================================================================
 static void ReadBufferAndWrite(GamePhase phase, bool isHost) {
-    auto& buf = cccaster::core::sync::CentralBuffer::GetInstance();
+    auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
 
     uint32_t p1, p2;
     if (!buf.ReadFrameForGame(isHost, p1, p2)) {
@@ -50,10 +50,10 @@ static void ReadBufferAndWrite(GamePhase phase, bool isHost) {
 }
 
 // ============================================================================
-// CharaSelect — CentralBuffer 読取 → WriteInput
+// CharaSelect — FrameInputBuffer 読取 → WriteInput
 // ============================================================================
 void SceneBusiness::ResetCharaSelect() {
-    // 状態なし — CentralBuffer が全管理
+    // 状態なし — FrameInputBuffer が全管理
 }
 
 void SceneBusiness::OnCharaSelect(session::SessionContext& ctx) {
@@ -61,7 +61,7 @@ void SceneBusiness::OnCharaSelect(session::SessionContext& ctx) {
 }
 
 // ============================================================================
-// Loading — CentralBuffer 読取 → WriteInput (CharaSelectと同一処理)
+// Loading — FrameInputBuffer 読取 → WriteInput (CharaSelectと同一処理)
 // ============================================================================
 void SceneBusiness::ResetLoading() {
     // 状態なし
@@ -70,7 +70,7 @@ void SceneBusiness::ResetLoading() {
 void SceneBusiness::OnLoading(session::SessionContext& ctx) {
     // IntroBarrier 事前通知: Loading 中に localIntroComplete=true を設定し
     // GAME_TICK に乗せて peer に通知。InGame 到達時にはバリア待機ゼロを実現。
-    auto& ms = cccaster::core::netplay::SyncCoordinator::GetMutableState();
+    auto& ms = cccaster::core::netplay::NetplaySession::GetMutableState();
     if (!ms.localIntroComplete.load(std::memory_order_relaxed)) {
         ms.localIntroComplete.store(true, std::memory_order_release);
         DebugLog("[IntroBarrier] Pre-signaling during Loading phase.");
@@ -79,7 +79,7 @@ void SceneBusiness::OnLoading(session::SessionContext& ctx) {
 }
 
 // ============================================================================
-// InGame — ラウンド開始同期 + CentralBuffer読取
+// InGame — ラウンド開始同期 + FrameInputBuffer読取
 // ============================================================================
 static bool s_syncInitiated = false;
 
@@ -92,16 +92,16 @@ static bool HandleRoundStartSync(session::SessionContext& ctx) {
     }
 
     // ステップ1: intro=2 到達を即座に通知（isSynced 待ち中もパケットに乗る）
-    auto& ms = cccaster::core::netplay::SyncCoordinator::GetMutableState();
+    auto& ms = cccaster::core::netplay::NetplaySession::GetMutableState();
     if (!s_syncInitiated) {
         ms.localIntroComplete.store(true, std::memory_order_release);
         GC::SetModePause();
         s_syncInitiated = true;
-        DebugLog("[InGame] introState=2 reached. localIntroComplete=true. Checking SyncCoordinator...");
+        DebugLog("[InGame] introState=2 reached. localIntroComplete=true. Checking NetplaySession...");
     }
 
-    // ステップ2: SyncCoordinator 同期待ち
-    auto& syncState = cccaster::core::netplay::SyncCoordinator::GetState();
+    // ステップ2: NetplaySession 同期待ち
+    auto& syncState = cccaster::core::netplay::NetplaySession::GetState();
     if (!syncState.isSynced.load(std::memory_order_acquire)) {
         return true;
     }
@@ -128,7 +128,7 @@ void SceneBusiness::ResetInGame() {
     s_syncInitiated = false;
     // IntroBarrier: peerIntroComplete のみリセット（peer の次の intro=2 到達を待つため）
     // localIntroComplete は true のまま維持 → GAME_TICK で常に flags=0x01 を送信
-    auto& syncState = cccaster::core::netplay::SyncCoordinator::GetMutableState();
+    auto& syncState = cccaster::core::netplay::NetplaySession::GetMutableState();
     syncState.peerIntroComplete.store(false, std::memory_order_relaxed);
 }
 
@@ -144,7 +144,7 @@ void SceneBusiness::OnInGame(session::SessionContext& ctx) {
 }
 
 // ============================================================================
-// Rematch — メニュー選択同期 + 自動ナビ + CentralBuffer読取
+// Rematch — メニュー選択同期 + 自動ナビ + FrameInputBuffer読取
 // ============================================================================
 // TODO: AsmHacks モジュールを v10 に統合後、正式な配置に変更
 namespace AsmHacks {

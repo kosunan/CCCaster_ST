@@ -93,7 +93,7 @@ void MainController::LaunchAndMonitorGame() {
         std::cout << "  \x1b[32m[ SUCCESS ]\x1b[0m Native control restored. You may now play.\n";
         
         // ===== FastBoot完了後: IPC同期監視 (12秒タイムアウト) =====
-        // DLLがポートをバインドして SyncCoordinator で同期を完了するのを待つ。
+        // DLLがポートをバインドして NetplaySession で同期を完了するのを待つ。
         // 計測開始は Launcher の起動時点ではなく、この待ちループの開始時点とする。
         std::cout << "  \x1b[1;36m[ SYNC ]\x1b[0m Waiting for DLL sync completion (12s timeout)...\n" << std::flush;
         auto syncStart = std::chrono::steady_clock::now();

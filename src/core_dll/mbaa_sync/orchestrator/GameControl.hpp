@@ -19,7 +19,7 @@
  * 【設計思想】
  *   - Scene は GameControl:: の関数のみを呼ぶ（メモリアドレスを直接触らない）
  *   - GameControl は MbaaSpeedController を内部で連携
- *   - 同期制御は SyncCoordinator に完全委譲（DLLスレッドは Read-only）
+ *   - 同期制御は NetplaySession に完全委譲（DLLスレッドは Read-only）
  *   - 個別メモリ操作は private メソッドとして隠蔽
  *   - 全メソッドは static — シングルトンへの委譲で状態管理
  *
@@ -29,12 +29,12 @@
  *   GameControl::SleepFrame();           // gap ベースのフレーム待機
  *
  * @see MbaaSpeedController  フレームスキップ制御の実装
- * @see SyncCoordinator      通信同期（θ推定・ティックマスター）
+ * @see NetplaySession      通信同期（θ推定・ティックマスター）
  * @see MbaaConstants.hpp     メモリアドレス定義
  */
 
 #include "core_dll/mbaa_game/speed/MbaaSpeedController.hpp"
-#include "core_dll/fg_netplay/buffer/CentralBuffer.hpp"
+#include "core_dll/fg_netplay/buffer/FrameInputBuffer.hpp"
 #include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
 #include <cstdint>
 #include <windows.h>
@@ -111,7 +111,7 @@ public:
      *   描画の ON/OFF は API hook (RenderSkip → OnPresentSkip) で制御する。
      */
     static void SleepFrame() {
-        auto& buf = cccaster::core::sync::CentralBuffer::GetInstance();
+        auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
         uint32_t ef = buf.GetEffectiveHead();
         uint32_t wt = *CC_WORLD_TIMER_ADDR;
 

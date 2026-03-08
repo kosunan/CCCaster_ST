@@ -1,19 +1,19 @@
 #pragma once
 // ============================================================================
-// SyncCoordinator — 通信スレッド統括（4層分離版）
+// NetplaySession — 通信スレッド統括（4層分離版）
 //
 // 【責務】
 //   パケットの送受信に専念する。
-//   計算・α補正・CentralBuffer操作は SyncCalculator に委譲。
+//   計算・α補正・FrameInputBuffer操作は GameTickCodec に委譲。
 //   フレームリズム生成は Metronome に委譲。
 //
 // 【モード遷移】
 //   WaitReady  → (双方READY) → WaitStart → (合意時刻到達) → Counting
 //
 // 【スレッド間ルール】
-//   - 通信スレッドは送受信と SyncCalculator 呼出しのみ。
+//   - 通信スレッドは送受信と GameTickCodec 呼出しのみ。
 //   - Metronome は独立スレッドでカウンタをカウントアップ。
-//   - ゲームスレッドは CentralBuffer を監視するだけ。
+//   - ゲームスレッドは FrameInputBuffer を監視するだけ。
 // ============================================================================
 
 #include <atomic>
@@ -22,8 +22,8 @@
 #include <vector>
 #include <string>
 #include <mutex>
-#include "core_dll/mbaa_sync/protocol/SyncCalculator.hpp"
-#include "core_dll/fg_netplay/sync/Metronome.hpp"
+#include "core_dll/mbaa_sync/protocol/GameTickCodec.hpp"
+#include "core_dll/fg_netplay/frame_sync/Metronome.hpp"
 
 namespace cccaster {
 namespace core {
@@ -35,7 +35,7 @@ namespace netplay {
 enum class SyncMode {
     WaitReady,   // 準備完了待機 — READY信号を送り、相手のREADYを待つ
     WaitStart,   // 開始時刻待機 — θ推定→START送受信→合意時刻到達を待つ
-    Counting     // フレームカウント中 — パケット送受信 + CentralBuffer書込み
+    Counting     // フレームカウント中 — パケット送受信 + FrameInputBuffer書込み
 };
 
 // ============================================================================
@@ -78,11 +78,11 @@ struct ReceivedPacket {
 };
 
 // ============================================================================
-// SyncCoordinator 本体 — 通信専用
+// NetplaySession 本体 — 通信専用
 // ============================================================================
-class SyncCoordinator {
+class NetplaySession {
 public:
-    static SyncCoordinator& GetInstance();
+    static NetplaySession& GetInstance();
     static const SharedSyncState& GetState() {
         return GetInstance()._state;
     }
@@ -101,12 +101,12 @@ public:
     /// @brief メトロノームへのアクセサ（DLLスレッドから ConsumeTicks 用）
     Metronome& GetMetronome() { return _metronome; }
 
-    // ─── 時計データ読取り（オーバーレイ用、SyncCalculator 委譲）──
+    // ─── 時計データ読取り（オーバーレイ用、GameTickCodec 委譲）──
     int64_t GetRttUs() const        { return _calc.GetRttUs(); }
     int64_t GetThetaUs() const      { return _calc.GetThetaUs(); }
     int64_t GetBaselineTheta() const { return _calc.GetBaselineTheta(); }
 
-    // ─── D/R 動的変更（SyncCalculator 委譲）─────────────
+    // ─── D/R 動的変更（GameTickCodec 委譲）─────────────
     void SetDelayFrames(int d)  { _calc.SetDelayFrames(d); }
     void SetMaxRollback(int r)  { _calc.SetMaxRollback(r); }
 
@@ -119,15 +119,15 @@ public:
     static constexpr int64_t START_MARGIN_US        = 500000;
 
     // パケット定数
-    static constexpr int      UNIFIED_HEADER_SIZE   = SyncCalculator::UNIFIED_HEADER_SIZE;
-    static constexpr uint32_t CC10_MAGIC            = SyncCalculator::CC10_MAGIC;
-    static constexpr uint8_t  PKT_GAME_TICK         = SyncCalculator::PKT_GAME_TICK;
+    static constexpr int      UNIFIED_HEADER_SIZE   = GameTickCodec::UNIFIED_HEADER_SIZE;
+    static constexpr uint32_t CC10_MAGIC            = GameTickCodec::CC10_MAGIC;
+    static constexpr uint8_t  PKT_GAME_TICK         = GameTickCodec::PKT_GAME_TICK;
 
 private:
-    SyncCoordinator() = default;
-    ~SyncCoordinator() { Stop(); }
-    SyncCoordinator(const SyncCoordinator&) = delete;
-    SyncCoordinator& operator=(const SyncCoordinator&) = delete;
+    NetplaySession() = default;
+    ~NetplaySession() { Stop(); }
+    NetplaySession(const NetplaySession&) = delete;
+    NetplaySession& operator=(const NetplaySession&) = delete;
 
     // ─── 通信スレッド ──────────────────────────────────
     void ThreadMain();
@@ -142,7 +142,7 @@ private:
     SyncMode _mode = SyncMode::WaitReady;
 
     // ─── 委譲先 ────────────────────────────────────────
-    SyncCalculator _calc;
+    GameTickCodec _calc;
     Metronome _metronome;
 
     // ─── 構成 ──────────────────────────────────────────

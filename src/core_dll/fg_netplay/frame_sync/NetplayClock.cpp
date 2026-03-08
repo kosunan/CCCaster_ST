@@ -9,7 +9,7 @@
 //   3段階: デッドバンド(500μs) → 二乗カーブ → 飽和(2666μs)
 // ============================================================================
 
-#include "core_dll/fg_netplay/sync/NetplayClock.hpp"
+#include "core_dll/fg_netplay/frame_sync/NetplayClock.hpp"
 #include "core_dll/fg_netplay/common/WasapiClock.hpp"
 #include <algorithm>
 #include <cmath>

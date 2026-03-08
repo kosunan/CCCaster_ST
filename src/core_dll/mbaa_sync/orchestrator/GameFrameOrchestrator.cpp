@@ -15,7 +15,7 @@
 #include "core_dll/mbaa_sync/common/DirectInputHook.hpp"
 #include "core_dll/ui/UIManager.hpp"
 #include "core_dll/ui/State_Ui_Logic.hpp"
-#include "core_dll/fg_netplay/sync/SyncCoordinator.hpp"
+#include "core_dll/fg_netplay/frame_sync/NetplaySession.hpp"
 #include "core_dll/mbaa_game/speed/MbaaSpeedController.hpp"
 #include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
 #include <imgui.h>
@@ -192,10 +192,10 @@ void GameFrameOrchestrator::OnEndScene(LPDIRECT3DDEVICE9 pDevice) {
             }
         }
 
-        // ── SyncCoordinator → オーバーレイ ステータス供給 ──
-        if (cccaster::core::netplay::SyncCoordinator::GetInstance().IsRunning()) {
-            auto& sync = cccaster::core::netplay::SyncCoordinator::GetInstance();
-            auto& state = cccaster::core::netplay::SyncCoordinator::GetState();
+        // ── NetplaySession → オーバーレイ ステータス供給 ──
+        if (cccaster::core::netplay::NetplaySession::GetInstance().IsRunning()) {
+            auto& sync = cccaster::core::netplay::NetplaySession::GetInstance();
+            auto& state = cccaster::core::netplay::NetplaySession::GetState();
 
             int64_t tickUs = state.currentTickUs.load(std::memory_order_relaxed);
             double fps = (tickUs > 0) ? 1000000.0 / tickUs : 60.0;

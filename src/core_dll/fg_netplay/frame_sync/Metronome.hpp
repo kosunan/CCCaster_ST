@@ -4,8 +4,8 @@
 //
 // 【責務】
 //   α1 + α2 補正付き間隔でティック信号を発火する。
-//   フレーム番号の管理は行わない（SyncCalculator に委譲）。
-//   通信やCentralBuffer操作は一切行わない。
+//   フレーム番号の管理は行わない（GameTickCodec に委譲）。
+//   通信やFrameInputBuffer操作は一切行わない。
 //
 // 【α補正】
 //   α1: パケットディレイ不足補正 — D+R で吸収しきれない遅延分
@@ -13,7 +13,7 @@
 //
 // 【スレッド間ルール】
 //   - ティック信号は atomic カウンタで公開。通信スレッドが消費する。
-//   - α1/α2 の設定は SyncCalculator が行う（atomic 書込み）。
+//   - α1/α2 の設定は GameTickCodec が行う（atomic 書込み）。
 // ============================================================================
 
 #include <atomic>
@@ -38,7 +38,7 @@ public:
         return _pendingTicks.exchange(0, std::memory_order_acq_rel);
     }
 
-    // ─── α補正設定（SyncCalculator から呼ばれる） ───────
+    // ─── α補正設定（GameTickCodec から呼ばれる） ───────
     void SetAlpha1(int64_t alpha1Us) { _alpha1Us.store(alpha1Us, std::memory_order_release); }
     void SetAlpha2(int64_t alpha2Us) { _alpha2Us.store(alpha2Us, std::memory_order_release); }
 
