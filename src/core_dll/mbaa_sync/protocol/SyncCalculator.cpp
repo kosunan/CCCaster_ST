@@ -1,5 +1,9 @@
 // ============================================================================
 // SyncCalculator.cpp — 同期計算器（実装）
+//
+// 【パケット設計】
+//   全フェーズで GAME_TICK (0x30) のみ使用。
+//   flags.bit0=ready, startTimeUs>0 で WaitReady/WaitStart を表現。
 // ============================================================================
 
 #include "core_dll/mbaa_sync/protocol/SyncCalculator.hpp"
@@ -17,26 +21,24 @@ namespace cccaster {
 namespace core {
 namespace netplay {
 
-// ── パケットペイロード（SyncCoordinator.cpp と同一定義）──
+// ── 統一 GameTickPayload ──
 #pragma pack(push, 1)
-struct StartPayload {
-    int64_t startTimeUs;
-};
 struct GameTickPayload {
-    uint32_t baseFrame;
+    // NTP (常時)
     int64_t  t_send;
     int64_t  echo_t1;
     int64_t  echo_t2;
+    // フレーム同期 (Counting 時のみ有効)
+    uint32_t baseFrame;
     uint16_t buttons;
     uint16_t direction;
+    // 同期パラメータ
     uint8_t  delay;
     uint8_t  maxRollback;
-    uint8_t  flags;        // bit0: introComplete（introState==0 到達を通知）
-};
-struct PingPayload {
-    int64_t t_send;
-    int64_t echo_t1;
-    int64_t echo_t2;
+    // フラグ (READY/INTRO 統合)
+    uint8_t  flags;        // bit0: ready, bit1: introComplete
+    // スタート時刻 (WaitStart 時のみ有効, 0=未設定)
+    int64_t  startTimeUs;
 };
 #pragma pack(pop)
 
@@ -83,12 +85,11 @@ void SyncCalculator::Reset() {
 }
 
 // ============================================================================
-// ProcessReceivedPacket — 受信パケット解析 + Θ計算 + CentralBuffer書込み
+// ProcessReceivedPacket — 受信 GAME_TICK 解析
 // ============================================================================
 void SyncCalculator::ProcessReceivedPacket(const std::vector<uint8_t>& data,
                                             const std::string& /*fromIp*/, uint16_t /*fromPort*/,
                                             int64_t receiveTimeUs) {
-    // 疎通更新
     _framesSinceLastRecv = 0;
 
     // 統一ヘッダ検証
@@ -98,94 +99,80 @@ void SyncCalculator::ProcessReceivedPacket(const std::vector<uint8_t>& data,
     if (magic != CC10_MAGIC) return;
 
     uint8_t pktType = data[5];
+    if (pktType != PKT_GAME_TICK) return;
+    if (data.size() < UNIFIED_HEADER_SIZE + sizeof(GameTickPayload)) return;
 
-    // ── READY パケット ──
-    if (pktType == PKT_READY) {
+    GameTickPayload gtp{};
+    std::memcpy(&gtp, data.data() + UNIFIED_HEADER_SIZE, sizeof(gtp));
+
+    // (1) NTP θ推定（常時）
+    if (gtp.echo_t1 > 0 && gtp.echo_t2 > 0) {
+        _clock.AddNtpSample(gtp.echo_t1, gtp.echo_t2, gtp.t_send, receiveTimeUs);
+    }
+
+    // (2) エコー追跡更新
+    _lastPeerT1 = gtp.t_send;
+    _lastPeerRecvUs = receiveTimeUs;
+
+    // (3) READY フラグ
+    if (gtp.flags & FLAG_READY) {
         if (!_peerReady) {
             _peerReady = true;
-            cccaster::domain::session::DebugLog("[SyncCalculator] Received READY from peer.");
+            cccaster::domain::session::DebugLog("[SyncCalculator] Peer READY received.");
         }
-        return;
     }
 
-    // ── START パケット ──
-    if (pktType == PKT_START && data.size() >= UNIFIED_HEADER_SIZE + sizeof(StartPayload)) {
-        StartPayload sp{};
-        std::memcpy(&sp, data.data() + UNIFIED_HEADER_SIZE, sizeof(sp));
-        _clock.SetPeerStartTime(sp.startTimeUs);
+    // (4) START 時刻
+    if (gtp.startTimeUs > 0) {
+        _clock.SetPeerStartTime(gtp.startTimeUs);
         cccaster::domain::session::DebugLog(
-            "[SyncCalculator] Received START. peerStartTime=%lld us", sp.startTimeUs);
-        return;
+            "[SyncCalculator] Peer startTime=%lld us", gtp.startTimeUs);
     }
 
-    // ── GAME_TICK パケット ──
-    if (pktType == PKT_GAME_TICK && data.size() >= UNIFIED_HEADER_SIZE + sizeof(GameTickPayload)) {
-        GameTickPayload gtp{};
-        std::memcpy(&gtp, data.data() + UNIFIED_HEADER_SIZE, sizeof(gtp));
-
-        // (1) NTP θ推定
-        if (gtp.echo_t1 > 0 && gtp.echo_t2 > 0) {
-            _clock.AddNtpSample(gtp.echo_t1, gtp.echo_t2, gtp.t_send, receiveTimeUs);
-        }
-
-        // (2) エコー追跡更新
-        _lastPeerT1 = gtp.t_send;
-        _lastPeerRecvUs = receiveTimeUs;
-
-        // (3) CentralBuffer に相手入力を確定書込み
+    // (5) CentralBuffer に相手入力を確定書込み（フレーム>0 なら Counting 中）
+    if (gtp.baseFrame > 0) {
         uint32_t remoteInput = static_cast<uint32_t>(gtp.buttons)
                              | (static_cast<uint32_t>(gtp.direction) << 16);
         cccaster::core::sync::CentralBuffer::GetInstance().ConfirmRemote(
             gtp.baseFrame, remoteInput);
-
-        // (4) D/R 受信
-        static constexpr uint8_t DR_NO_CHANGE = 0xFF;
-        bool drChanged = false;
-        if (gtp.delay != DR_NO_CHANGE) { _delayFrames = gtp.delay; drChanged = true; }
-        if (gtp.maxRollback != DR_NO_CHANGE) { _maxRollback = gtp.maxRollback; drChanged = true; }
-        if (drChanged) {
-            cccaster::core::sync::CentralBuffer::GetInstance().SetSyncParams(
-                _delayFrames, _maxRollback);
-            cccaster::domain::ui::StateUiLogic::SetDelay(_delayFrames);
-            cccaster::domain::ui::StateUiLogic::SetRollback(_maxRollback);
-        }
-
-        // (5) 相手フレーム追跡
-        if (gtp.baseFrame > _latestPeerFrame) {
-            _latestPeerFrame = gtp.baseFrame;
-        }
-
-        // (6) introComplete フラグ受信
-        if (gtp.flags & 0x01) {
-            cccaster::core::netplay::SyncCoordinator::GetMutableState()
-                .peerIntroComplete.store(true, std::memory_order_release);
-        }
-        return;
     }
 
-    // ── PING パケット ──
-    if (pktType == 0x00 && data.size() >= UNIFIED_HEADER_SIZE + sizeof(PingPayload)) {
-        PingPayload pp{};
-        std::memcpy(&pp, data.data() + UNIFIED_HEADER_SIZE, sizeof(pp));
-        if (pp.echo_t1 > 0 && pp.echo_t2 > 0) {
-            _clock.AddNtpSample(pp.echo_t1, pp.echo_t2, pp.t_send, receiveTimeUs);
-        }
-        _lastPeerT1 = pp.t_send;
-        _lastPeerRecvUs = receiveTimeUs;
-        return;
+    // (6) D/R 受信
+    static constexpr uint8_t DR_NO_CHANGE = 0xFF;
+    bool drChanged = false;
+    if (gtp.delay != DR_NO_CHANGE) { _delayFrames = gtp.delay; drChanged = true; }
+    if (gtp.maxRollback != DR_NO_CHANGE) { _maxRollback = gtp.maxRollback; drChanged = true; }
+    if (drChanged) {
+        cccaster::core::sync::CentralBuffer::GetInstance().SetSyncParams(
+            _delayFrames, _maxRollback);
+        cccaster::domain::ui::StateUiLogic::SetDelay(_delayFrames);
+        cccaster::domain::ui::StateUiLogic::SetRollback(_maxRollback);
+    }
+
+    // (7) 相手フレーム追跡
+    if (gtp.baseFrame > _latestPeerFrame) {
+        _latestPeerFrame = gtp.baseFrame;
+    }
+
+    // (8) introComplete フラグ受信
+    if (gtp.flags & FLAG_INTRO_COMPLETE) {
+        cccaster::core::netplay::SyncCoordinator::GetMutableState()
+            .peerIntroComplete.store(true, std::memory_order_release);
     }
 }
 
 // ============================================================================
-// 送信パケット組立て
+// BuildGameTickPacket — 全フェーズ共通パケット組立て
 // ============================================================================
-std::vector<uint8_t> SyncCalculator::BuildGameTickPacket(uint32_t frame, uint32_t localInput) {
+std::vector<uint8_t> SyncCalculator::BuildGameTickPacket(
+    uint32_t frame, uint32_t localInput, bool ready, int64_t startTimeUs)
+{
     int64_t now = timer::WasapiClock::GetTimeUs();
     GameTickPayload gtp{};
-    gtp.baseFrame   = frame;
     gtp.t_send      = now;
     gtp.echo_t1     = _lastPeerT1;
     gtp.echo_t2     = _lastPeerRecvUs;
+    gtp.baseFrame   = frame;
     gtp.buttons     = static_cast<uint16_t>(localInput & 0xFFFF);
     gtp.direction   = static_cast<uint16_t>((localInput >> 16) & 0xFFFF);
 
@@ -195,32 +182,17 @@ std::vector<uint8_t> SyncCalculator::BuildGameTickPacket(uint32_t frame, uint32_
     _delayDirty    = false;
     _rollbackDirty = false;
 
-    // introComplete フラグをパケットに乗せる
-    gtp.flags = cccaster::core::netplay::SyncCoordinator::GetState()
-                    .localIntroComplete.load(std::memory_order_acquire) ? 0x01 : 0x00;
+    // flags
+    gtp.flags = 0;
+    if (ready) gtp.flags |= FLAG_READY;
+    if (cccaster::core::netplay::SyncCoordinator::GetState()
+            .localIntroComplete.load(std::memory_order_acquire)) {
+        gtp.flags |= FLAG_INTRO_COMPLETE;
+    }
+
+    gtp.startTimeUs = startTimeUs;
 
     return BuildUnifiedPacket(0x00, PKT_GAME_TICK, now, &gtp, sizeof(gtp));
-}
-
-std::vector<uint8_t> SyncCalculator::BuildReadyPacket() {
-    int64_t now = timer::WasapiClock::GetTimeUs();
-    return BuildUnifiedPacket(0x00, PKT_READY, now);
-}
-
-std::vector<uint8_t> SyncCalculator::BuildStartPacket(int64_t startTimeUs) {
-    int64_t now = timer::WasapiClock::GetTimeUs();
-    StartPayload sp{};
-    sp.startTimeUs = startTimeUs;
-    return BuildUnifiedPacket(0x00, PKT_START, now, &sp, sizeof(sp));
-}
-
-std::vector<uint8_t> SyncCalculator::BuildPingPacket() {
-    int64_t now = timer::WasapiClock::GetTimeUs();
-    PingPayload pp{};
-    pp.t_send  = now;
-    pp.echo_t1 = _lastPeerT1;
-    pp.echo_t2 = _lastPeerRecvUs;
-    return BuildUnifiedPacket(0x00, 0x00, now, &pp, sizeof(pp));
 }
 
 // ============================================================================
@@ -251,8 +223,6 @@ void SyncCalculator::WriteFrameSlot(uint32_t frame, uint32_t localInput) {
 void SyncCalculator::UpdateAlphaCorrections() {
     if (!_metronome) return;
 
-    // ── α1: パケットディレイ不足補正 ──
-    // RTT/2 (片道遅延) が D+R フレーム分で吸収可能か判定
     int64_t halfRtt = _clock.GetRttUs() / 2;
     int64_t absorbableUs = static_cast<int64_t>(_delayFrames + _maxRollback)
                          * Metronome::BASE_TICK_US;
@@ -262,8 +232,6 @@ void SyncCalculator::UpdateAlphaCorrections() {
     }
     _metronome->SetAlpha1(alpha1);
 
-    // ── α2: 相手メトロノームとのズレ補正 ──
-    // NetplayClock::GetTickUs() の α補正ロジックを流用
     int64_t alpha2 = _clock.GetTickUs() - Metronome::BASE_TICK_US;
     _metronome->SetAlpha2(alpha2);
 }

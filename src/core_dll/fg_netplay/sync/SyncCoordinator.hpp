@@ -118,11 +118,9 @@ public:
     static constexpr int     SUB_TICKS_PER_FRAME    = 3;
     static constexpr int64_t START_MARGIN_US        = 500000;
 
-    // パケット定数（互換用: 既存コードがこれを参照する可能性）
+    // パケット定数
     static constexpr int      UNIFIED_HEADER_SIZE   = SyncCalculator::UNIFIED_HEADER_SIZE;
     static constexpr uint32_t CC10_MAGIC            = SyncCalculator::CC10_MAGIC;
-    static constexpr uint8_t  PKT_READY             = SyncCalculator::PKT_READY;
-    static constexpr uint8_t  PKT_START             = SyncCalculator::PKT_START;
     static constexpr uint8_t  PKT_GAME_TICK         = SyncCalculator::PKT_GAME_TICK;
 
 private:

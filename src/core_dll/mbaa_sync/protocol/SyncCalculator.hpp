@@ -7,8 +7,12 @@
 //   - α1 算出: RTT/2 ベースのパケットディレイ不足補正
 //   - α2 算出: Θ変化量ベースの相手ドリフト補正
 //   - CentralBuffer 書込み（入力データ）
-//   - 送信パケット組立て
+//   - 送信パケット組立て（GAME_TICK のみ）
 //   - D/R dirty 管理
+//
+// 【パケット設計】
+//   全フェーズ（WaitReady/WaitStart/Counting）で GAME_TICK 1種類のみ使用。
+//   フェーズの違いは flags と startTimeUs フィールドで表現する。
 //
 // 【スレッド安全性】
 //   ProcessReceivedPacket() は通信スレッドから呼ばれる。
@@ -40,26 +44,23 @@ public:
                                int64_t receiveTimeUs);
 
     // ─── 送信パケット組立て ──────────────────────────────
-    // フレーム番号とローカル入力から GAME_TICK パケットを構築する
-    std::vector<uint8_t> BuildGameTickPacket(uint32_t frame, uint32_t localInput);
-    std::vector<uint8_t> BuildReadyPacket();
-    std::vector<uint8_t> BuildStartPacket(int64_t startTimeUs);
-    std::vector<uint8_t> BuildPingPacket();
+    /// 全フェーズ共通の GAME_TICK パケットを構築する。
+    /// @param frame     フレーム番号 (Counting時のみ有効、それ以外は0)
+    /// @param localInput ローカル入力 (Counting時のみ有効)
+    /// @param ready     true: 準備完了シグナル (WaitReady/WaitStart)
+    /// @param startTimeUs メトロノーム開始時刻 (WaitStart時のみ有効、0=未設定)
+    std::vector<uint8_t> BuildGameTickPacket(uint32_t frame, uint32_t localInput,
+                                             bool ready = false, int64_t startTimeUs = 0);
 
     // ─── フレーム番号管理 ────────────────────────────
-    /// 初期フレーム番号を設定（Start時に1回呼ぶ）
     void SetInitialFrame(uint32_t frame) { _currentFrame = frame; }
-    /// フレームを進めてCentralBufferに書込む
     uint32_t AdvanceFrame(uint32_t localInput);
-    /// 現在フレーム番号を取得
     uint32_t GetCurrentFrame() const { return _currentFrame; }
 
     // ─── CentralBuffer書込み ────────────────────────
-    // 指定フレーム番号でスロットを書込む（キャッチアップバースト用）
     void WriteFrameSlot(uint32_t frame, uint32_t localInput);
 
     // ─── α補正の更新 ────────────────────────────────────
-    // 通信状態に基づいてα1/α2を再計算し、Metronome に反映
     void UpdateAlphaCorrections();
 
     // ─── D/R 動的変更 ───────────────────────────────────
@@ -94,10 +95,12 @@ public:
     static constexpr int      UNIFIED_HEADER_SIZE  = 20;
     static constexpr uint32_t CC10_MAGIC           = 0x30314343u;
 
-    // パケットタイプ
-    static constexpr uint8_t PKT_READY     = 0x15;
-    static constexpr uint8_t PKT_START     = 0x16;
-    static constexpr uint8_t PKT_GAME_TICK = 0x30;  // 旧0x20はTYPE_LOADING_INPUTと衝突するため変更
+    // パケットタイプ（GAME_TICK のみ）
+    static constexpr uint8_t PKT_GAME_TICK = 0x30;
+
+    // GameTickPayload flags
+    static constexpr uint8_t FLAG_READY          = 0x01;  // 準備完了
+    static constexpr uint8_t FLAG_INTRO_COMPLETE = 0x02;  // イントロ完了
 
 private:
     static std::vector<uint8_t> BuildUnifiedPacket(

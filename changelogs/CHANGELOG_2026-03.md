@@ -1,3 +1,26 @@
+# refactor: READY/START/PING を GAME_TICK に統合、旧互換パケットを全削除
+
+## 2026-03-09: パケット種別を GAME_TICK 1種に統合
+
+### 概要
+READY/START/PING を GAME_TICK 内の flags.bit0=ready と startTimeUs フィールドで表現。
+PacketRouter から CS_INPUT/LOADING_INPUT/REMATCH_MENU/GAME_INPUT/旧レガシー処理を全削除。
+
+### 変更ファイル
+- [MODIFY] `SyncCalculator.hpp`: PKT_READY/PKT_START 削除、BuildGameTickPacket に ready/startTimeUs 追加
+- [MODIFY] `SyncCalculator.cpp`: ProcessReceivedPacket を GAME_TICK 単一処理に統合
+- [MODIFY] `SyncCoordinator.hpp`: PKT_READY/PKT_START 互換定数を削除
+- [MODIFY] `SyncCoordinator.cpp`: 全フェーズで BuildGameTickPacket を使用
+- [MODIFY] `PacketRouter.cpp`: 277行→50行 (CC10→SyncCoordinator 転送のみに簡素化)
+
+### GameTickPayload (43B)
+```
+t_send(8) | echo_t1(8) | echo_t2(8) | baseFrame(4) | buttons(2) | direction(2)
+| delay(1) | maxRollback(1) | flags(1) | startTimeUs(8)
+```
+
+---
+
 # refactor: 通信処理を fg_netplay/network/ に統合
 
 ## 2026-03-09: ネットワーク関連ファイルを専用フォルダに移動

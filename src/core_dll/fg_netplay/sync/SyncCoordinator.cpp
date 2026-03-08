@@ -185,7 +185,7 @@ void SyncCoordinator::ThreadMain() {
         // Mode::WaitReady — 準備完了待機
         // ================================================================
         case SyncMode::WaitReady: {
-            SendPacket(_calc.BuildReadyPacket());
+            SendPacket(_calc.BuildGameTickPacket(0, 0, true, 0));
 
             if (_calc.IsPeerReady()) {
                 _mode = SyncMode::WaitStart;
@@ -199,15 +199,18 @@ void SyncCoordinator::ThreadMain() {
         // Mode::WaitStart — 開始時刻待機
         // ================================================================
         case SyncMode::WaitStart: {
-            SendPacket(_calc.BuildReadyPacket());
-            SendPacket(_calc.BuildPingPacket());
-
+            // θ安定前: ready のみ送信（NTP echo は常に含まれる）
+            // θ安定後: ready + startTimeUs を送信
+            int64_t sendStartTime = 0;
             if (!_startSent && _calc.IsThetaStable()) {
-                int64_t startTime = now + START_MARGIN_US;
-                _calc.SetLocalStartTime(startTime);
-                SendPacket(_calc.BuildStartPacket(startTime));
+                sendStartTime = now + START_MARGIN_US;
+                _calc.SetLocalStartTime(sendStartTime);
                 _startSent = true;
+            } else if (_startSent) {
+                sendStartTime = _calc.GetAgreedStartTime() > 0
+                    ? _calc.GetAgreedStartTime() : 0;
             }
+            SendPacket(_calc.BuildGameTickPacket(0, 0, true, sendStartTime));
 
             int64_t agreedStart = _calc.GetAgreedStartTime();
             if (agreedStart > 0 && now >= agreedStart) {
