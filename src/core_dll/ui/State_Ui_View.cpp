@@ -2,9 +2,9 @@
 // State_Ui_View.cpp — 常時表示ステータスバー描画の実装
 // ============================================================================
 
-#include "core_dll/fg_netplay/overlay/State_Ui_View.hpp"
-#include "core_dll/fg_netplay/overlay/State_Ui_Logic.hpp"
-#include "core_dll/fg_netplay/overlay/OverlayRenderer.hpp"
+#include "core_dll/ui/State_Ui_View.hpp"
+#include "core_dll/ui/State_Ui_Logic.hpp"
+#include "core_dll/ui/OverlayRenderer.hpp"
 #include <imgui.h>
 #include <cstdio>
 

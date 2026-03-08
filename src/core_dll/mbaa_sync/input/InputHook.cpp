@@ -1,5 +1,5 @@
 #include "core_dll/mbaa_sync/input/InputHook.hpp"
-#include "core_dll/mbaa_sync/overlay/UIManager.hpp"
+#include "core_dll/ui/UIManager.hpp"
 #include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
 #include <imgui.h>
 #include <cstdio>

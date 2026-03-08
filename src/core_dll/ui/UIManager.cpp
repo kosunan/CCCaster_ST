@@ -2,13 +2,13 @@
 // UIManager.cpp — 画面切替エントリポイント実装
 // ============================================================================
 
-#include "core_dll/mbaa_sync/overlay/UIManager.hpp"
-#include "core_dll/fg_netplay/overlay/State_Ui_Logic.hpp"
-#include "core_dll/fg_netplay/overlay/State_Ui_View.hpp"
-#include "core_dll/mbaa_game/ui/CharaSelect_Ui_View.hpp"
-#include "core_dll/fg_netplay/overlay/InGame_Ui_View.hpp"
-#include "core_dll/fg_netplay/overlay/Rematch_Ui_View.hpp"
-#include "core_dll/mbaa_game/ui/Controller_Ui_View.hpp"
+#include "core_dll/ui/UIManager.hpp"
+#include "core_dll/ui/State_Ui_Logic.hpp"
+#include "core_dll/ui/State_Ui_View.hpp"
+#include "core_dll/ui/CharaSelect_Ui_View.hpp"
+#include "core_dll/ui/InGame_Ui_View.hpp"
+#include "core_dll/ui/Rematch_Ui_View.hpp"
+#include "core_dll/ui/Controller_Ui_View.hpp"
 #include "core_dll/fg_netplay/buffer/CentralBuffer.hpp"
 #include "core_dll/fg_netplay/sync/SyncCoordinator.hpp"
 

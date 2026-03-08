@@ -19,8 +19,8 @@
 //   DrawBindList()            : 1人分のバインドリストを描画するユーティリティ
 // ============================================================================
 
-#include "core_dll/mbaa_game/ui/ControllerMapper.hpp"
-#include "core_dll/fg_netplay/overlay/OverlayRenderer.hpp"
+#include "core_dll/ui/ControllerMapper.hpp"
+#include "core_dll/ui/OverlayRenderer.hpp"
 #include "core_dll/mbaa_sync/common/DirectInputHook.hpp"
 #include "cli_launcher/ConfigManager.hpp"
 #include <imgui.h>

@@ -24,12 +24,19 @@ add_library(cccaster_hook SHARED
     fg_netplay/sync/Metronome.cpp
     fg_netplay/sync/NetplayClock.cpp
     fg_netplay/sync/NetplayManager.cpp
-    fg_netplay/overlay/OverlayRenderer.cpp
-    fg_netplay/overlay/State_Ui_Logic.cpp
-    fg_netplay/overlay/State_Ui_View.cpp
-    fg_netplay/overlay/InGame_Ui_View.cpp
-    fg_netplay/overlay/Rematch_Ui_View.cpp
-    fg_netplay/overlay/NetplayOverlay.cpp
+
+    # === ui (オーバーレイUI統合) ===
+    ui/OverlayRenderer.cpp
+    ui/State_Ui_Logic.cpp
+    ui/State_Ui_View.cpp
+    ui/InGame_Ui_View.cpp
+    ui/Rematch_Ui_View.cpp
+    ui/NetplayOverlay.cpp
+    ui/UIManager.cpp
+    ui/CharaSelect_Ui_View.cpp
+    ui/Controller_Ui_View.cpp
+    ui/Controller_Ui_Logic.cpp
+    ui/ControllerMapper.cpp
 
     # === mbaa_sync (MBAA同期処理) ===
     mbaa_sync/protocol/SyncCalculator.cpp
@@ -41,16 +48,11 @@ add_library(cccaster_hook SHARED
     mbaa_sync/scene/SceneBusiness.cpp
     mbaa_sync/rollback/RollbackEngine.cpp
     mbaa_sync/input/InputHook.cpp
-    mbaa_sync/overlay/UIManager.cpp
 
     # === mbaa_game (MBAAゲーム固有) ===
     mbaa_game/monitor/GameMonitor.cpp
     mbaa_game/state/StateBuffer.cpp
     mbaa_game/patcher/MbaaPatcher.cpp
-    mbaa_game/ui/CharaSelect_Ui_View.cpp
-    mbaa_game/ui/Controller_Ui_View.cpp
-    mbaa_game/ui/Controller_Ui_Logic.cpp
-    mbaa_game/ui/ControllerMapper.cpp
 
     # === 外部参照 ===
     ../cli_launcher/ConfigManager.cpp

@@ -25,9 +25,9 @@
 //   DxHook.cpp    →(毎フレーム)→ Render()         →GameMode判定→ 上記いずれかを描画
 // ============================================================================
 
-#include "core_dll/fg_netplay/overlay/NetplayOverlay.hpp"
-#include "core_dll/mbaa_game/ui/ControllerMapper.hpp"
-#include "core_dll/fg_netplay/overlay/OverlayRenderer.hpp"
+#include "core_dll/ui/NetplayOverlay.hpp"
+#include "core_dll/ui/ControllerMapper.hpp"
+#include "core_dll/ui/OverlayRenderer.hpp"
 #include <imgui.h>
 
 /// DLL側の共通ログ関数（dllmain.cpp で定義）

@@ -6,8 +6,8 @@
 //       現段階ではプレースホルダUIを表示。
 // ============================================================================
 
-#include "core_dll/fg_netplay/overlay/Rematch_Ui_View.hpp"
-#include "core_dll/fg_netplay/overlay/OverlayRenderer.hpp"
+#include "core_dll/ui/Rematch_Ui_View.hpp"
+#include "core_dll/ui/OverlayRenderer.hpp"
 #include <imgui.h>
 
 namespace cccaster::domain::ui {

@@ -2,8 +2,8 @@
 // State_Ui_Logic.cpp — UI状態データ管理の実装
 // ============================================================================
 
-#include "core_dll/fg_netplay/overlay/State_Ui_Logic.hpp"
-#include "core_dll/fg_netplay/overlay/OverlayRenderer.hpp"
+#include "core_dll/ui/State_Ui_Logic.hpp"
+#include "core_dll/ui/OverlayRenderer.hpp"
 
 namespace cccaster::domain::ui {
 

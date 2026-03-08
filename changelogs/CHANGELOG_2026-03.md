@@ -1,3 +1,20 @@
+# refactor: overlay/UI を core_dll/ui/ に統合
+
+## 2026-03-09: 3箇所に分散していた UI ファイルを統合
+
+### 概要
+`fg_netplay/overlay/`、`mbaa_game/ui/`、`mbaa_sync/overlay/` に分散していた
+全22ファイル（overlay + UI）を `core_dll/ui/` に統合。
+
+### 変更内容
+- [MOVE] `fg_netplay/overlay/*` (12ファイル) → `ui/`
+- [MOVE] `mbaa_game/ui/*` (8ファイル) → `ui/`
+- [MOVE] `mbaa_sync/overlay/*` (2ファイル: UIManager) → `ui/`
+- [MODIFY] 全 #include パス更新 (25箇所)
+- [MODIFY] `core_dll/CMakeLists.txt`, `tests/CMakeLists.txt` パス更新
+
+---
+
 # refactor: platform/ 解体 — 各層の common/ にコモン機能を再配置
 
 ## 2026-03-08: platform/ ディレクトリを廃止し、使用元の層に再配置

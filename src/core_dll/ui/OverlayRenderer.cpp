@@ -1,7 +1,7 @@
 // ============================================================================
 // OverlayRenderer.cpp — ImGui描画基盤ユーティリティ 実装
 // ============================================================================
-#include "core_dll/fg_netplay/overlay/OverlayRenderer.hpp"
+#include "core_dll/ui/OverlayRenderer.hpp"
 #include <chrono>
 
 using namespace cccaster::overlay;
