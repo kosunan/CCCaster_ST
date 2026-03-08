@@ -49,7 +49,7 @@ add_library(cccaster_hook SHARED
     mbaa_sync/scene/SceneInputFilter.cpp
     mbaa_sync/scene/MatchScene.cpp
     mbaa_sync/rollback/RollbackEngine.cpp
-    mbaa_sync/input/InputHook.cpp
+    mbaa_sync/hooks/WndProcHook.cpp
 
     # === mbaa_game (MBAAゲーム固有) ===
     mbaa_game/monitor/PhaseMonitor.cpp

@@ -3,7 +3,7 @@
 
 namespace cccaster::game_interface {
 
-class InputHook {
+class WndProcHook {
 public:
     static bool Initialize(HWND hwnd);
     static void Shutdown();

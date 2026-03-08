@@ -1,4 +1,4 @@
-#include "core_dll/mbaa_sync/input/InputHook.hpp"
+#include "core_dll/mbaa_sync/hooks/WndProcHook.hpp"
 #include "core_dll/ui/UIManager.hpp"
 #include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
 #include <imgui.h>
@@ -12,10 +12,10 @@ using namespace cccaster::game_interface;
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-WNDPROC InputHook::original_WndProc = nullptr;
-HWND InputHook::hooked_hwnd = nullptr;
+WNDPROC WndProcHook::original_WndProc = nullptr;
+HWND WndProcHook::hooked_hwnd = nullptr;
 
-bool InputHook::Initialize(HWND hwnd) {
+bool WndProcHook::Initialize(HWND hwnd) {
     if (original_WndProc) return true; // Already initialized
 
     HWND mbaaWnd = FindWindowA("MBAA", NULL);
@@ -36,7 +36,7 @@ bool InputHook::Initialize(HWND hwnd) {
     return original_WndProc != nullptr;
 }
 
-void InputHook::Shutdown() {
+void WndProcHook::Shutdown() {
     if (original_WndProc && hooked_hwnd) {
         SetWindowLongPtr(hooked_hwnd, GWLP_WNDPROC, (LONG_PTR)original_WndProc);
         original_WndProc = nullptr;
@@ -44,7 +44,7 @@ void InputHook::Shutdown() {
     }
 }
 
-LRESULT CALLBACK InputHook::HookedWindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+LRESULT CALLBACK WndProcHook::HookedWindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     // 1. Pass to ImGui first
     if (ImGui_ImplWin32_WndProcHandler(hWnd, uMsg, wParam, lParam)) {
         return true;

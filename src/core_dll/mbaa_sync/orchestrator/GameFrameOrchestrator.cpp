@@ -11,7 +11,7 @@
 #include "core_dll/mbaa_sync/orchestrator/GameFrameOrchestrator.hpp"
 #include "core_dll/mbaa_sync/orchestrator/SceneRunner.hpp"
 #include "core_dll/mbaa_sync/hooks/DxHook.hpp"
-#include "core_dll/mbaa_sync/input/InputHook.hpp"
+#include "core_dll/mbaa_sync/hooks/WndProcHook.hpp"
 #include "core_dll/mbaa_sync/hooks/DirectInputHook.hpp"
 #include "core_dll/ui/UIManager.hpp"
 #include "core_dll/ui/State_Ui_Logic.hpp"
@@ -135,7 +135,7 @@ void GameFrameOrchestrator::OnEndScene(LPDIRECT3DDEVICE9 pDevice) {
         ImGui_ImplWin32_Init(params.hFocusWindow);
         ImGui_ImplDX9_Init(pDevice);
 
-        cccaster::game_interface::InputHook::Initialize(params.hFocusWindow);
+        cccaster::game_interface::WndProcHook::Initialize(params.hFocusWindow);
         cccaster::game_interface::DirectInputHook::Initialize(params.hFocusWindow);
 
         s_imguiInitialized = true;

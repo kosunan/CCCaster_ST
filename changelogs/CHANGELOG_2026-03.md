@@ -1,3 +1,14 @@
+# refactor: InputHook → WndProcHook にリネーム、hooks/ に統合
+
+## 2026-03-09: WndProcHook リネーム + フォルダ統合
+
+### 変更内容
+- [MOVE+RENAME] `mbaa_sync/input/InputHook.*` → `mbaa_sync/hooks/WndProcHook.*`
+- `mbaa_sync/input/` フォルダ廃止
+- クラス名 `InputHook` → `WndProcHook`
+
+---
+
 # refactor: 汎用的なフォルダ名/クラス名を目的がわかる名称にリネーム
 
 ## 2026-03-09: フォルダ4件 + ファイル/クラス6件リネーム
