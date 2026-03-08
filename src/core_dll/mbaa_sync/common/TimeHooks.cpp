@@ -1,4 +1,4 @@
-#include "core_dll/platform/hooks/TimeHooks.hpp"
+#include "core_dll/mbaa_sync/common/TimeHooks.hpp"
 #include "MinHook.h"
 #include <atomic>
 #include <iostream>

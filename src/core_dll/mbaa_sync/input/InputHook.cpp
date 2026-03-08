@@ -4,7 +4,7 @@
 #include <imgui.h>
 #include <cstdio>
 #include <Dbt.h>
-#include "core_dll/platform/hooks/DirectInputHook.hpp"
+#include "core_dll/mbaa_sync/common/DirectInputHook.hpp"
 
 void HookLog(const char* msg);
 

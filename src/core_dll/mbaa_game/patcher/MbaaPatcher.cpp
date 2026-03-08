@@ -3,9 +3,9 @@
 // ============================================================================
 
 #include "core_dll/mbaa_game/patcher/MbaaPatcher.hpp"
-#include "core_dll/platform/memory/MemoryPatcher.hpp"
+#include "core_dll/mbaa_game/common/MemoryPatcher.hpp"
 #include "core_dll/mbaa_game/constants/MbaaAddresses.hpp"
-#include "core_dll/platform/common/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 
 namespace cccaster::game_memory {
 

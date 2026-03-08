@@ -1,4 +1,4 @@
-#include "core_dll/platform/hooks/DirectInputHook.hpp"
+#include "core_dll/mbaa_sync/common/DirectInputHook.hpp"
 #include "cli_launcher/ConfigManager.hpp"
 #include <windows.h>
 #include <dinput.h>

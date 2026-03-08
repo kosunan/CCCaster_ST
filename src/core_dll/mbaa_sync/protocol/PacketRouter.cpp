@@ -33,7 +33,7 @@
 #include "core_dll/fg_netplay/sync/SyncCoordinator.hpp"
 
 #include "core_dll/mbaa_sync/scene/SceneBusiness.hpp"
-#include "core_dll/platform/common/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 #include "core_dll/fg_netplay/buffer/CentralBuffer.hpp"
 #include <cstring>
 

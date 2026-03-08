@@ -9,13 +9,15 @@ add_library(cccaster_hook SHARED
     # === mbaa_sync (MBAA同期処理 — DLLエントリ) ===
     mbaa_sync/dllmain.cpp
 
-    # === platform (低レイヤー基盤) ===
-    platform/hooks/DxHook.cpp
-    platform/hooks/TimeHooks.cpp
-    platform/hooks/DirectInputHook.cpp
-    platform/clock/WasapiClock.cpp
-    platform/network/UdpSocket.cpp
-    platform/network/NetworkSimulator.cpp
+    # === mbaa_sync/common (OSフック基盤) ===
+    mbaa_sync/common/DxHook.cpp
+    mbaa_sync/common/TimeHooks.cpp
+    mbaa_sync/common/DirectInputHook.cpp
+
+    # === fg_netplay/common (通信・クロック基盤) ===
+    fg_netplay/common/UdpSocket.cpp
+    fg_netplay/common/NetworkSimulator.cpp
+    fg_netplay/common/WasapiClock.cpp
 
     # === fg_netplay (格闘ゲームネット対戦エンジン) ===
     fg_netplay/sync/SyncCoordinator.cpp

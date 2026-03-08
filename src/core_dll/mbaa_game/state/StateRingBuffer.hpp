@@ -9,7 +9,7 @@
 #include <cfenv>
 #include <memory>
 #include <iostream>
-#include "core_dll/platform/memory/MemDumper.hpp"
+#include "core_dll/mbaa_game/common/MemDumper.hpp"
 
 namespace cccaster::sync {
 

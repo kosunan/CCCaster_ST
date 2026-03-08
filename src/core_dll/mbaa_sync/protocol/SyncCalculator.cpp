@@ -5,11 +5,11 @@
 #include "core_dll/mbaa_sync/protocol/SyncCalculator.hpp"
 #include "core_dll/fg_netplay/sync/SyncCoordinator.hpp"
 #include "core_dll/fg_netplay/sync/Metronome.hpp"
-#include "core_dll/platform/clock/WasapiClock.hpp"
+#include "core_dll/fg_netplay/common/WasapiClock.hpp"
 #include "core_dll/fg_netplay/buffer/CentralBuffer.hpp"
 #include "core_dll/mbaa_game/monitor/GamePhaseDetector.hpp"
 #include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
-#include "core_dll/platform/common/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 #include "core_dll/fg_netplay/overlay/State_Ui_Logic.hpp"
 #include <cstring>
 

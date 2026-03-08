@@ -16,9 +16,9 @@
 #include <cstdio>
 #include <string>
 #include "core_dll/fg_netplay/sync/NetplayManager.hpp"
-#include "core_dll/platform/hooks/TimeHooks.hpp"
+#include "core_dll/mbaa_sync/common/TimeHooks.hpp"
 #include "core_dll/mbaa_game/patcher/MbaaPatcher.hpp"
-#include "core_dll/platform/hooks/DxHook.hpp"
+#include "core_dll/mbaa_sync/common/DxHook.hpp"
 #include "core_dll/mbaa_sync/orchestrator/SceneRunner.hpp"
 #include "core_dll/mbaa_sync/orchestrator/SessionContext.hpp"
 #include "core_dll/mbaa_sync/orchestrator/GameFrameOrchestrator.hpp"

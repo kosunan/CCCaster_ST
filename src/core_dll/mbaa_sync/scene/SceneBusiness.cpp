@@ -16,12 +16,12 @@
 #include "core_dll/mbaa_sync/scene/SceneBusiness.hpp"
 #include "core_dll/mbaa_sync/scene/SceneInputFilter.hpp"
 #include "core_dll/mbaa_sync/orchestrator/GameControl.hpp"
-#include "core_dll/platform/common/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 #include "core_dll/fg_netplay/buffer/CentralBuffer.hpp"
 #include "core_dll/fg_netplay/sync/SyncCoordinator.hpp"
 #include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
 #include "core_dll/mbaa_game/monitor/GamePhaseDetector.hpp"
-#include "core_dll/platform/hooks/DirectInputHook.hpp"
+#include "core_dll/mbaa_sync/common/DirectInputHook.hpp"
 #include <atomic>
 
 namespace cccaster::domain::scene {

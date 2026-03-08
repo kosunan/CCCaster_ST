@@ -1,5 +1,5 @@
-#include "core_dll/platform/network/UdpSocket.hpp"
-#include "core_dll/platform/network/NetworkSimulator.hpp"
+#include "core_dll/fg_netplay/common/UdpSocket.hpp"
+#include "core_dll/fg_netplay/common/NetworkSimulator.hpp"
 
 // ASIOがシステム(MinGWやvcpkg等)にインストールされている想定
 // 無ければ単純なWinsockに差し替えることも可能なようにPimplで隠蔽しています

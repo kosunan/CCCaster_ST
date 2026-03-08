@@ -6,8 +6,8 @@
 // ============================================================================
 
 #include "core_dll/fg_netplay/sync/Metronome.hpp"
-#include "core_dll/platform/clock/WasapiClock.hpp"
-#include "core_dll/platform/common/DebugLog.hpp"
+#include "core_dll/fg_netplay/common/WasapiClock.hpp"
+#include "core_dll/common/DebugLog.hpp"
 #include <windows.h>
 
 namespace cccaster {

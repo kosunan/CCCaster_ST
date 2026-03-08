@@ -21,7 +21,7 @@
 
 #include "core_dll/mbaa_game/ui/ControllerMapper.hpp"
 #include "core_dll/fg_netplay/overlay/OverlayRenderer.hpp"
-#include "core_dll/platform/hooks/DirectInputHook.hpp"
+#include "core_dll/mbaa_sync/common/DirectInputHook.hpp"
 #include "cli_launcher/ConfigManager.hpp"
 #include <imgui.h>
 #include <string>

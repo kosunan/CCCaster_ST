@@ -31,7 +31,7 @@
 
 // CommitFrame() 内部で使用する依存ヘッダ（前方宣言では不十分）
 #include "core_dll/mbaa_game/monitor/GamePhaseDetector.hpp"
-#include "core_dll/platform/hooks/DirectInputHook.hpp"
+#include "core_dll/mbaa_sync/common/DirectInputHook.hpp"
 
 namespace cccaster {
 namespace core {

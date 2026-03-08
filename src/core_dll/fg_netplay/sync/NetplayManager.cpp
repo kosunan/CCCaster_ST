@@ -6,7 +6,7 @@
 
 #include "core_dll/fg_netplay/sync/NetplayManager.hpp"
 #include "core_dll/mbaa_sync/protocol/PacketRouter.hpp"
-#include "core_dll/platform/common/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 
 namespace cccaster::netplay {
 

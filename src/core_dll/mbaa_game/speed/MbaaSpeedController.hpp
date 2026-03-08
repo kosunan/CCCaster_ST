@@ -27,9 +27,9 @@
  *   CC_SKIP_FRAMES_ADDR は不使用 (0固定)。
  */
 
-#include "core_dll/platform/hooks/ISpeedController.hpp"
+#include "core_dll/mbaa_game/speed/ISpeedController.hpp"
 #include "core_dll/mbaa_game/constants/MbaaAddresses.hpp"
-#include "core_dll/platform/hooks/TimeHooks.hpp"
+#include "core_dll/mbaa_sync/common/TimeHooks.hpp"
 #include <cstdio>
 #include <atomic>
 

@@ -10,7 +10,7 @@
 // ============================================================================
 
 #include "core_dll/fg_netplay/sync/NetplayClock.hpp"
-#include "core_dll/platform/clock/WasapiClock.hpp"
+#include "core_dll/fg_netplay/common/WasapiClock.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>

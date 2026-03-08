@@ -8,10 +8,10 @@
 // ============================================================================
 
 #include "core_dll/fg_netplay/sync/SyncCoordinator.hpp"
-#include "core_dll/platform/clock/WasapiClock.hpp"
+#include "core_dll/fg_netplay/common/WasapiClock.hpp"
 #include "core_dll/fg_netplay/sync/NetplayManager.hpp"
 #include "core_dll/fg_netplay/buffer/CentralBuffer.hpp"
-#include "core_dll/platform/common/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 #include "core_dll/fg_netplay/overlay/State_Ui_Logic.hpp"
 #include <windows.h>
 

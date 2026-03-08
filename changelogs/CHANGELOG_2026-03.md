@@ -1,3 +1,22 @@
+# refactor: platform/ 解体 — 各層の common/ にコモン機能を再配置
+
+## 2026-03-08: platform/ ディレクトリを廃止し、使用元の層に再配置
+
+### 概要
+独立した `platform/` 層は全層から参照される形になり、層分離の意図に反していたため解体。
+各ファイルを実際に使用する層の `common/` サブディレクトリに再配置。
+
+### 変更内容
+- [MOVE] `platform/network/` (UdpSocket, NetworkSimulator) → `fg_netplay/common/`
+- [MOVE] `platform/clock/` (WasapiClock) → `fg_netplay/common/`
+- [MOVE] `platform/hooks/` (DxHook, TimeHooks, DirectInputHook) → `mbaa_sync/common/`
+- [MOVE] `platform/hooks/ISpeedController.hpp` → `mbaa_game/speed/`（唯一の使用元と同ディレクトリに）
+- [MOVE] `platform/memory/` (MemoryPatcher, MemDumper) → `mbaa_game/common/`
+- [MOVE] `platform/common/DebugLog.hpp` → `common/`（core_dll直下、全層共有）
+- [DELETE] `platform/` ディレクトリ
+
+---
+
 # refactor: core_dll 4層アーキテクチャ再構成 — platform/fg_netplay/mbaa_sync/mbaa_game
 
 ## 2026-03-08: ディレクトリ構造を4層に再編成

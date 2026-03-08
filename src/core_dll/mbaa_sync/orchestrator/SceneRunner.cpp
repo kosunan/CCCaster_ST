@@ -19,14 +19,14 @@
 #include <windows.h>
 #include "core_dll/mbaa_sync/orchestrator/SceneRunner.hpp"
 #include "core_dll/mbaa_sync/orchestrator/SessionContext.hpp"
-#include "core_dll/platform/common/DebugLog.hpp"
+#include "core_dll/common/DebugLog.hpp"
 #include "core_dll/mbaa_sync/orchestrator/GameControl.hpp"
 #include "core_dll/mbaa_sync/scene/SceneBusiness.hpp"
 #include "core_dll/mbaa_sync/scene/SceneFastBoot.hpp"
 #include "core_dll/fg_netplay/sync/SyncCoordinator.hpp"
 #include "core_dll/mbaa_game/monitor/GamePhaseDetector.hpp"
 #include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
-#include "core_dll/platform/hooks/TimeHooks.hpp"
+#include "core_dll/mbaa_sync/common/TimeHooks.hpp"
 #include "shared_contracts/IpcData.hpp"
 #include <atomic>
 

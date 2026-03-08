@@ -10,9 +10,9 @@
 #include <windows.h>
 #include "core_dll/mbaa_sync/orchestrator/GameFrameOrchestrator.hpp"
 #include "core_dll/mbaa_sync/orchestrator/SceneRunner.hpp"
-#include "core_dll/platform/hooks/DxHook.hpp"
+#include "core_dll/mbaa_sync/common/DxHook.hpp"
 #include "core_dll/mbaa_sync/input/InputHook.hpp"
-#include "core_dll/platform/hooks/DirectInputHook.hpp"
+#include "core_dll/mbaa_sync/common/DirectInputHook.hpp"
 #include "core_dll/mbaa_sync/overlay/UIManager.hpp"
 #include "core_dll/fg_netplay/overlay/State_Ui_Logic.hpp"
 #include "core_dll/fg_netplay/sync/SyncCoordinator.hpp"

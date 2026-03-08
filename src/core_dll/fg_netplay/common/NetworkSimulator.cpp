@@ -1,4 +1,4 @@
-#include "core_dll/platform/network/NetworkSimulator.hpp"
+#include "core_dll/fg_netplay/common/NetworkSimulator.hpp"
 #include <algorithm>
 
 namespace cccaster::network {

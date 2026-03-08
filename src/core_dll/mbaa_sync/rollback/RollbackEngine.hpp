@@ -5,7 +5,7 @@
 // ============================================================================
 
 #include <cstdint>
-#include "core_dll/platform/memory/MemDumper.hpp"
+#include "core_dll/mbaa_game/common/MemDumper.hpp"
 #include "core_dll/mbaa_game/state/StateRingBuffer.hpp"
 #include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
 
