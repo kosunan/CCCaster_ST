@@ -9,7 +9,8 @@
 
 #include "core_dll/mbaa_sync/scene/SceneFastBoot.hpp"
 #include "core_dll/mbaa_sync/orchestrator/FrameControl.hpp"
-#include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
+#include "core_dll/mbaa_game/constants/MbaaAddresses.hpp"
+#include "core_dll/mbaa_game/constants/MbaaInputDefs.hpp"
 #include "core_dll/common/DebugLog.hpp"
 
 #include <cstring>

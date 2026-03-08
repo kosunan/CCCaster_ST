@@ -19,7 +19,8 @@
 #include "core_dll/common/DebugLog.hpp"
 #include "core_dll/fg_netplay/frame_input/FrameInputBuffer.hpp"
 #include "core_dll/fg_netplay/frame_sync/NetplaySession.hpp"
-#include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
+#include "core_dll/mbaa_game/constants/MbaaAddresses.hpp"
+#include "core_dll/mbaa_game/constants/MbaaInputDefs.hpp"
 #include "core_dll/mbaa_game/monitor/GamePhaseDetector.hpp"
 #include "core_dll/mbaa_sync/hooks/DirectInputHook.hpp"
 #include <atomic>

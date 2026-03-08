@@ -12,7 +12,7 @@
  *   Core 層のコードがこのファイルを直接参照することは設計違反。
  *
  * 【分割元】
- *   旧 MbaaConstants.hpp から定数定義部分を抽出。
+ *   旧 MbaaAddresses.hpp から定数定義部分を抽出。
  */
 
 #include <windows.h>

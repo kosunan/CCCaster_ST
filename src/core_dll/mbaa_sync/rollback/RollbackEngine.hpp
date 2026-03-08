@@ -7,7 +7,7 @@
 #include <cstdint>
 #include "core_dll/mbaa_game/memory/MemDumper.hpp"
 #include "core_dll/mbaa_game/memory/StateRingBuffer.hpp"
-#include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
+#include "core_dll/mbaa_game/constants/MbaaAddresses.hpp"
 
 namespace cccaster::sync {
 

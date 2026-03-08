@@ -17,7 +17,7 @@
 #include "core_dll/ui/State_Ui_Logic.hpp"
 #include "core_dll/fg_netplay/frame_sync/NetplaySession.hpp"
 #include "core_dll/mbaa_game/speed/MbaaSpeedController.hpp"
-#include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
+#include "core_dll/mbaa_game/constants/MbaaAddresses.hpp"
 #include <imgui.h>
 #include <imgui_impl_dx9.h>
 #include <imgui_impl_win32.h>

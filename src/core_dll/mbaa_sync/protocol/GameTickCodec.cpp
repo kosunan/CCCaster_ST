@@ -12,7 +12,7 @@
 #include "core_dll/fg_netplay/frame_sync/WasapiClock.hpp"
 #include "core_dll/fg_netplay/frame_input/FrameInputBuffer.hpp"
 #include "core_dll/mbaa_game/monitor/GamePhaseDetector.hpp"
-#include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
+#include "core_dll/mbaa_game/constants/MbaaAddresses.hpp"
 #include "core_dll/common/DebugLog.hpp"
 #include "core_dll/ui/State_Ui_Logic.hpp"
 #include <cstring>

@@ -14,7 +14,7 @@
  *
  *   Layer 1 (Primitive)  : 個別メモリ読み書き（このファイル下部の private セクション）
  *                         例: GetInputBasePtr(), WriteP1Input(), WriteP2Input()
- *                         MbaaConstants.hpp で定義された生アドレスへの直接操作
+ *                         MbaaAddresses.hpp で定義された生アドレスへの直接操作
  *
  * 【設計思想】
  *   - Scene は FrameControl:: の関数のみを呼ぶ（メモリアドレスを直接触らない）
@@ -30,12 +30,13 @@
  *
  * @see MbaaSpeedController  フレームスキップ制御の実装
  * @see NetplaySession      通信同期（θ推定・ティックマスター）
- * @see MbaaConstants.hpp     メモリアドレス定義
+ * @see MbaaAddresses.hpp     メモリアドレス定義
  */
 
 #include "core_dll/mbaa_game/speed/MbaaSpeedController.hpp"
 #include "core_dll/fg_netplay/frame_input/FrameInputBuffer.hpp"
-#include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
+#include "core_dll/mbaa_game/constants/MbaaAddresses.hpp"
+#include "core_dll/mbaa_game/constants/MbaaInputDefs.hpp"
 #include <cstdint>
 #include <windows.h>
 

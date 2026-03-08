@@ -8,7 +8,7 @@
  *   方向キー、ボタン、入力書き込みアドレス、合成マクロを含む。
  *
  * 【分割元】
- *   旧 MbaaConstants.hpp の入力系セクション（L139-L177）を抽出。
+ *   旧 MbaaAddresses.hpp の入力系セクション（L139-L177）を抽出。
  */
 
 #include <cstdint>

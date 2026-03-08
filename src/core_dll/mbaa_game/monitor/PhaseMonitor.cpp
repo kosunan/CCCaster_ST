@@ -2,11 +2,11 @@
 // GameMonitor.cpp — ゲーム状態の監視・判定ファサード（実装）
 //
 // 【処理概要】
-//   MbaaConstants.hpp で定義された MBAA 固有のメモリアドレスから
+//   MbaaAddresses.hpp で定義された MBAA 固有のメモリアドレスから
 //   ゲームモードとイントロ状態を読み取り、GamePhase enum に変換する。
 //
 // 【Domain 層】
-//   このファイルは MbaaConstants.hpp に完全依存しており、
+//   このファイルは MbaaAddresses.hpp に完全依存しており、
 //   他のゲームでは使用できない。将来 src/domain/ に移動予定。
 //
 // 設計書: docs/design/memory_and_hook_design.md

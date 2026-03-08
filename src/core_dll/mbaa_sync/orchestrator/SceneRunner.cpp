@@ -25,7 +25,7 @@
 #include "core_dll/mbaa_sync/scene/SceneFastBoot.hpp"
 #include "core_dll/fg_netplay/frame_sync/NetplaySession.hpp"
 #include "core_dll/mbaa_game/monitor/GamePhaseDetector.hpp"
-#include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
+#include "core_dll/mbaa_game/constants/MbaaAddresses.hpp"
 #include "core_dll/mbaa_sync/hooks/TimeHooks.hpp"
 #include "shared_contracts/IpcData.hpp"
 #include <atomic>

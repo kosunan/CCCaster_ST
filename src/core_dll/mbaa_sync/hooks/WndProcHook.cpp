@@ -1,6 +1,6 @@
 #include "core_dll/mbaa_sync/hooks/WndProcHook.hpp"
 #include "core_dll/ui/UIManager.hpp"
-#include "core_dll/mbaa_game/constants/MbaaConstants.hpp"
+#include "core_dll/mbaa_game/constants/MbaaAddresses.hpp"
 #include <imgui.h>
 #include <cstdio>
 #include <Dbt.h>
@@ -70,7 +70,7 @@ LRESULT CALLBACK WndProcHook::HookedWindowProc(HWND hWnd, UINT uMsg, WPARAM wPar
         // F4
         if (key == VK_F4 && !isAltDown) { // Alt+F4 is normally close, we intercept just F4
             // キャラセレ画面以外では F4 によるマッピングトグルを制限する
-            // CC_GAME_MODE_ADDR / CC_GAME_MODE_CHARA_SELECT は MbaaConstants.hpp で定義
+            // CC_GAME_MODE_ADDR / CC_GAME_MODE_CHARA_SELECT は MbaaAddresses.hpp で定義
             if (!IsBadReadPtr(CC_GAME_MODE_ADDR, sizeof(uint32_t))
                 && *CC_GAME_MODE_ADDR != CC_GAME_MODE_CHARA_SELECT) {
                 return 0; // キャラセレ以外では F4 を無視（ゲームにも渡さない）

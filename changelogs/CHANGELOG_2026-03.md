@@ -1,3 +1,14 @@
+# refactor: 互換転送ヘッダ MbaaConstants.hpp を削除
+
+## 2026-03-09: MbaaConstants.hpp 削除 + 個別ヘッダ参照に置換
+
+### 変更内容
+- [DELETE] `mbaa_game/constants/MbaaConstants.hpp` (MbaaAddresses + MbaaInputDefs の転送のみ)
+- 8ファイルの #include を個別ヘッダに直接置換
+- 5箇所のコメント内参照を更新
+
+---
+
 # refactor: InputHook → WndProcHook にリネーム、hooks/ に統合
 
 ## 2026-03-09: WndProcHook リネーム + フォルダ統合
