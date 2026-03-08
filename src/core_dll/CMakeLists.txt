@@ -51,8 +51,8 @@ add_library(cccaster_hook SHARED
 
     # === mbaa_game (MBAAゲーム固有) ===
     mbaa_game/monitor/GameMonitor.cpp
-    mbaa_game/state/StateBuffer.cpp
-    mbaa_game/patcher/MbaaPatcher.cpp
+    mbaa_game/memory/StateBuffer.cpp
+    mbaa_game/memory/MbaaPatcher.cpp
 
     # === 外部参照 ===
     ../cli_launcher/ConfigManager.cpp

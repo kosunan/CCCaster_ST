@@ -1,4 +1,4 @@
-#include "core_dll/mbaa_game/state/StateBuffer.hpp"
+#include "core_dll/mbaa_game/memory/StateBuffer.hpp"
 
 namespace cccaster::sync {
 

@@ -1,3 +1,14 @@
+# refactor: GamePhase を mbaa_game へ移動 + メモリアクセス処理を memory/ に統合
+
+## 2026-03-09: mbaa_game 内構造再編
+
+### 変更内容
+- [MOVE] `fg_netplay/types/GamePhase.hpp` → `mbaa_game/monitor/`（ゲーム固有概念として再分類）
+- [MERGE] `mbaa_game/{common,patcher,state,dump}/` → `mbaa_game/memory/`（メモリアクセス統合）
+  - MemoryPatcher, MemDumper, MbaaPatcher, StateBuffer, StateRingBuffer, DumpEntryList
+
+---
+
 # refactor: overlay/UI を core_dll/ui/ に統合
 
 ## 2026-03-09: 3箇所に分散していた UI ファイルを統合

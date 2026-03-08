@@ -17,7 +17,7 @@
  */
 
 #include <cstdint>
-#include "core_dll/fg_netplay/types/GamePhase.hpp"
+#include "core_dll/mbaa_game/monitor/GamePhase.hpp"
 
 namespace cccaster::game_interface {
 

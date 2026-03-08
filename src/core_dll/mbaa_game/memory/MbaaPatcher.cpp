@@ -2,8 +2,8 @@
 // MbaaPatcher.cpp — MBAA 固有メモリパッチの実装
 // ============================================================================
 
-#include "core_dll/mbaa_game/patcher/MbaaPatcher.hpp"
-#include "core_dll/mbaa_game/common/MemoryPatcher.hpp"
+#include "core_dll/mbaa_game/memory/MbaaPatcher.hpp"
+#include "core_dll/mbaa_game/memory/MemoryPatcher.hpp"
 #include "core_dll/mbaa_game/constants/MbaaAddresses.hpp"
 #include "core_dll/common/DebugLog.hpp"
 

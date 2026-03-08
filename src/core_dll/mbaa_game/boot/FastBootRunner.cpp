@@ -5,7 +5,7 @@
 // ============================================================================
 
 #include "core_dll/mbaa_game/boot/FastBootRunner.hpp"
-#include "core_dll/mbaa_game/common/MemoryPatcher.hpp"
+#include "core_dll/mbaa_game/memory/MemoryPatcher.hpp"
 #include "core_dll/mbaa_game/constants/MbaaAddresses.hpp"
 #include "core_dll/mbaa_game/constants/MbaaInputDefs.hpp"
 #include "core_dll/common/DebugLog.hpp"
