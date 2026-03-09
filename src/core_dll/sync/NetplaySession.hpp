@@ -60,6 +60,9 @@ struct SharedSyncState {
     // ─── Keepalive 要求（ゲーム→通信スレッド）─────────────────
     std::atomic<bool>     needKeepalive{true};         // CB書込みしないPhaseで true
 
+    // ─── Rematch メニュー選択（ゲーム↔通信スレッド間）────────
+    std::atomic<int8_t>   localRetryMenuIndex{-1};     // ゲームスレッドが設定, -1=未決定
+
     // ─── リモート入力リングバッファ ──────────────────────
     static constexpr int RING_SIZE = 20;
     struct InputSlot {

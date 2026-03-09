@@ -180,6 +180,9 @@ void MatchScene::ResetRematch() {
     s_remoteWaitFrames     = 0;
     AsmHacks::currentMenuIndex = 0;
     AsmHacks::menuConfirmState = 0;
+    // SharedSyncState もリセット
+    cccaster::core::netplay::NetplaySession::GetMutableState()
+        .localRetryMenuIndex.store(-1, std::memory_order_release);
 }
 
 void MatchScene::SetRemoteRetryMenuIndex(int8_t menuIndex) {
@@ -220,6 +223,9 @@ static bool ResolveMenuSelection(uint16_t& input) {
     if (s_localRetryMenuIndex == MENU_INDEX_NONE) {
         if (input & (CC_BUTTON_A | CC_BUTTON_CONFIRM)) {
             s_localRetryMenuIndex = static_cast<int8_t>(AsmHacks::currentMenuIndex);
+            // SharedSyncState に書込み → GAME_TICK パケットで相手に送信される
+            cccaster::core::netplay::NetplaySession::GetMutableState()
+                .localRetryMenuIndex.store(s_localRetryMenuIndex, std::memory_order_release);
             DebugLog("[Rematch] Local selected: menuIndex=%d", s_localRetryMenuIndex);
             input &= ~(CC_BUTTON_A | CC_BUTTON_CONFIRM); // 即確定を防止
         }

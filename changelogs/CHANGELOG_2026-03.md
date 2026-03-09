@@ -1,3 +1,25 @@
+# feat: Rematch メニュー選択を GAME_TICK パケットに統合
+
+## 2026-03-10: retryMenuIndex フィールド追加
+
+### 変更ファイル
+- [MODIFY] `network/GameTickCodec.cpp`:
+  - `GameTickPayload` に `int8_t retryMenuIndex` 追加 (-1=未決定, 0-2=選択済み)
+  - `BuildGameTickPacket`: SharedSyncState.localRetryMenuIndex を読取りパケットに設定
+  - `ProcessReceivedPacket`: 受信した retryMenuIndex を `MatchScene::SetRemoteRetryMenuIndex` に転送
+  - `MatchScene.hpp` include 追加
+- [MODIFY] `sync/NetplaySession.hpp`:
+  - `SharedSyncState` に `localRetryMenuIndex` (atomic<int8_t>) 追加
+- [MODIFY] `engine/MatchScene.cpp`:
+  - ローカル選択検出時に SharedSyncState.localRetryMenuIndex も更新
+  - `ResetRematch` で SharedSyncState.localRetryMenuIndex を -1 にリセット
+
+### テスト結果 (dual_test.bat)
+- fip=2400+ まで安定動作
+- alive=1 / RTT=110-123μs 安定
+
+---
+
 # fix: 相手入力未到着時にゲーム進行をブロックする待機機構を追加
 
 ## 2026-03-10: readPos > crf で相手入力到着までスピン待機

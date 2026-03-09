@@ -14,6 +14,7 @@
 #include "core_dll/detect/GamePhaseDetector.hpp"
 #include "core_dll/detect/MbaaAddresses.hpp"
 #include "core_dll/common/DebugLog.hpp"
+#include "core_dll/engine/MatchScene.hpp"
 #include "core_dll/ui/State_Ui_Logic.hpp"
 #include <cstring>
 
@@ -39,6 +40,8 @@ struct GameTickPayload {
     uint8_t  flags;        // bit0: ready, bit1: introComplete
     // スタート時刻 (WaitStart 時のみ有効, 0=未設定)
     int64_t  startTimeUs;
+    // Rematch メニュー選択 (-1=未決定, 0=もう1回, 1=キャラ選択, 2=リプレイ保存)
+    int8_t   retryMenuIndex;
 };
 #pragma pack(pop)
 
@@ -159,6 +162,11 @@ void GameTickCodec::ProcessReceivedPacket(const std::vector<uint8_t>& data,
         cccaster::core::netplay::NetplaySession::GetMutableState()
             .peerIntroComplete.store(true, std::memory_order_release);
     }
+
+    // (9) Rematch メニュー選択受信
+    if (gtp.retryMenuIndex >= 0) {
+        cccaster::domain::scene::MatchScene::SetRemoteRetryMenuIndex(gtp.retryMenuIndex);
+    }
 }
 
 // ============================================================================
@@ -191,6 +199,10 @@ std::vector<uint8_t> GameTickCodec::BuildGameTickPacket(
     }
 
     gtp.startTimeUs = startTimeUs;
+
+    // Rematch メニュー選択
+    gtp.retryMenuIndex = cccaster::core::netplay::NetplaySession::GetState()
+        .localRetryMenuIndex.load(std::memory_order_acquire);
 
     return BuildUnifiedPacket(0x00, PKT_GAME_TICK, now, &gtp, sizeof(gtp));
 }
