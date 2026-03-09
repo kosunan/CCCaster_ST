@@ -1,6 +1,6 @@
-#include "cli_launcher/controller/MainController.hpp"
+﻿#include "cli_launcher/controller/MainController.hpp"
 #include "cli_launcher/ConfigManager.hpp"
-#include "core_dll/fg_netplay/network/NetworkSimulator.hpp"
+#include "core_dll/network/NetworkSimulator.hpp"
 #include <iostream>
 #include <fstream>
 

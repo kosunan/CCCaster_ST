@@ -220,6 +220,28 @@ core_dll の全ファイルを4つのアーキテクチャ層に再配置。ロ�
 
 ---
 
+# refactor: 目的軸フォルダ構造への全面移行（3層→9フォルダ）
+
+## 2026-03-09: core_dll フォルダ再配置
+
+### 変更内容
+- 旧3層構造（`fg_netplay/`, `mbaa_sync/`, `mbaa_game/`）を廃止
+- 「やりたい事の順序」に基づく9フォルダに全61ファイルを再配置:
+  - `inject/` (4) — ゲームに介入する
+  - `detect/` (7) — ゲームの状態を知る
+  - `input/` (6) — 入力を奪う
+  - `timing/` (10) — 時間を支配する
+  - `network/` (10) — 相手と通信する
+  - `sync/` (7) — 入力を同期する
+  - `rollback/` (7) — 過去を修正する
+  - `engine/` (10) — 全体を駆動する
+  - `ui/` (22, 移動なし) — 情報を表示する
+- 全ファイルの `#include` パスを新構造に置換（45ファイル/113件）
+- `CMakeLists.txt` 2ファイル更新（`core_dll/`, `cli_launcher/`）
+- クリーンビルド（EXE + DLL + test_overlay）成功確認
+
+---
+
 # docs: GameControl.hpp の旧描画制御コメントを現行 API Hook 仕様に修正
 
 ## 2026-03-08: GameControl.hpp コメント修正（旧 CC_SKIP_FRAMES/CC_PAUSE_FLAG 時代の記述を削除）

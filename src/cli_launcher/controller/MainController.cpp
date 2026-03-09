@@ -1,10 +1,10 @@
-#include "cli_launcher/controller/MainController.hpp"
+﻿#include "cli_launcher/controller/MainController.hpp"
 #include "cli_launcher/ui/ConsoleRenderer.hpp"
 #include "cli_launcher/network_wrapper/SessionNegotiator.hpp"
 #include "cli_launcher/ConfigManager.hpp"
 #include "launcher/GameLauncher.hpp"
 #include "shared_contracts/IpcData.hpp"
-#include "core_dll/fg_netplay/network/UdpSocket.hpp"
+#include "core_dll/network/UdpSocket.hpp"
 
 #include <iostream>
 #include <conio.h>
