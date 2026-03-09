@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // SceneRunner — ゲームスレッド統合型フレームディスパッチャ
 //
 // 【アーキテクチャ】
@@ -25,10 +25,10 @@
 #include "core_dll/engine/SceneFastBoot.hpp"
 #include "core_dll/sync/NetplaySession.hpp"
 #include "core_dll/sync/FrameInputBuffer.hpp"
-#include "core_dll/detect/GamePhaseDetector.hpp"
-#include "core_dll/detect/MbaaAddresses.hpp"
-#include "core_dll/input/DirectInputHook.hpp"
-#include "core_dll/timing/TimeHooks.hpp"
+#include "core_dll/mbaa_mem/GamePhaseDetector.hpp"
+#include "core_dll/mbaa_mem/MbaaAddresses.hpp"
+#include "core_dll/hook/DirectInputHook.hpp"
+#include "core_dll/hook/TimeHooks.hpp"
 #include "shared_contracts/IpcData.hpp"
 #include <atomic>
 
@@ -244,9 +244,10 @@ void SceneRunner::Step() {
     }
 
     // (G) 相手入力待機 + CB → ゲームメモリ書込み
+    //   Rematch では OnRematch が独自に入力を処理するためスキップ。
     //   readPos が confirmedRemoteFrame を超えている場合、
     //   相手の入力パケット到着を待ってからゲームメモリに書込む。
-    {
+    if (phase != GamePhase::Rematch) {
         auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
         uint32_t readPos = buf.GetReadPos();
 

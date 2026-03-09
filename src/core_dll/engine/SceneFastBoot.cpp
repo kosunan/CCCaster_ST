@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // SceneFastBoot.cpp — ゲームスレッド上の高速起動の実装
 //
 // 【旧 FastBootRunner からの移植】
@@ -9,8 +9,8 @@
 
 #include "core_dll/engine/SceneFastBoot.hpp"
 #include "core_dll/engine/FrameControl.hpp"
-#include "core_dll/detect/MbaaAddresses.hpp"
-#include "core_dll/detect/MbaaInputDefs.hpp"
+#include "core_dll/mbaa_mem/MbaaAddresses.hpp"
+#include "core_dll/mbaa_mem/MbaaInputDefs.hpp"
 #include "core_dll/common/DebugLog.hpp"
 
 #include <cstring>

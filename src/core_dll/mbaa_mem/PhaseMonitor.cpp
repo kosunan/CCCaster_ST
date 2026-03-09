@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // GameMonitor.cpp — ゲーム状態の監視・判定ファサード（実装）
 //
 // 【処理概要】
@@ -12,8 +12,8 @@
 // 設計書: docs/design/memory_and_hook_design.md
 // ============================================================================
 
-#include "core_dll/detect/GamePhaseDetector.hpp"
-#include "core_dll/detect/MbaaAddresses.hpp"
+#include "core_dll/mbaa_mem/GamePhaseDetector.hpp"
+#include "core_dll/mbaa_mem/MbaaAddresses.hpp"
 
 namespace cccaster::game_interface {
 

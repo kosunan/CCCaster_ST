@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // GameTickCodec.cpp — 同期計算器（実装）
 //
 // 【パケット設計】
@@ -11,8 +11,8 @@
 #include "core_dll/timing/Metronome.hpp"
 #include "core_dll/timing/WasapiClock.hpp"
 #include "core_dll/sync/FrameInputBuffer.hpp"
-#include "core_dll/detect/GamePhaseDetector.hpp"
-#include "core_dll/detect/MbaaAddresses.hpp"
+#include "core_dll/mbaa_mem/GamePhaseDetector.hpp"
+#include "core_dll/mbaa_mem/MbaaAddresses.hpp"
 #include "core_dll/common/DebugLog.hpp"
 #include "core_dll/engine/MatchScene.hpp"
 #include "core_dll/ui/State_Ui_Logic.hpp"

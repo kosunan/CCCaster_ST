@@ -6,48 +6,45 @@
 # so we only declare our local module here.
 
 add_library(cccaster_hook SHARED
-    # === inject/ — ゲームに介入する ===
-    inject/dllmain.cpp
+    # === mbaa_mem/ — MBAA メモリ操作・検出 ===
+    mbaa_mem/dllmain.cpp
+    mbaa_mem/MbaaPatcher.cpp
+    mbaa_mem/PhaseMonitor.cpp
+    mbaa_mem/FastBootRunner.cpp
 
-    # === timing/ — 時間を支配する ===
-    timing/DxHook.cpp
-    timing/TimeHooks.cpp
+    # === hook/ — 外部 API フック ===
+    hook/DxHook.cpp
+    hook/TimeHooks.cpp
+    hook/DirectInputHook.cpp
+    hook/WndProcHook.cpp
+
+    # === timing/ — 時間管理 ===
     timing/WasapiClock.cpp
     timing/Metronome.cpp
 
-    # === input/ — 入力を奪う ===
-    input/DirectInputHook.cpp
-    input/WndProcHook.cpp
-    input/SceneInputFilter.cpp
+    # === engine/ — メインロジック ===
+    engine/SceneRunner.cpp
+    engine/GameFrameOrchestrator.cpp
+    engine/SceneFastBoot.cpp
+    engine/MatchScene.cpp
+    engine/SceneInputFilter.cpp
 
-    # === detect/ — ゲームの状態を知る ===
-    detect/PhaseMonitor.cpp
-
-    # === network/ — 相手と通信する ===
+    # === network/ — 通信 ===
     network/UdpSocket.cpp
     network/NetworkSimulator.cpp
     network/NetplayManager.cpp
     network/GameTickCodec.cpp
     network/PacketRouter.cpp
 
-    # === sync/ — 入力を同期する ===
+    # === sync/ — 同期 ===
     sync/NetplaySession.cpp
     sync/NetplayClock.cpp
 
-    # === rollback/ — 過去を修正する ===
+    # === rollback/ — ロールバック ===
     rollback/RollbackEngine.cpp
     rollback/StateBuffer.cpp
 
-    # === engine/ — 全体を駆動する ===
-    engine/SceneRunner.cpp
-    engine/GameFrameOrchestrator.cpp
-    engine/SceneFastBoot.cpp
-    engine/MatchScene.cpp
-
-    # === inject/ — ゲーム固有パッチ ===
-    inject/MbaaPatcher.cpp
-
-    # === ui/ — 情報を表示する ===
+    # === ui/ — 表示 ===
     ui/OverlayRenderer.cpp
     ui/State_Ui_Logic.cpp
     ui/State_Ui_View.cpp

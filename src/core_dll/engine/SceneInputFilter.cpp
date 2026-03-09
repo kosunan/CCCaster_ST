@@ -1,11 +1,11 @@
-﻿// ============================================================================
+// ============================================================================
 // SceneInputFilter.cpp — 統合入力フィルタ（実装）
 //
 // 現時点ではパススルー。シーン別フィルタ条件は後日この関数に追加する。
 // ============================================================================
 
-#include "core_dll/input/SceneInputFilter.hpp"
-#include "core_dll/detect/GamePhaseDetector.hpp"
+#include "core_dll/engine/SceneInputFilter.hpp"
+#include "core_dll/mbaa_mem/GamePhaseDetector.hpp"
 
 namespace cccaster::domain::scene {
 

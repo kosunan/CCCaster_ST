@@ -1,10 +1,10 @@
-﻿// ============================================================================
+// ============================================================================
 // MbaaPatcher.cpp — MBAA 固有メモリパッチの実装
 // ============================================================================
 
-#include "core_dll/inject/MbaaPatcher.hpp"
-#include "core_dll/inject/MemoryPatcher.hpp"
-#include "core_dll/detect/MbaaAddresses.hpp"
+#include "core_dll/mbaa_mem/MbaaPatcher.hpp"
+#include "core_dll/mbaa_mem/MemoryPatcher.hpp"
+#include "core_dll/mbaa_mem/MbaaAddresses.hpp"
 #include "core_dll/common/DebugLog.hpp"
 
 namespace cccaster::game_memory {

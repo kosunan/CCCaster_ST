@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 /**
  * @file GamePhaseDetector.hpp
  * @brief MBAACC ゲームフェーズ検出 — メモリ読み取りによるゲーム状態判定
@@ -17,7 +17,7 @@
  */
 
 #include <cstdint>
-#include "core_dll/detect/GamePhase.hpp"
+#include "core_dll/mbaa_mem/GamePhase.hpp"
 
 namespace cccaster::game_interface {
 

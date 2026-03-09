@@ -1,3 +1,27 @@
+# refactor: core_dll フォルダ再編成 — hook/ + mbaa_mem/ 新設
+
+## 2026-03-10: hook系コードとMBAAメモリ系コードの分離
+
+### 新設フォルダ
+- **hook/** — 外部APIフック (DxHook, TimeHooks, DirectInputHook, WndProcHook)
+- **mbaa_mem/** — MBAAメモリ操作・検出 (旧 inject/ + detect/ 統合)
+
+### 移動ファイル (19ファイル)
+- `timing/` → `hook/`: DxHook.cpp/hpp, TimeHooks.cpp/hpp
+- `input/` → `hook/`: DirectInputHook.cpp/hpp, WndProcHook.cpp/hpp
+- `inject/` → `mbaa_mem/`: dllmain.cpp, MbaaPatcher.cpp/hpp, MemoryPatcher.hpp
+- `detect/` → `mbaa_mem/`: MbaaAddresses.hpp, MbaaInputDefs.hpp, GamePhase.hpp, GamePhaseDetector.hpp, PhaseMonitor.cpp, FastBootRunner.cpp/hpp
+- `input/` → `engine/`: SceneInputFilter.cpp/hpp
+
+### 廃止フォルダ
+- `inject/`, `input/`, `detect/` → 空フォルダ化
+
+### 関連更新
+- 24ファイルの `#include` パス更新
+- CMakeLists.txt 更新
+
+---
+
 # feat: Rematch メニュー選択を GAME_TICK パケットに統合
 
 ## 2026-03-10: retryMenuIndex フィールド追加

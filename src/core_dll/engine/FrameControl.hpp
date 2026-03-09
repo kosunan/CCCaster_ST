@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 /**
  * @file FrameControl.hpp
  * @brief ゲーム制御ファサード — メモリ操作を階層化した統一API
@@ -34,7 +34,7 @@
  */
 
 #include "core_dll/timing/SpeedFlags.hpp"
-#include "core_dll/detect/MbaaInputDefs.hpp"
+#include "core_dll/mbaa_mem/MbaaInputDefs.hpp"
 #include <cstdint>
 #include <windows.h>
 

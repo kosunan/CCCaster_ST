@@ -3,24 +3,24 @@
 // FrameInputBuffer — 全フレーム入力管理（Central Ring Buffer）
 //
 // 【責務】
-//   自入力・相手入力をフレームごとにセットで管理する巨大リングバッファ。
-//   DLLスレッドが CommitFrame() で入力蓄積、ゲームスレッドが読取り。
+//   自入力・相手入力をフレームごとにセットで管理する純粋なリングバッファ。
+//   「いつ・何を書くか」はバッファが判断しない — 呼び出し元 (SceneRunner) が決める。
 //
 // 【スレッド安全性】
-//   - CommitFrame / WriteSlot / SetWriteHead: DLLスレッド専用（単一writer）
+//   - WriteSlot / SetWriteHead: DLLスレッド専用（単一writer）
 //   - ConfirmRemote: ioスレッド（受信コールバック経由）
 //   - ReadFrameForGame / GetSlot / GetWriteHead / GetReadPos: ゲームスレッドから読取り（atomic同期）
 //   - ConsumeMismatch: ゲームスレッドのみ
 //
 // 【データフロー】
-//   DLLスレッド  → CommitFrame() → スロット書込み + writeHead 更新
+//   SceneRunner    → WriteSlot() + SetWriteHead() （Phase/intro判定後）
 //   ゲームスレッド ← ReadFrameForGame() → confirmed チェック + P1/P2 振分け
-//   ioスレッド   → ConfirmRemote() → 相手入力確定 + confirmedRemoteFrame 更新
+//   ioスレッド     → ConfirmRemote() → 相手入力確定 + confirmedRemoteFrame 更新
 //
-// 【readPos 算出方式】
-//   readPos = writeHead - max(delay + maxRollback, 1)
-//   非ロールバック区間: confirmed=true のスロットのみ消費（未確定なら待つ）
-//   ロールバック区間:   confirmed=false でも予測入力で進行可（後からロールバック）
+// 【CB書込み対象（SceneRunner が判断）】
+//   CharaSelect: 常時書込み
+//   InGame:      intro 0→1 遷移後のみ書込み（同期フレーム番号のゼロ点を一致させる）
+//   Loading / Rematch / 他: 書込まない
 //
 // 【注意】
 //   CC_SKIP_FRAMES_ADDR は使用禁止。描画制御は SpeedFlags (RenderSkip) で行う。
@@ -29,10 +29,6 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
-
-// CommitFrame() 内部で使用する依存ヘッダ（前方宣言では不十分）
-#include "core_dll/detect/GamePhaseDetector.hpp"
-#include "core_dll/input/DirectInputHook.hpp"
 
 namespace cccaster {
 namespace core {
@@ -62,51 +58,6 @@ public:
     // DLLスレッドから呼ばれる (Write系)
     // @thread_safety DLLスレッド専用（単一writer）
     // ════════════════════════════════════════════════════
-
-    /// @brief 引数なし CommitFrame — 内部で全情報を収集してスロット書込み
-    /// @details (1) Phase取得 (2) 入力Poll (3) rollbackable判定 (4) スロット書込み + writeHead更新
-    /// @thread_safety DLLスレッド専用
-    void CommitFrame() {
-        // (1) 現在の画面フェーズ
-        auto phase = cccaster::game_interface::PhaseMonitor::GetCurrentPhase();
-        uint8_t phaseU8 = static_cast<uint8_t>(phase);
-
-        // ゲームが入力を受け付けるフェーズのみCBに書込み
-        // CharaSelect(2), InGame(4), Rematch(5) → 有効
-        // Unknown(0), Title(1), Loading(3)      → スキップ（ゲームが廃棄する入力）
-        using GP = cccaster::game_interface::GamePhase;
-        if (phase != GP::CharaSelect && phase != GP::InGame && phase != GP::Rematch) {
-            return;  // 入力無効フェーズ — CB に書込まない
-        }
-
-        uint32_t frame = _writeHead.load(std::memory_order_relaxed) + 1;
-
-        // (2) ローカル入力読取
-        cccaster::game_interface::DirectInputHook::Poll();
-        uint32_t localInput = _isHost
-            ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
-            : cccaster::game_interface::DirectInputHook::GetPlayer2Input();
-
-        // (3) rollbackable判定 (InGame のみ)
-        bool rb = (phase == GP::InGame);
-
-        // (4) スロット書込み + writeHead 更新
-        auto& slot = _ring[frame % RING_SIZE];
-        slot.frame        = frame;
-        slot.gamePhase    = phaseU8;
-        slot.rollbackable = rb;
-        slot.localInput   = localInput;
-        slot.remoteInput  = 0;      // 未確定
-        slot.confirmed    = false;
-        _writeHead.store(frame, std::memory_order_release);
-    }
-
-    /// @brief 旧API: 引数付き CommitFrame (段階的移行用)
-    void CommitFrame(uint32_t frame, uint8_t gamePhase, bool rollbackable,
-                     uint32_t localInput, uint32_t remoteInput, bool confirmed) {
-        WriteSlot(frame, gamePhase, rollbackable, localInput, remoteInput, confirmed);
-        SetWriteHead(frame);
-    }
 
     /// @brief スロット書込み（低レベルAPI — 通常は CommitFrame を使うこと）
     /// @thread_safety 通信スレッド専用
@@ -163,9 +114,8 @@ public:
 
     /// @brief 全状態リセット＋初期フレーム＋同期パラメータを一括設定（推奨）
     /// @thread_safety Start前のシングルスレッド状態で呼ぶこと
-    void Initialize(uint32_t startFrame, int16_t delay, int16_t maxRollback, bool isHost = false) {
+    void Initialize(uint32_t startFrame, int16_t delay, int16_t maxRollback) {
         Reset();
-        _isHost = isHost;
         SetWriteHead(startFrame);
         InitializeConfirmedRemoteFrame(startFrame);
         SetSyncParams(delay, maxRollback);
@@ -290,8 +240,7 @@ private:
     int16_t _delay       = 0;
     int16_t _maxRollback = 0;
 
-    // ロール識別（CommitFrame で P1/P2 どちらの入力を読むか）
-    bool _isHost = false;
+
 };
 
 } // namespace sync

@@ -1,13 +1,13 @@
-﻿// ============================================================================
+// ============================================================================
 // FastBootRunner.cpp — ゲーム起動高速化の実装
 //
 // GameHooks::NetworkSyncLoop() から FastBoot フェーズを分離・移設したもの。
 // ============================================================================
 
-#include "core_dll/detect/FastBootRunner.hpp"
-#include "core_dll/inject/MemoryPatcher.hpp"
-#include "core_dll/detect/MbaaAddresses.hpp"
-#include "core_dll/detect/MbaaInputDefs.hpp"
+#include "core_dll/mbaa_mem/FastBootRunner.hpp"
+#include "core_dll/mbaa_mem/MemoryPatcher.hpp"
+#include "core_dll/mbaa_mem/MbaaAddresses.hpp"
+#include "core_dll/mbaa_mem/MbaaInputDefs.hpp"
 #include "core_dll/common/DebugLog.hpp"
 #include "shared_contracts/IpcData.hpp"
 

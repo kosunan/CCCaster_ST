@@ -1,10 +1,10 @@
-﻿#include "core_dll/input/WndProcHook.hpp"
+#include "core_dll/hook/WndProcHook.hpp"
 #include "core_dll/ui/UIManager.hpp"
-#include "core_dll/detect/MbaaAddresses.hpp"
+#include "core_dll/mbaa_mem/MbaaAddresses.hpp"
 #include <imgui.h>
 #include <cstdio>
 #include <Dbt.h>
-#include "core_dll/input/DirectInputHook.hpp"
+#include "core_dll/hook/DirectInputHook.hpp"
 
 void HookLog(const char* msg);
 

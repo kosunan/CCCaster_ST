@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // WasapiClock.cpp — WASAPI IAudioClock ベースの高精度クロック（実装）
 //
 // 【初期化フロー】
@@ -15,7 +15,7 @@
 // ============================================================================
 
 #include "core_dll/timing/WasapiClock.hpp"
-#include "core_dll/timing/TimeHooks.hpp"
+#include "core_dll/hook/TimeHooks.hpp"
 #include <windows.h>
 #include <initguid.h>
 #include <mmdeviceapi.h>

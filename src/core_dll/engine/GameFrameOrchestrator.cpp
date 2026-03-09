@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // GameFrameOrchestrator.cpp — DxHookコールバック統合（実装）
 //
 // 【3つの処理】
@@ -10,14 +10,14 @@
 #include <windows.h>
 #include "core_dll/engine/GameFrameOrchestrator.hpp"
 #include "core_dll/engine/SceneRunner.hpp"
-#include "core_dll/timing/DxHook.hpp"
-#include "core_dll/input/WndProcHook.hpp"
-#include "core_dll/input/DirectInputHook.hpp"
+#include "core_dll/hook/DxHook.hpp"
+#include "core_dll/hook/WndProcHook.hpp"
+#include "core_dll/hook/DirectInputHook.hpp"
 #include "core_dll/ui/UIManager.hpp"
 #include "core_dll/ui/State_Ui_Logic.hpp"
 #include "core_dll/sync/NetplaySession.hpp"
 #include "core_dll/timing/SpeedFlags.hpp"
-#include "core_dll/detect/MbaaAddresses.hpp"
+#include "core_dll/mbaa_mem/MbaaAddresses.hpp"
 #include <imgui.h>
 #include <imgui_impl_dx9.h>
 #include <imgui_impl_win32.h>

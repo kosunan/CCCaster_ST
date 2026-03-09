@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // dllmain.cpp — DLLエントリーポイント（最小構成）
 //
 // 責務:
@@ -16,9 +16,9 @@
 #include <cstdio>
 #include <string>
 #include "core_dll/network/NetplayManager.hpp"
-#include "core_dll/timing/TimeHooks.hpp"
-#include "core_dll/inject/MbaaPatcher.hpp"
-#include "core_dll/timing/DxHook.hpp"
+#include "core_dll/hook/TimeHooks.hpp"
+#include "core_dll/mbaa_mem/MbaaPatcher.hpp"
+#include "core_dll/hook/DxHook.hpp"
 #include "core_dll/engine/SceneRunner.hpp"
 #include "core_dll/engine/MatchContext.hpp"
 #include "core_dll/engine/GameFrameOrchestrator.hpp"

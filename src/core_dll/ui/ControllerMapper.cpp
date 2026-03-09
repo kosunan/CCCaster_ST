@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // ControllerMapper.cpp — コントローラーマッピングUI 実装
 // ============================================================================
 //
@@ -21,7 +21,7 @@
 
 #include "core_dll/ui/ControllerMapper.hpp"
 #include "core_dll/ui/OverlayRenderer.hpp"
-#include "core_dll/input/DirectInputHook.hpp"
+#include "core_dll/hook/DirectInputHook.hpp"
 #include "cli_launcher/ConfigManager.hpp"
 #include <imgui.h>
 #include <string>

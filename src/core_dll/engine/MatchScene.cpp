@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // MatchScene.cpp — 画面別業務ロジック（統合版 実装）
 //
 // 【設計】
@@ -14,15 +14,15 @@
 // ============================================================================
 
 #include "core_dll/engine/MatchScene.hpp"
-#include "core_dll/input/SceneInputFilter.hpp"
+#include "core_dll/engine/SceneInputFilter.hpp"
 #include "core_dll/engine/FrameControl.hpp"
 #include "core_dll/common/DebugLog.hpp"
 #include "core_dll/sync/FrameInputBuffer.hpp"
 #include "core_dll/sync/NetplaySession.hpp"
-#include "core_dll/detect/MbaaAddresses.hpp"
-#include "core_dll/detect/MbaaInputDefs.hpp"
-#include "core_dll/detect/GamePhaseDetector.hpp"
-#include "core_dll/input/DirectInputHook.hpp"
+#include "core_dll/mbaa_mem/MbaaAddresses.hpp"
+#include "core_dll/mbaa_mem/MbaaInputDefs.hpp"
+#include "core_dll/mbaa_mem/GamePhaseDetector.hpp"
+#include "core_dll/hook/DirectInputHook.hpp"
 #include <atomic>
 
 namespace cccaster::domain::scene {

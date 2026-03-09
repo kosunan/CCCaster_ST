@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Controller_Ui_View.cpp — マッピング画面 描画専用実装
 // ============================================================================
 //
@@ -10,7 +10,7 @@
 #include "core_dll/ui/Controller_Ui_View.hpp"
 #include "core_dll/ui/Controller_Ui_Logic.hpp"
 #include "core_dll/ui/OverlayRenderer.hpp"
-#include "core_dll/input/DirectInputHook.hpp"
+#include "core_dll/hook/DirectInputHook.hpp"
 #include <imgui.h>
 #include <cmath>
 

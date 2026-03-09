@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // ============================================================================
 // RollbackEngine — ロールバック＆ロールアップ管理
 // 処理速度最優先: キー確定＋ゲーム進行のみ
@@ -7,7 +7,7 @@
 #include <cstdint>
 #include "core_dll/rollback/MemDumper.hpp"
 #include "core_dll/rollback/StateRingBuffer.hpp"
-#include "core_dll/detect/MbaaAddresses.hpp"
+#include "core_dll/mbaa_mem/MbaaAddresses.hpp"
 
 namespace cccaster::sync {
 

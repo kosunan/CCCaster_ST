@@ -1,9 +1,9 @@
-﻿// ============================================================================
+// ============================================================================
 // Controller_Ui_Logic.cpp — コントローラーマッピング ロジック実装
 // ============================================================================
 
 #include "core_dll/ui/Controller_Ui_Logic.hpp"
-#include "core_dll/input/DirectInputHook.hpp"
+#include "core_dll/hook/DirectInputHook.hpp"
 #include "cli_launcher/ConfigManager.hpp"
 #include <imgui.h>
 

@@ -1,11 +1,11 @@
-﻿#pragma once
+#pragma once
 // ============================================================================
 // DumpEntryList — Constants.hppベースのダンプエントリ構築
 // ============================================================================
 
 #include <vector>
 #include "core_dll/rollback/MemDumper.hpp"
-#include "core_dll/detect/MbaaAddresses.hpp"
+#include "core_dll/mbaa_mem/MbaaAddresses.hpp"
 
 namespace cccaster::sync {
 

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // ============================================================================
 // SceneInputFilter — 統合入力フィルタ（全シーン・全モード対応）
 //
@@ -19,7 +19,7 @@
 // ============================================================================
 
 #include <cstdint>
-#include "core_dll/detect/GamePhaseDetector.hpp"
+#include "core_dll/mbaa_mem/GamePhaseDetector.hpp"
 
 namespace cccaster::domain::scene {
 
