@@ -243,9 +243,30 @@ void SceneRunner::Step() {
             break;
     }
 
-    // (G) CB → ゲームメモリ書込み
+    // (G) 相手入力待機 + CB → ゲームメモリ書込み
+    //   readPos が confirmedRemoteFrame を超えている場合、
+    //   相手の入力パケット到着を待ってからゲームメモリに書込む。
     {
         auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
+        uint32_t readPos = buf.GetReadPos();
+
+        if (readPos > 0) {
+            uint32_t crf = buf.GetConfirmedRemoteFrame();
+            if (readPos > crf) {
+                // 相手入力未到着 → crf が readPos 以上になるまで待機
+                static constexpr int WAIT_TIMEOUT_MS = 3000;
+                auto startWait = GetCurrentTimeMs();
+                while (buf.GetConfirmedRemoteFrame() < readPos) {
+                    if ((GetCurrentTimeMs() - startWait) > WAIT_TIMEOUT_MS) {
+                        DebugLog("[SceneRunner] Remote input wait TIMEOUT at readPos=%u crf=%u (waited %dms)",
+                                 readPos, buf.GetConfirmedRemoteFrame(), WAIT_TIMEOUT_MS);
+                        break;
+                    }
+                    Sleep(0);
+                }
+            }
+        }
+
         uint32_t p1 = 0, p2 = 0;
         if (buf.ReadFrameForGame(ctx.isHost, p1, p2)) {
             GC::WriteInput(p1, p2);

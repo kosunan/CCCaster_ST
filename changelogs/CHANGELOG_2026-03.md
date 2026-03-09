@@ -1,3 +1,23 @@
+# fix: 相手入力未到着時にゲーム進行をブロックする待機機構を追加
+
+## 2026-03-10: readPos > crf で相手入力到着までスピン待機
+
+### 問題
+ReadFrameForGame で confirmed=false のフレームはゲームメモリに書込まれず、
+HOST 側で自分の操作が反映されない（相手には送信される）非対称な挙動が発生。
+
+### 変更ファイル
+- [MODIFY] `engine/SceneRunner.cpp`:
+  - (G) セクションに crf ベースの待機ロジック追加
+  - readPos > confirmedRemoteFrame の場合、crf が追いつくまで Sleep(0) スピン待機
+  - 3秒タイムアウト付き（TIMEOUT 発生時はログ出力して続行）
+
+### テスト結果 (dual_test.bat)
+- TIMEOUT なし / Peer Disconnected なし
+- HOST/CLIENT 両方で fip=2340+ まで安定動作
+
+---
+
 # refactor: メトロノーム駆動アーキテクチャ刷新 — SleepFrame 廃止 + ゲームスレッド精密待機
 
 ## 2026-03-09: 独立スレッド廃止 → WaitForNextTick + gap キャッチアップ
