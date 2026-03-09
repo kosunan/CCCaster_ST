@@ -34,8 +34,6 @@
  */
 
 #include "core_dll/timing/SpeedFlags.hpp"
-#include "core_dll/sync/FrameInputBuffer.hpp"
-#include "core_dll/detect/MbaaAddresses.hpp"
 #include "core_dll/detect/MbaaInputDefs.hpp"
 #include <cstdint>
 #include <windows.h>
@@ -87,48 +85,15 @@ public:
 
 
     /**
-     * @brief 次フレームまで待機する
+     * @brief gap に応じて RenderSkip を制御する
+     * @param gap   peerLatestFrame - localWriteHead（相手との差分）
      * @details
-     *   worldTimer（ゲームエンジン側フレームカウンタ）が
-     *   effectiveHead（ディレイ+ロールバック補正+リモート確定）に追従する。
-     *
-     *   effectiveHead = min(writeHead - (delay+maxRollback), confirmedRemoteFrame)
-     *
-     *   gap = effectiveHead - worldTimer として:
-     *     gap <= 0: worldTimer が追いついた → effectiveHead 変化を待機
-     *     gap == 1: 通常速度で 1F 進める
-     *     gap >= 2: 描画OFF で高速に追いつかせる
-     *
-     *   【注意】CC_SKIP_FRAMES_ADDR は使用禁止。
-     *   描画の ON/OFF は API hook (RenderSkip → OnPresentSkip) で制御する。
+     *   gap >= 2: 相手が先行 → RenderSkip=ON（描画スキップで高速キャッチアップ）
+     *   gap <  2: 通常 → RenderSkip=OFF（描画ON）
      */
-    static void SleepFrame() {
+    static void SetRenderSkipByGap(int32_t gap) {
         using SF = cccaster::core::SpeedFlags;
-        auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
-        uint32_t ef = buf.GetEffectiveHead();
-        uint32_t wt = *CC_WORLD_TIMER_ADDR;
-
-        // gap = effectiveHead - worldTimer
-        int32_t gap = static_cast<int32_t>(ef) - static_cast<int32_t>(wt);
-
-        if (gap <= 0) {
-            // worldTimer が effectiveHead に追いついている → 変化を待つ
-            SF::RenderSkip().store(false, std::memory_order_release);
-            SF::TickBypass().store(false, std::memory_order_release);
-            for (;;) {
-                uint32_t now = buf.GetEffectiveHead();
-                if (now != ef) break;
-                Sleep(1);
-            }
-        } else if (gap == 1) {
-            // 1F 遅れ → 通常速度で進行
-            SF::RenderSkip().store(false, std::memory_order_release);
-            SF::TickBypass().store(false, std::memory_order_release);
-        } else {
-            // 2F 以上遅れ → 描画OFF (API hook経由: RenderSkip→OnPresentSkip)
-            SF::RenderSkip().store(true, std::memory_order_release);
-            SF::TickBypass().store(true, std::memory_order_release);
-        }
+        SF::RenderSkip().store(gap >= 2, std::memory_order_release);
     }
 
     // -------------------- 入力操作 --------------------

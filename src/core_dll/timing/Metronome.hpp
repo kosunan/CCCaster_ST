@@ -1,24 +1,28 @@
 #pragma once
 // ============================================================================
-// Metronome — フレームリズム生成器（独立スレッド）
+// Metronome — フレームリズム生成器（ゲームスレッド直接呼出し型）
 //
 // 【責務】
-//   α1 + α2 補正付き間隔でティック信号を発火する。
+//   α1 + α2 補正付き間隔で精密待機を提供する。
 //   フレーム番号の管理は行わない（GameTickCodec に委譲）。
 //   通信やFrameInputBuffer操作は一切行わない。
+//
+// 【使い方】
+//   ゲームスレッドが毎フレーム WaitForNextTick() を呼ぶ。
+//   WaitForNextTick は次ティック時刻まで Sleep+CPUスピン で精密待機する。
+//   skipWait=true の場合は待機せず次ティック時刻のみ進める（キャッチアップ用）。
 //
 // 【α補正】
 //   α1: パケットディレイ不足補正 — D+R で吸収しきれない遅延分
 //   α2: 相手メトロノームとのズレ補正 — Θ変化量ベースのドリフト追従
 //
-// 【スレッド間ルール】
-//   - ティック信号は atomic カウンタで公開。通信スレッドが消費する。
-//   - α1/α2 の設定は GameTickCodec が行う（atomic 書込み）。
+// 【スレッド安全性】
+//   WaitForNextTick() はゲームスレッドから呼ばれる。
+//   α1/α2 の設定は GameTickCodec が行う（atomic 書込み）。
 // ============================================================================
 
 #include <atomic>
 #include <cstdint>
-#include <thread>
 
 namespace cccaster {
 namespace core {
@@ -31,12 +35,10 @@ public:
     void Stop();
     bool IsRunning() const { return _running.load(std::memory_order_acquire); }
 
-    // ─── ティック消費（通信スレッドから呼ぶ）────────────
-    /// 蓄積されたティック数を取得し、0 にリセットする。
-    /// 戻り値 = 前回消費してから何フレーム分進めるべきか。
-    uint32_t ConsumeTicks() {
-        return _pendingTicks.exchange(0, std::memory_order_acq_rel);
-    }
+    // ─── ゲームスレッド精密待機 ──────────────────────────
+    /// 次ティックまで Sleep+CPUスピン で精密待機する。
+    /// @param skipWait true: 待機せず次ティック時刻のみ進める（キャッチアップ用）
+    void WaitForNextTick(bool skipWait = false);
 
     // ─── α補正設定（GameTickCodec から呼ばれる） ───────
     void SetAlpha1(int64_t alpha1Us) { _alpha1Us.store(alpha1Us, std::memory_order_release); }
@@ -54,19 +56,17 @@ public:
     static constexpr int64_t MIN_TICK_US  = 14000;   // 最小（加速下限）
 
 private:
-    void ThreadMain();
     static void SleepUntil(int64_t targetUs);
 
-    // ─── ティック信号カウンタ ────────────────────────────
-    std::atomic<uint32_t> _pendingTicks{0};
+    // ─── 次ティック時刻 ────────────────────────────────
+    int64_t _nextTickUs = 0;
 
     // ─── α補正（μs） ─────────────────────────────────
     std::atomic<int64_t> _alpha1Us{0};  // パケットディレイ不足補正
     std::atomic<int64_t> _alpha2Us{0};  // 相手ドリフト補正
 
-    // ─── スレッド制御 ──────────────────────────────────
+    // ─── 状態 ──────────────────────────────────────────
     std::atomic<bool> _running{false};
-    std::thread _thread;
 };
 
 } // namespace netplay

@@ -1,8 +1,8 @@
 ﻿// ============================================================================
 // Metronome.cpp — フレームリズム生成器（実装）
 //
-// α1 + α2 補正付き間隔でティック信号を発火する。
-// フレーム番号管理は行わない（GameTickCodec に委譲）。
+// ゲームスレッドが WaitForNextTick() を直接呼ぶ精密待機型。
+// α1 + α2 補正付き間隔で待機する。
 // ============================================================================
 
 #include "core_dll/timing/Metronome.hpp"
@@ -27,30 +27,26 @@ int64_t Metronome::GetCurrentIntervalUs() const {
 }
 
 // ============================================================================
-// Start — メトロノームスレッド起動
+// Start — 次ティック時刻を初期化
 // ============================================================================
 void Metronome::Start() {
     if (_running.load()) return;
 
-    _pendingTicks.store(0, std::memory_order_release);
     _alpha1Us.store(0, std::memory_order_release);
     _alpha2Us.store(0, std::memory_order_release);
+    _nextTickUs = timer::WasapiClock::GetTimeUs();
 
     _running.store(true, std::memory_order_release);
-    _thread = std::thread(&Metronome::ThreadMain, this);
 
     cccaster::domain::session::DebugLog("[Metronome] Started.");
 }
 
 // ============================================================================
-// Stop — メトロノームスレッド停止
+// Stop
 // ============================================================================
 void Metronome::Stop() {
     if (!_running.load()) return;
     _running.store(false, std::memory_order_release);
-    if (_thread.joinable()) {
-        _thread.join();
-    }
     cccaster::domain::session::DebugLog("[Metronome] Stopped.");
 }
 
@@ -70,23 +66,18 @@ void Metronome::SleepUntil(int64_t targetUs) {
 }
 
 // ============================================================================
-// ThreadMain — メトロノームスレッドのメインループ
+// WaitForNextTick — ゲームスレッドから呼ばれる精密待機
 // ============================================================================
 //
-// α1 + α2 補正付き間隔でティック信号を蓄積する。
-// 通信やバッファ操作は一切行わない。
+// 次ティック時刻を α補正付きで計算し、その時刻まで Sleep+CPUスピン で待機する。
+// skipWait=true の場合は待機せず、次ティック時刻のみ進める（キャッチアップ用）。
 //
-void Metronome::ThreadMain() {
-    int64_t nextTickUs = timer::WasapiClock::GetTimeUs();
+void Metronome::WaitForNextTick(bool skipWait) {
+    int64_t intervalUs = GetCurrentIntervalUs();
+    _nextTickUs += intervalUs;
 
-    while (_running.load(std::memory_order_acquire)) {
-        int64_t intervalUs = GetCurrentIntervalUs();
-        nextTickUs += intervalUs;
-
-        SleepUntil(nextTickUs);
-
-        // ティック信号を蓄積（通信スレッドが ConsumeTicks で消費する）
-        _pendingTicks.fetch_add(1, std::memory_order_release);
+    if (!skipWait) {
+        SleepUntil(_nextTickUs);
     }
 }
 

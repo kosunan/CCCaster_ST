@@ -101,13 +101,14 @@ public:
     void Stop();
     bool IsRunning() const { return _running.load(); }
 
-    /// @brief メトロノームへのアクセサ（DLLスレッドから ConsumeTicks 用）
+    /// @brief メトロノームへのアクセサ（DLLスレッドから WaitForNextTick 用）
     Metronome& GetMetronome() { return _metronome; }
 
     // ─── 時計データ読取り（オーバーレイ用、GameTickCodec 委譲）──
     int64_t GetRttUs() const        { return _calc.GetRttUs(); }
     int64_t GetThetaUs() const      { return _calc.GetThetaUs(); }
     int64_t GetBaselineTheta() const { return _calc.GetBaselineTheta(); }
+    uint32_t GetLatestPeerFrame() const { return _calc.GetLatestPeerFrame(); }
 
     // ─── D/R 動的変更（GameTickCodec 委譲）─────────────
     void SetDelayFrames(int d)  { _calc.SetDelayFrames(d); }

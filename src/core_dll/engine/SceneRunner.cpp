@@ -24,6 +24,7 @@
 #include "core_dll/engine/MatchScene.hpp"
 #include "core_dll/engine/SceneFastBoot.hpp"
 #include "core_dll/sync/NetplaySession.hpp"
+#include "core_dll/sync/FrameInputBuffer.hpp"
 #include "core_dll/detect/GamePhaseDetector.hpp"
 #include "core_dll/detect/MbaaAddresses.hpp"
 #include "core_dll/input/DirectInputHook.hpp"
@@ -147,18 +148,41 @@ void SceneRunner::Step() {
     // (C) FastBoot
     if (phase < GamePhase::CharaSelect && !scene::SceneFastBoot::IsComplete()) {
         scene::SceneFastBoot::ProcessFrame(ctx.isHost);
-        GC::SleepFrame();
+        // FastBoot 中はメトロノーム待機なし、needKeepalive=true で通信維持
+        cccaster::core::netplay::NetplaySession::GetMutableState()
+            .needKeepalive.store(true, std::memory_order_release);
         s_prev = phase;
         ctx.framesInPhase++;
         return;
     }
 
-    // (D) メトロノーム駆動: ConsumeTicks → Phase に応じて CB に書込み
-    //     「いつ・何を書くか」は SceneRunner が判断する。
-    //     FrameInputBuffer は純粋なデータ格納のみ。
+    // (D) メトロノーム精密待機 or キャッチアップ
+    //   gap = peerLatestFrame - localWriteHead
+    //   gap >= 2: 相手が先行 → メトロノーム待ち不要（即座に処理）
+    //   gap <  2: 通常 → メトロノームの次ティックまで Sleep+CPUスピン
     {
         auto& metronome = cccaster::core::netplay::NetplaySession::GetInstance().GetMetronome();
-        uint32_t ticks = metronome.ConsumeTicks();
+        auto& syncState = cccaster::core::netplay::NetplaySession::GetState();
+        auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
+
+        uint32_t peerFrame = syncState.isSynced.load(std::memory_order_acquire)
+            ? cccaster::core::netplay::NetplaySession::GetInstance().GetLatestPeerFrame()
+            : 0;
+        uint32_t localHead = buf.GetWriteHead();
+        int32_t gap = static_cast<int32_t>(peerFrame) - static_cast<int32_t>(localHead);
+
+        bool skipWait = (gap >= 2);
+        GC::SetRenderSkipByGap(gap);
+
+        if (metronome.IsRunning()) {
+            metronome.WaitForNextTick(skipWait);
+        }
+    }
+
+    // (E) 入力取得 → CB書込み
+    //   「いつ・何を書くか」は SceneRunner が判断する。
+    //   FrameInputBuffer は純粋なデータ格納のみ。
+    {
         auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
 
         // InGame の intro 0→1 遷移検出（CB書込みのゲート）
@@ -187,11 +211,9 @@ void SceneRunner::Step() {
                 : cccaster::game_interface::DirectInputHook::GetPlayer2Input();
             uint8_t phaseU8 = static_cast<uint8_t>(phase);
 
-            for (uint32_t t = 0; t < ticks; t++) {
-                uint32_t frame = buf.GetWriteHead() + 1;
-                buf.WriteSlot(frame, phaseU8, rollbackable, localInput, 0, false);
-                buf.SetWriteHead(frame);
-            }
+            uint32_t frame = buf.GetWriteHead() + 1;
+            buf.WriteSlot(frame, phaseU8, rollbackable, localInput, 0, false);
+            buf.SetWriteHead(frame);
 
             // CB書込み中 → keepalive 不要
             cccaster::core::netplay::NetplaySession::GetMutableState()
@@ -203,7 +225,7 @@ void SceneRunner::Step() {
         }
     }
 
-    // (D2) MatchScene ディスパッチ（Phase固有ロジック — 入力以外の処理）
+    // (F) MatchScene ディスパッチ（Phase固有ロジック — 入力以外の処理）
     switch (phase) {
         case GamePhase::CharaSelect:
             scene::MatchScene::OnCharaSelect(ctx);
@@ -221,20 +243,13 @@ void SceneRunner::Step() {
             break;
     }
 
-    // (E) CB → ゲームメモリ書込み + SleepFrame
+    // (G) CB → ゲームメモリ書込み
     {
         auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
         uint32_t p1 = 0, p2 = 0;
         if (buf.ReadFrameForGame(ctx.isHost, p1, p2)) {
             GC::WriteInput(p1, p2);
         }
-    }
-
-    // InGame バリア待機中は SleepFrame をスキップ
-    if (phase == GamePhase::InGame && !ctx.roundStartSynced) {
-        Sleep(1);
-    } else {
-        GC::SleepFrame();
     }
 
     // (F) 統合フロー確認ログ（60フレームごと）

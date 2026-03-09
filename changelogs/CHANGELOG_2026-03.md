@@ -1,3 +1,38 @@
+# refactor: メトロノーム駆動アーキテクチャ刷新 — SleepFrame 廃止 + ゲームスレッド精密待機
+
+## 2026-03-09: 独立スレッド廃止 → WaitForNextTick + gap キャッチアップ
+
+### 問題
+1. SleepFrame(ef-WT gap) が effectiveHead 停滞時に無限ブロック → 画面フリーズ
+2. メトロノーム独立スレッドがティック蓄積 → FastBoot中に ConsumeTicks 呼ばれず → wh 大ジャンプ
+3. 3分割サブティック(SUB_TICKS_PER_FRAME) の残骸
+
+### 変更ファイル
+- [MODIFY] `timing/Metronome.hpp`:
+  - 独立スレッド(ThreadMain, _pendingTicks, ConsumeTicks) 完全廃止
+  - `WaitForNextTick(skipWait)` 追加: ゲームスレッドが直接精密待機
+- [MODIFY] `timing/Metronome.cpp`:
+  - ThreadMain 削除、Start() は _nextTickUs 初期化のみ、Stop() はフラグのみ
+  - WaitForNextTick: α補正付き間隔で _nextTickUs を進め、SleepUntil で精密待機
+- [MODIFY] `engine/FrameControl.hpp`:
+  - SleepFrame() 削除 → SetRenderSkipByGap(gap) に置換
+  - 未使用 include (FrameInputBuffer.hpp, MbaaAddresses.hpp) 除去
+- [MODIFY] `engine/SceneRunner.cpp`:
+  - Step() 根本刷新: gap判定 → WaitForNextTick(skipWait) → 入力取得 → CB 1F書込み
+  - gap = peerLatestFrame - localWriteHead ≥ 2 → skipWait=true (キャッチアップ)
+  - ConsumeTicks ループ廃止 → 毎 Step() で 1F だけ CB 書込み
+  - FrameInputBuffer.hpp 直接 include 追加
+- [MODIFY] `sync/NetplaySession.hpp`:
+  - GetLatestPeerFrame() 委譲メソッド追加
+
+### テスト結果 (dual_test.bat)
+- fip=2400 まで安定動作（約40秒）
+- wh-ef 差が一定（delay+RB 分のみ）、crf 正常追従
+- 画面フリーズなし（SleepFrame 廃止で構造的に解消）
+- alive=1 / RTT=130μs 前後安定
+
+---
+
 # fix: FastBoot中パケット途絶による Peer Disconnected を修正 + 3分割サブティック廃止
 
 ## 2026-03-09: keepalive 機構追加 + 通信スレッドループ刷新
