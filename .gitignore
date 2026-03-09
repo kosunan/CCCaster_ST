@@ -1,0 +1,33 @@
+# ビルド成果物
+build/
+build_test/
+build_logs/
+
+# テスト環境
+_TEST_MBAACC/
+_temp_backup/
+
+# エディタ・IDE設定
+.vscode/
+.agents/
+.cache/
+
+# CMake生成物
+compile_commands.json
+
+# ビルドログ（プロジェクトルートへの散在防止）
+*.log
+*.txt
+*.exe
+!src/**
+!docs/**
+
+# 一時スクリプト・ファイル
+fix_*.py
+rename_*.py
+test_compile.*
+.ai_workspace/
+
+compile_commands.json
+
+.clangd

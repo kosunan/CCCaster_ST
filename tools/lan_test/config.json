@@ -1,0 +1,17 @@
+{
+  "host_pc": {
+    "ip": "192.168.1.5",
+    "game_dir": "I:\\work_space\\CCCaster_v10\\_TEST_MBAACC\\cccaster",
+    "build_dir": "I:\\work_space\\CCCaster_v10\\build\\bin"
+  },
+  "client_pc": {
+    "ip": "192.168.206.129",
+    "game_dir_shared": "\\\\192.168.206.129\\MBAACC\\cccaster",
+    "game_dir_local": "C:\\MBAACC\\cccaster"
+  },
+  "test": {
+    "port": 10800,
+    "timeout_sec": 120,
+    "processes_to_kill": ["CCCaster_v10", "MBAA"]
+  }
+}
