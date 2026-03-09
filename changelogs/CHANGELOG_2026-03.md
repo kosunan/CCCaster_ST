@@ -1,3 +1,63 @@
+# fix: FastBoot中パケット途絶による Peer Disconnected を修正 + 3分割サブティック廃止
+
+## 2026-03-09: keepalive 機構追加 + 通信スレッドループ刷新
+
+### 問題
+Counting 開始後の FastBoot 期間中、SceneRunner が CB に書込まないため通信スレッドがパケットを送信せず、
+双方の疎通カウンタ(DISCONNECT_TIMEOUT_FRAMES=180) がタイムアウトして Peer Disconnected が発生。
+また 3分割サブティック(SUB_TICKS_PER_FRAME=3, ≈5.5ms間隔) の残骸がループに残存していた。
+
+### 変更ファイル
+- [MODIFY] `sync/NetplaySession.hpp`:
+  - `SharedSyncState` に `needKeepalive` フラグ追加（初期値 true）
+  - `SUB_TICKS_PER_FRAME` 廃止 → `KEEPALIVE_INTERVAL_FRAMES=3` (≈50ms) に置換
+  - `_keepaliveCounter` フィールド追加
+- [MODIFY] `sync/NetplaySession.cpp`:
+  - ThreadMain を1フレーム間隔(BASE_TICK_US ≈16.6ms) ループに刷新
+  - Counting モード: CB writeHead 変化 → ゲームデータ送信（従来通り）
+  - CB変化なし + needKeepalive=true → KEEPALIVE_INTERVAL_FRAMES ごとに keepalive 送信
+  - subTickUs/subTickIdx 変数を完全削除
+- [MODIFY] `engine/SceneRunner.cpp`:
+  - CB書込み判定結果に応じて `needKeepalive` フラグを設定（shouldWrite=true→false, else→true）
+- [MODIFY] `network/PacketRouter.cpp`:
+  - 非CC10パケット(EXE SessionNegotiator残存)のログをサイレントドロップに変更
+  - 未使用 DebugLog.hpp include 除去
+
+### 副修正
+- [MODIFY] `network/GameTickCodec.cpp`:
+  - WriteFrameSlot() の `buf.CommitFrame()` → `buf.WriteSlot()` + `buf.SetWriteHead()` に修正
+  - （前回のリファクタリングで CommitFrame 削除後のビルドエラー対応）
+
+### テスト結果 (dual_test.bat)
+- HOST/CLIENT 両方で `alive=1` 確認（修正前: `alive=0`）
+- `Peer Disconnected` 解消
+- `UNKNOWN packet` ログ解消
+- CharaSelect 到達後 fip=540+ まで安定動作（RTT=130μs, α1=0, α2=0）
+- ImGui + InputHook 初期化まで正常に進行
+
+---
+
+# refactor: CommitFrame 責務分離 — バッファからゲームロジックを除去 + InGame CB 書込みを intro 0→1 に同期
+
+## 2026-03-09: FrameInputBuffer を純粋データ格納に、Phase/intro 判定を SceneRunner に移動
+
+### 概要
+FrameInputBuffer::CommitFrame(引数なし) がフェーズ判定・入力取得・rollbackable判定を内包していた問題を修正。
+バッファは WriteSlot/SetWriteHead のみ提供し、「いつ・何を書くか」は SceneRunner が判断する設計に変更。
+同時に InGame の CB 書込み開始を intro 0→1 遷移に揃え、両 peer 間の フレーム番号ゼロ点を一致させる。
+
+### CB書込み対象（変更後）
+- CharaSelect: 常時書込み
+- InGame: intro 0→1 遷移後のみ（以前: InGame フェーズなら常時）
+- Loading / Rematch / 他: 書込まない（Rematch は以前は書込んでいたが不要）
+
+### 変更ファイル
+- [MODIFY] `sync/FrameInputBuffer.hpp`: CommitFrame(引数なし) 削除、`_isHost` 削除、`GamePhaseDetector.hpp`/`DirectInputHook.hpp` include 削除、Initialize() から isHost 引数削除
+- [MODIFY] `engine/SceneRunner.cpp`: Phase/intro 判定付き入力書込みロジック追加（s_introStarted ゲート）
+- [MODIFY] `sync/NetplaySession.cpp`: Initialize() 呼出しから isHost 引数削除
+
+---
+
 # docs: sync/ コメントを実装に合わせて修正
 
 ## 2026-03-09: sync/ 配下4ファイルのコメント最適化

@@ -26,6 +26,7 @@
 #include "core_dll/sync/NetplaySession.hpp"
 #include "core_dll/detect/GamePhaseDetector.hpp"
 #include "core_dll/detect/MbaaAddresses.hpp"
+#include "core_dll/input/DirectInputHook.hpp"
 #include "core_dll/timing/TimeHooks.hpp"
 #include "shared_contracts/IpcData.hpp"
 #include <atomic>
@@ -84,6 +85,7 @@ static bool s_running = false;
 static bool s_syncReported = false;
 static bool s_ready = false;
 static uint8_t s_prevIntroState = 255;  // introState 変化追跡用
+static bool    s_introStarted  = false; // intro 0→1 遷移が発生したか（InGame CB書込みゲート）
 
 // ================================================================
 // Init — 初期化（InitThread から1回だけ呼ばれる）
@@ -109,6 +111,7 @@ void SceneRunner::Init(MatchContext& ctx, SendFunc send) {
     s_prev = GamePhase::Unknown;
     s_running = true;
     s_syncReported = false;
+    s_introStarted = false;
     s_lastPacketReceiveTimeMs.store(GetCurrentTimeMs(), std::memory_order_relaxed);
 
     // FastBoot 初期化
@@ -135,6 +138,10 @@ void SceneRunner::Step() {
     if (phase != s_prev) {
         OnPhaseChanged(s_prev, phase, ctx);
         ctx.framesInPhase = 0;
+        // InGame に入ったら intro 遷移フラグをリセット
+        if (phase == GamePhase::InGame) {
+            s_introStarted = false;
+        }
     }
 
     // (C) FastBoot
@@ -146,14 +153,53 @@ void SceneRunner::Step() {
         return;
     }
 
-    // (D) メトロノーム駆動: ConsumeTicks → CommitFrame (引数なし)
-    //     CommitFrame() 内で Phase取得・入力Poll・rollbackable判定を自前収集
+    // (D) メトロノーム駆動: ConsumeTicks → Phase に応じて CB に書込み
+    //     「いつ・何を書くか」は SceneRunner が判断する。
+    //     FrameInputBuffer は純粋なデータ格納のみ。
     {
         auto& metronome = cccaster::core::netplay::NetplaySession::GetInstance().GetMetronome();
         uint32_t ticks = metronome.ConsumeTicks();
         auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
-        for (uint32_t t = 0; t < ticks; t++) {
-            buf.CommitFrame();
+
+        // InGame の intro 0→1 遷移検出（CB書込みのゲート）
+        if (phase == GamePhase::InGame && !s_introStarted) {
+            uint8_t introNow = *CC_INTRO_STATE_ADDR;
+            if (introNow >= 1) {
+                s_introStarted = true;
+                DebugLog("[SceneRunner] intro 0->%u detected. InGame CB writing enabled.", introNow);
+            }
+        }
+
+        // CB 書込み判定
+        bool shouldWrite = false;
+        bool rollbackable = false;
+        if (phase == GamePhase::CharaSelect) {
+            shouldWrite = true;
+        } else if (phase == GamePhase::InGame && s_introStarted) {
+            shouldWrite = true;
+            rollbackable = true;
+        }
+
+        if (shouldWrite) {
+            cccaster::game_interface::DirectInputHook::Poll();
+            uint32_t localInput = ctx.isHost
+                ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
+                : cccaster::game_interface::DirectInputHook::GetPlayer2Input();
+            uint8_t phaseU8 = static_cast<uint8_t>(phase);
+
+            for (uint32_t t = 0; t < ticks; t++) {
+                uint32_t frame = buf.GetWriteHead() + 1;
+                buf.WriteSlot(frame, phaseU8, rollbackable, localInput, 0, false);
+                buf.SetWriteHead(frame);
+            }
+
+            // CB書込み中 → keepalive 不要
+            cccaster::core::netplay::NetplaySession::GetMutableState()
+                .needKeepalive.store(false, std::memory_order_release);
+        } else {
+            // CB書込みなし → keepalive 要求
+            cccaster::core::netplay::NetplaySession::GetMutableState()
+                .needKeepalive.store(true, std::memory_order_release);
         }
     }
 

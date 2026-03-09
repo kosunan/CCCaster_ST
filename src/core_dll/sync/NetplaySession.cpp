@@ -52,7 +52,7 @@ void NetplaySession::Start(bool isHost,
     _state.lastRttUs.store(0);
 
     // FrameInputBuffer 初期化
-    cccaster::core::sync::FrameInputBuffer::GetInstance().Initialize(200, delayFrames, maxRollback, isHost);
+    cccaster::core::sync::FrameInputBuffer::GetInstance().Initialize(200, delayFrames, maxRollback);
 
     // オーバーレイ初期表示
     cccaster::domain::ui::StateUiLogic::SetDelay(delayFrames);
@@ -161,20 +161,22 @@ void NetplaySession::SleepUntil(int64_t targetUs) {
 //
 // 【設計】
 //   通信スレッドはパケット送受信に専念。
-//   固定間隔（BASE_TICK_US / SUB_TICKS_PER_FRAME ≈ 5.5ms）でループ。
+//   1フレーム間隔（BASE_TICK_US ≈ 16.6ms）でループ。
+//   待機は SleepUntil（14ms Sleep + 残りCPUスピン）で精密制御。
 //   α補正はメトロノームが独立管理し、通信間隔に影響しない。
+//
+//   Counting モードでは以下2つのソースを監視:
+//     (1) CB writeHead 変化 → ゲームデータ送信
+//     (2) needKeepalive フラグ → 定期 keepalive 送信
 //
 void NetplaySession::ThreadMain() {
     cccaster::domain::session::DebugLog("[NetplaySession] Thread started. Mode=WaitReady");
 
-    // 通信スレッドは固定間隔でループ（α補正の影響を受けない）
-    int64_t subTickUs  = Metronome::BASE_TICK_US / SUB_TICKS_PER_FRAME;
-    int     subTickIdx = 0;
-    int64_t nextSubTickUs = timer::WasapiClock::GetTimeUs();
+    int64_t nextTickUs = timer::WasapiClock::GetTimeUs();
 
     while (_running.load()) {
-        // ── 精密スリープ ──
-        SleepUntil(nextSubTickUs);
+        // ── 精密スリープ（14ms Sleep + 残りCPUスピン）──
+        SleepUntil(nextTickUs);
         int64_t now = timer::WasapiClock::GetTimeUs();
 
         // ── 受信パケット処理 ──
@@ -199,8 +201,6 @@ void NetplaySession::ThreadMain() {
         // Mode::WaitStart — 開始時刻待機
         // ================================================================
         case SyncMode::WaitStart: {
-            // θ安定前: ready のみ送信（NTP echo は常に含まれる）
-            // θ安定後: ready + startTimeUs を送信
             int64_t sendStartTime = 0;
             if (!_startSent && _calc.IsThetaStable()) {
                 sendStartTime = now + START_MARGIN_US;
@@ -218,12 +218,10 @@ void NetplaySession::ThreadMain() {
                 _calc.SetBaselineTheta();
                 _state.isSynced.store(true, std::memory_order_release);
 
-                // フレーム番号初期化 + メトロノーム起動
                 uint32_t startFrame = cccaster::core::sync::FrameInputBuffer::GetInstance().GetWriteHead();
                 _calc.SetInitialFrame(startFrame);
                 _metronome.Start();
 
-                subTickIdx = 0;
                 cccaster::domain::session::DebugLog(
                     "[NetplaySession] Mode -> Counting. startTime=%lld us θ=%lld us startFrame=%u",
                     agreedStart, _calc.GetThetaUs(), startFrame);
@@ -232,7 +230,7 @@ void NetplaySession::ThreadMain() {
         }
 
         // ================================================================
-        // Mode::Counting — CB writeHead 監視 → パケット送信（送信専念）
+        // Mode::Counting — CB writeHead + needKeepalive 監視
         // ================================================================
         case SyncMode::Counting: {
             // 疎通カウンタ + α補正
@@ -241,15 +239,23 @@ void NetplaySession::ThreadMain() {
             _state.currentTickUs.store(_metronome.GetCurrentIntervalUs(), std::memory_order_release);
             _calc.UpdateAlphaCorrections();
 
-            // CB writeHead 監視 → 新フレームがあれば送信
+            // (1) CB writeHead 監視 → ゲームデータ送信
             uint32_t newHead = cccaster::core::sync::FrameInputBuffer::GetInstance().GetWriteHead();
             if (newHead > _lastSentFrame) {
                 const auto& slot = cccaster::core::sync::FrameInputBuffer::GetInstance().GetSlot(newHead);
                 SendPacket(_calc.BuildGameTickPacket(newHead, slot.localInput));
                 _lastSentFrame = newHead;
+                _keepaliveCounter = 0;
+            } else if (_state.needKeepalive.load(std::memory_order_acquire)) {
+                // (2) CB書込みなし + keepalive要求 → 定期 keepalive
+                _keepaliveCounter++;
+                if (_keepaliveCounter >= KEEPALIVE_INTERVAL_FRAMES) {
+                    SendPacket(_calc.BuildGameTickPacket(_lastSentFrame, 0));
+                    _keepaliveCounter = 0;
+                }
             }
 
-            // 60Fごとの進捗ログ
+            // 進捗ログ（60フレームごと）
             if (newHead % 60 == 0 && newHead != _lastLogFrame) {
                 cccaster::domain::session::DebugLog(
                     "[NetplaySession] wh=%u tick=%lldus α1=%lld α2=%lld RTT=%lldus peerF=%u",
@@ -258,13 +264,11 @@ void NetplaySession::ThreadMain() {
                     _calc.GetRttUs(), _calc.GetLatestPeerFrame());
                 _lastLogFrame = newHead;
             }
-
-            subTickIdx = (subTickIdx + 1) % SUB_TICKS_PER_FRAME;
             break;
         }
         } // switch
 
-        nextSubTickUs += subTickUs;
+        nextTickUs += Metronome::BASE_TICK_US;
     }
 
     cccaster::domain::session::DebugLog("[NetplaySession] Thread exiting.");

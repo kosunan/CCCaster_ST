@@ -10,7 +10,7 @@
 // ============================================================================
 #include "core_dll/network/PacketRouter.hpp"
 #include "core_dll/sync/NetplaySession.hpp"
-#include "core_dll/common/DebugLog.hpp"
+
 #include <cstring>
 
 namespace cccaster::core::network {
@@ -38,10 +38,7 @@ void PacketRouter::OnPacket(const std::vector<uint8_t>& data, const std::string&
         }
     }
 
-    // 非CC10パケットは無視
-    cccaster::domain::session::DebugLog(
-        "[PacketRouter] UNKNOWN packet: size=%u from=%s:%u",
-        (unsigned)data.size(), fromIp.c_str(), fromPort);
+    // 非CC10パケットはサイレントドロップ（EXE SessionNegotiator 残存パケット等）
 }
 
 } // namespace cccaster::core::network

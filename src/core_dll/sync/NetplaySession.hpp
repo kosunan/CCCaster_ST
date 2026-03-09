@@ -57,6 +57,9 @@ struct SharedSyncState {
     std::atomic<bool>     localIntroComplete{false};  // ゲームスレッドが設定
     std::atomic<bool>     peerIntroComplete{false};    // 通信スレッドが設定（受信時）
 
+    // ─── Keepalive 要求（ゲーム→通信スレッド）─────────────────
+    std::atomic<bool>     needKeepalive{true};         // CB書込みしないPhaseで true
+
     // ─── リモート入力リングバッファ ──────────────────────
     static constexpr int RING_SIZE = 20;
     struct InputSlot {
@@ -115,8 +118,8 @@ public:
                           const std::string& fromIp, uint16_t fromPort);
 
     // ─── 定数 ──────────────────────────────────────────
-    static constexpr int     SUB_TICKS_PER_FRAME    = 3;
-    static constexpr int64_t START_MARGIN_US        = 500000;
+    static constexpr int     KEEPALIVE_INTERVAL_FRAMES = 3;  // 3フレーム(≈50ms)ごとに keepalive
+    static constexpr int64_t START_MARGIN_US            = 500000;
 
     // パケット定数
     static constexpr int      UNIFIED_HEADER_SIZE   = GameTickCodec::UNIFIED_HEADER_SIZE;
@@ -160,6 +163,7 @@ private:
     // ─── CB writeHead 監視用 ──────────────────────────
     uint32_t _lastSentFrame = 0;
     uint32_t _lastLogFrame  = 0;
+    int      _keepaliveCounter = 0;
 
     // ─── 実ピアポート（NAT越え用）──────────────────────
     uint16_t _peerActualPort = 0;
