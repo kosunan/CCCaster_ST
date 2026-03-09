@@ -3,7 +3,7 @@
 //
 // 【旧 FastBootRunner からの移植】
 //   - 裏スレッドの 1ms ポーリング → ゲームスレッドの毎フレーム呼び出し
-//   - CC_SKIP_FRAMES 直書き → MbaaSpeedController::HighSpeedSkip_Normal
+//   - CC_SKIP_FRAMES 直書き → SpeedFlags::HighSpeedSkip
 //   - MemoryPatcher 直書き → GC::WriteInput() + 直接メモリ操作
 // ============================================================================
 

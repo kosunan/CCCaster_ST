@@ -1,3 +1,39 @@
+# docs: sync/ コメントを実装に合わせて修正
+
+## 2026-03-09: sync/ 配下4ファイルのコメント最適化
+
+### 変更内容
+- [MODIFY] `sync/FrameInputBuffer.hpp`: スレッド安全性（DLLスレッド/ioスレッド明記）、データフロー（ReadFrameForGame反映）、readPos算出式修正
+- [MODIFY] `sync/NetplaySession.hpp`: "4層分離版" 削除、モード遷移にθ安定条件追加、DLLスレッド明記
+- [MODIFY] `sync/NetplaySession.cpp`: "4層分離版" 削除、ThreadMain コメントにサブティック間隔(≈5.5ms)追記
+- [MODIFY] `sync/NetplayClock.hpp`: 呼び出し元を NetplaySession → GameTickCodec に修正
+
+---
+
+# refactor: ISpeedController/MbaaSpeedController/SpeedMode 削除 → SpeedFlags に簡素化
+
+## 2026-03-09: 速度制御の3層抽象化を解体し、2フラグのみの SpeedFlags に置換
+
+### 概要
+速度制御の本質は「描画スキップ(RenderSkip) + ティックバイパス(TickBypass)」の2フラグの ON/OFF のみ。
+不要な抽象インターフェース・シングルトン・4値enum を全削除し、atomic<bool>×2 の SpeedFlags 構造体に置換。
+
+### 削除
+- [DELETE] `timing/ISpeedController.hpp` (57行): 実装が1つだけの抽象インターフェース
+- [DELETE] `timing/MbaaSpeedController.hpp` (142行): シングルトン + SpeedMode enum + 冗長ログ
+
+### 新規
+- [NEW] `timing/SpeedFlags.hpp` (46行): RenderSkip + TickBypass の atomic<bool>×2 + SetHighSpeed/SetNormalSpeed
+
+### 変更
+- [MODIFY] `engine/FrameControl.hpp`: SpeedFlags 直接使用に変更、MaintainState() 削除
+- [MODIFY] `engine/GameFrameOrchestrator.cpp`: MbaaSpeedController → SpeedFlags (3箇所)
+- [MODIFY] `engine/SceneRunner.cpp`: MaintainState() 呼出し2箇所削除
+- [MODIFY] `inject/dllmain.cpp`: TimeHooks 初期化後に SetTimeMultiplier(1000)/SetSleepBypass(true) を1回設定
+- [MODIFY] `engine/SceneFastBoot.hpp`, `engine/SceneFastBoot.cpp`, `sync/FrameInputBuffer.hpp`, `detect/FastBootRunner.cpp`: コメント内参照更新
+
+---
+
 # refactor: 互換転送ヘッダ MbaaConstants.hpp を削除
 
 ## 2026-03-09: MbaaConstants.hpp 削除 + 個別ヘッダ参照に置換

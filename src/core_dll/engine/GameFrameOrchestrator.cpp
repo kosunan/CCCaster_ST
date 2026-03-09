@@ -16,7 +16,7 @@
 #include "core_dll/ui/UIManager.hpp"
 #include "core_dll/ui/State_Ui_Logic.hpp"
 #include "core_dll/sync/NetplaySession.hpp"
-#include "core_dll/timing/MbaaSpeedController.hpp"
+#include "core_dll/timing/SpeedFlags.hpp"
 #include "core_dll/detect/MbaaAddresses.hpp"
 #include <imgui.h>
 #include <imgui_impl_dx9.h>
@@ -95,7 +95,7 @@ void GameFrameOrchestrator::OnPresent(LPDIRECT3DDEVICE9 pDevice) {
 // ============================================================================
 bool GameFrameOrchestrator::OnPresentSkip(LPDIRECT3DDEVICE9 pDevice) {
     (void)pDevice;
-    return cccaster::domain::MbaaSpeedController::RenderSkip().load(std::memory_order_acquire);
+    return cccaster::core::SpeedFlags::RenderSkip().load(std::memory_order_acquire);
 }
 
 // ============================================================================
@@ -111,7 +111,7 @@ bool GameFrameOrchestrator::OnPresentSkip(LPDIRECT3DDEVICE9 pDevice) {
 //   3. バックバッファ一致時のみ ImGui 描画
 void GameFrameOrchestrator::OnEndScene(LPDIRECT3DDEVICE9 pDevice) {
     // ── 高速モード: ImGui描画スキップ ──
-    if (cccaster::domain::MbaaSpeedController::RenderSkip().load(std::memory_order_acquire)) {
+    if (cccaster::core::SpeedFlags::RenderSkip().load(std::memory_order_acquire)) {
         return;
     }
 

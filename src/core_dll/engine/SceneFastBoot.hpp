@@ -10,7 +10,7 @@
 //
 // 【旧 FastBootRunner との違い】
 //   - 裏スレッド → ゲームスレッド（スレッド安全）
-//   - CC_SKIP_FRAMES 直書き → MbaaSpeedController 統一
+//   - CC_SKIP_FRAMES 直書き → SpeedFlags 統一
 //   - MemoryPatcher 直書き → GC::WriteInput() 統一
 // ============================================================================
 

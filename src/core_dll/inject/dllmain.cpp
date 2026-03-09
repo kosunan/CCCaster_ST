@@ -208,6 +208,9 @@ DWORD WINAPI InitThread(LPVOID lpParam) {
     // ================================================================
     HookLog("[InitThread] Initializing TimeHooks...");
     cccaster::core::hooks::TimeHooks::Initialize();
+    // ゲーム内蔵の Sleep と VSync を常に無効化し、1000倍速でタイマーを回す
+    cccaster::core::hooks::TimeHooks::SetTimeMultiplier(1000);
+    cccaster::core::hooks::TimeHooks::SetSleepBypass(true);
 
     // ================================================================
     // (4) ネットプレイ通信初期化（UDPソケット生成・受信開始）

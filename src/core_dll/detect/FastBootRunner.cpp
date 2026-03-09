@@ -92,7 +92,7 @@ void FastBootRunner::RunLoop(cccaster::public_api::IpcGameMode targetMode) {
                     MP::WriteMemory<uint32_t>(GAME_STATE_ADDR, STATE_INTRO_SKIP);
                 }
 
-                // 描画スキップ: CC_SKIP_FRAMES_ADDR は使用禁止。描画制御は API hook (RenderSkip) で行う
+                // 描画スキップ: CC_SKIP_FRAMES_ADDR は使用禁止。描画制御は SpeedFlags (RenderSkip) で行う
                 // MP::WriteMemory<uint32_t>(
                 //     reinterpret_cast<uintptr_t>(CC_SKIP_FRAMES_ADDR), 1);
 

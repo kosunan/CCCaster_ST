@@ -9,7 +9,7 @@
  *                         → FrameControl の束ねた関数を呼び出して業務を遂行
  *
  *   Layer 2 (FrameControl): このファイル — 複数の操作を束ねた制御関数
- *                         例: SetModePause() = RenderSkip=OFF + 自然待機
+ *                         例: SetModePause() = SpeedFlags::SetNormalSpeed()
  *                         Scene は「何をしたいか」だけを知り、制御の詳細は知らない
  *
  *   Layer 1 (Primitive)  : 個別メモリ読み書き（このファイル下部の private セクション）
@@ -18,7 +18,7 @@
  *
  * 【設計思想】
  *   - Scene は FrameControl:: の関数のみを呼ぶ（メモリアドレスを直接触らない）
- *   - FrameControl は MbaaSpeedController を内部で連携
+ *   - 速度制御は SpeedFlags（RenderSkip + TickBypass）で直接管理
  *   - 同期制御は NetplaySession に完全委譲（DLLスレッドは Read-only）
  *   - 個別メモリ操作は private メソッドとして隠蔽
  *   - 全メソッドは static — シングルトンへの委譲で状態管理
@@ -28,12 +28,12 @@
  *   FrameControl::SetModeHighSpeedSkip(); // 起動時・FastBoot 用高速化
  *   FrameControl::SleepFrame();           // gap ベースのフレーム待機
  *
- * @see MbaaSpeedController  フレームスキップ制御の実装
+ * @see SpeedFlags         描画スキップ + ティックバイパスの2フラグ
  * @see NetplaySession      通信同期（θ推定・ティックマスター）
  * @see MbaaAddresses.hpp     メモリアドレス定義
  */
 
-#include "core_dll/timing/MbaaSpeedController.hpp"
+#include "core_dll/timing/SpeedFlags.hpp"
 #include "core_dll/sync/FrameInputBuffer.hpp"
 #include "core_dll/detect/MbaaAddresses.hpp"
 #include "core_dll/detect/MbaaInputDefs.hpp"
@@ -54,20 +54,19 @@ public:
     // -------------------- 速度・進行状態制御 --------------------
 
     /**
-     * @brief 高速スキップ_通常 (起動時, FastBoot用)
+     * @brief 高速スキップ (起動時, FastBoot用, ロールアップ用)
      * @details RenderSkip=ON, TickBypass=ON
      */
     static void SetModeHighSpeedSkip() {
-        Speed().SetMode(cccaster::core::SpeedMode::HighSpeedSkip_Normal);
+        cccaster::core::SpeedFlags::SetHighSpeed();
     }
 
     /**
      * @brief 高速スキップ_ロールアップ
-     * @param frames ロールバックするフレーム数
-     * @details RenderSkip=ON, TickBypass=ON
+     * @details RenderSkip=ON, TickBypass=ON（HighSpeedSkip と同一動作）
      */
-    static void SetModeRollupSkip(uint32_t frames) {
-        Speed().SetMode(cccaster::core::SpeedMode::HighSpeedSkip_Rollup, frames);
+    static void SetModeRollupSkip(uint32_t /*frames*/) {
+        cccaster::core::SpeedFlags::SetHighSpeed();
     }
 
     /**
@@ -75,7 +74,7 @@ public:
      * @details RenderSkip=OFF（SleepFrame が gap に応じて動的に ON/OFF 制御）
      */
     static void SetModeNormalSpeed() {
-        Speed().SetMode(cccaster::core::SpeedMode::NormalSpeed);
+        cccaster::core::SpeedFlags::SetNormalSpeed();
     }
 
     /**
@@ -83,15 +82,7 @@ public:
      * @details RenderSkip=OFF, currentFrame が進まないので SleepFrame で自然待機
      */
     static void SetModePause() {
-        Speed().SetMode(cccaster::core::SpeedMode::Pause);
-    }
-
-    /**
-     * @brief 毎フレーム状態を維持する（現在は空実装）
-     * @details 描画制御は SleepFrame が gap に基づいて RenderSkip を動的制御するため不要
-     */
-    static void MaintainState() {
-        Speed().MaintainState();
+        cccaster::core::SpeedFlags::SetNormalSpeed();
     }
 
 
@@ -112,6 +103,7 @@ public:
      *   描画の ON/OFF は API hook (RenderSkip → OnPresentSkip) で制御する。
      */
     static void SleepFrame() {
+        using SF = cccaster::core::SpeedFlags;
         auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
         uint32_t ef = buf.GetEffectiveHead();
         uint32_t wt = *CC_WORLD_TIMER_ADDR;
@@ -121,8 +113,8 @@ public:
 
         if (gap <= 0) {
             // worldTimer が effectiveHead に追いついている → 変化を待つ
-            MbaaSpeedController::RenderSkip().store(false, std::memory_order_release);
-            MbaaSpeedController::TickBypass().store(false, std::memory_order_release);
+            SF::RenderSkip().store(false, std::memory_order_release);
+            SF::TickBypass().store(false, std::memory_order_release);
             for (;;) {
                 uint32_t now = buf.GetEffectiveHead();
                 if (now != ef) break;
@@ -130,12 +122,12 @@ public:
             }
         } else if (gap == 1) {
             // 1F 遅れ → 通常速度で進行
-            MbaaSpeedController::RenderSkip().store(false, std::memory_order_release);
-            MbaaSpeedController::TickBypass().store(false, std::memory_order_release);
+            SF::RenderSkip().store(false, std::memory_order_release);
+            SF::TickBypass().store(false, std::memory_order_release);
         } else {
             // 2F 以上遅れ → 描画OFF (API hook経由: RenderSkip→OnPresentSkip)
-            MbaaSpeedController::RenderSkip().store(true, std::memory_order_release);
-            MbaaSpeedController::TickBypass().store(true, std::memory_order_release);
+            SF::RenderSkip().store(true, std::memory_order_release);
+            SF::TickBypass().store(true, std::memory_order_release);
         }
     }
 
@@ -195,14 +187,6 @@ private:
         if (s_nullCount++ % 120 == 0) {
             DebugLog("[FrameControl] Input base pointer is NULL (count=%u)", s_nullCount);
         }
-    }
-
-    // =====================================================================
-    //  シングルトンアクセサ（内部用）
-    // =====================================================================
-
-    static MbaaSpeedController& Speed() {
-        return MbaaSpeedController::GetInstance();
     }
 };
 

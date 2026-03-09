@@ -7,22 +7,23 @@
 //   DLLスレッドが CommitFrame() で入力蓄積、ゲームスレッドが読取り。
 //
 // 【スレッド安全性】
-//   - WriteSlot / ConfirmRemote / SetWriteHead: 通信スレッドのみ（単一writer）
-//   - GetSlot / GetWriteHead / GetReadPos: ゲームスレッドから読取り（atomic同期）
+//   - CommitFrame / WriteSlot / SetWriteHead: DLLスレッド専用（単一writer）
+//   - ConfirmRemote: ioスレッド（受信コールバック経由）
+//   - ReadFrameForGame / GetSlot / GetWriteHead / GetReadPos: ゲームスレッドから読取り（atomic同期）
 //   - ConsumeMismatch: ゲームスレッドのみ
 //
 // 【データフロー】
-//   DLLスレッド  → CommitFrame() → writeHead 更新
-//   DLLスレッド  ← GetReadPos() → GetSlot(readPos) → WriteInput
-//   ioスレッド   → ConfirmRemote() (受信コールバック)
+//   DLLスレッド  → CommitFrame() → スロット書込み + writeHead 更新
+//   ゲームスレッド ← ReadFrameForGame() → confirmed チェック + P1/P2 振分け
+//   ioスレッド   → ConfirmRemote() → 相手入力確定 + confirmedRemoteFrame 更新
 //
 // 【readPos 算出方式】
-//   readPos = writeHead - delay - maxRollback
+//   readPos = writeHead - max(delay + maxRollback, 1)
 //   非ロールバック区間: confirmed=true のスロットのみ消費（未確定なら待つ）
 //   ロールバック区間:   confirmed=false でも予測入力で進行可（後からロールバック）
 //
 // 【注意】
-//   CC_SKIP_FRAMES_ADDR は使用禁止。描画制御は API hook (RenderSkip) で行う。
+//   CC_SKIP_FRAMES_ADDR は使用禁止。描画制御は SpeedFlags (RenderSkip) で行う。
 // ============================================================================
 
 #include <atomic>

@@ -1,19 +1,19 @@
 ﻿#pragma once
 // ============================================================================
-// NetplaySession — 通信スレッド統括（4層分離版）
+// NetplaySession — 通信スレッド統括
 //
 // 【責務】
 //   パケットの送受信に専念する。
-//   計算・α補正・FrameInputBuffer操作は GameTickCodec に委譲。
+//   パケット解析・Θ計算・α補正・FrameInputBuffer操作は GameTickCodec に委譲。
 //   フレームリズム生成は Metronome に委譲。
 //
 // 【モード遷移】
-//   WaitReady  → (双方READY) → WaitStart → (合意時刻到達) → Counting
+//   WaitReady  → (双方READY) → WaitStart → (θ安定+合意時刻到達) → Counting
 //
 // 【スレッド間ルール】
 //   - 通信スレッドは送受信と GameTickCodec 呼出しのみ。
 //   - Metronome は独立スレッドでカウンタをカウントアップ。
-//   - ゲームスレッドは FrameInputBuffer を監視するだけ。
+//   - DLLスレッド（ゲームスレッド）は FrameInputBuffer を監視するだけ。
 // ============================================================================
 
 #include <atomic>

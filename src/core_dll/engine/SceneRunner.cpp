@@ -11,7 +11,7 @@
 //   (B) 画面遷移検出 → OnPhaseChanged
 //   (C) FastBoot処理
 //   (D) MatchScene ディスパッチ（Phase別）
-//   (E) SleepFrame + MaintainState
+//   (E) SleepFrame
 //   (F) 同期状態チェック + 疎通チェック
 //   (G) 中断チェック (F12)
 // ============================================================================
@@ -141,7 +141,6 @@ void SceneRunner::Step() {
     if (phase < GamePhase::CharaSelect && !scene::SceneFastBoot::IsComplete()) {
         scene::SceneFastBoot::ProcessFrame(ctx.isHost);
         GC::SleepFrame();
-        GC::MaintainState();
         s_prev = phase;
         ctx.framesInPhase++;
         return;
@@ -191,7 +190,6 @@ void SceneRunner::Step() {
     } else {
         GC::SleepFrame();
     }
-    GC::MaintainState();
 
     // (F) 統合フロー確認ログ（60フレームごと）
     if (ctx.framesInPhase % 60 == 0 && phase >= GamePhase::CharaSelect) {
