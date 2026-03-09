@@ -9,6 +9,7 @@
 // ============================================================================
 
 #include <cstdint>
+#include <windows.h>
 
 namespace cccaster::domain::ui {
 
@@ -24,6 +25,10 @@ class UIManager {
 public:
     /// @brief 毎フレーム呼ばれる描画エントリポイント
     static void Render(UiPhase phase);
+
+    /// @brief WndProc メッセージの UI 側処理
+    /// @return >0: ゲームに渡さない(ブロック), 0: ゲームに渡す, -1: 判定なし(元 WndProc に委譲)
+    static int HandleWndProcMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
     // --- 入力イベント（InputHook から呼ばれる） ---
     static void OnDelayInput(int num);

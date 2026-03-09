@@ -1,3 +1,15 @@
+# refactor: WndProcHook の UI 処理を UIManager に分離
+
+## 2026-03-10: hook 層とロジック層の責務分離
+
+### 変更
+- [MODIFY] `hook/WndProcHook.cpp`: フック設置・復元のみの薄い層に簡素化 (139行→50行)
+- [MODIFY] `ui/UIManager.hpp`: `HandleWndProcMessage` 宣言追加 + `windows.h` include
+- [MODIFY] `ui/UIManager.cpp`: WndProc UI ロジックを `HandleWndProcMessage` に集約
+  - ImGui ハンドラ, ホットキー(F4/Ctrl+数字/Alt+数字), マッピング制御, デバイスホットプラグ, WantCapture
+
+---
+
 # refactor: core_dll フォルダ再編成 — hook/ + mbaa_mem/ 新設
 
 ## 2026-03-10: hook系コードとMBAAメモリ系コードの分離
