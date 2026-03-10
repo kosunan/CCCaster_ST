@@ -92,7 +92,6 @@ public:
 
     // SyncPayload flags
     static constexpr uint8_t FLAG_READY          = 0x01;  // 準備完了
-    static constexpr uint8_t FLAG_PHASE_READY    = 0x02;  // Phase遷移準備完了（旧INTRO_COMPLETE）
 
 private:
     static std::vector<uint8_t> BuildUnifiedPacket(

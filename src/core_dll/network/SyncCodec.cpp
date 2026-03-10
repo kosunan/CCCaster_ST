@@ -41,6 +41,8 @@ struct SyncPayload {
     int8_t   retryMenuIndex;
     // Phase 遷移同期: InGame 開始時の writeHead 基準点 (0=未設定)
     uint32_t phaseBaseFrame;
+    // 遷移同期カウンター (Phase変化 + intro変化で++)
+    uint32_t transitionId;
 };
 #pragma pack(pop)
 
@@ -156,10 +158,13 @@ void SyncCodec::ProcessReceivedPacket(const std::vector<uint8_t>& data,
         _latestPeerFrame = gtp.baseFrame;
     }
 
-    // (8) phaseReady フラグ受信
-    if (gtp.flags & FLAG_PHASE_READY) {
-        cccaster::core::netplay::NetplaySession::GetMutableState()
-            .peerPhaseReady.store(true, std::memory_order_release);
+    // (8) 遷移同期カウンター受信
+    {
+        auto& ms = cccaster::core::netplay::NetplaySession::GetMutableState();
+        uint32_t prevPeer = ms.peerTransitionId.load(std::memory_order_relaxed);
+        if (gtp.transitionId > prevPeer) {
+            ms.peerTransitionId.store(gtp.transitionId, std::memory_order_release);
+        }
     }
 
     // (9) Rematch メニュー選択受信
@@ -198,10 +203,6 @@ std::vector<uint8_t> SyncCodec::BuildPacket(
     // flags
     gtp.flags = 0;
     if (ready) gtp.flags |= FLAG_READY;
-    if (cccaster::core::netplay::NetplaySession::GetState()
-            .localPhaseReady.load(std::memory_order_acquire)) {
-        gtp.flags |= FLAG_PHASE_READY;
-    }
 
     gtp.startTimeUs = startTimeUs;
 
@@ -212,6 +213,10 @@ std::vector<uint8_t> SyncCodec::BuildPacket(
     // Phase 遷移同期: phaseBaseFrame
     gtp.phaseBaseFrame = cccaster::core::netplay::NetplaySession::GetState()
         .phaseBaseFrame.load(std::memory_order_acquire);
+
+    // 遷移同期カウンター
+    gtp.transitionId = cccaster::core::netplay::NetplaySession::GetState()
+        .localTransitionId.load(std::memory_order_acquire);
 
     return BuildUnifiedPacket(0x00, PKT_SYNC_TICK, now, &gtp, sizeof(gtp));
 }

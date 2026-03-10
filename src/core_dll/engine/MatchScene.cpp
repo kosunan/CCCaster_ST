@@ -21,8 +21,6 @@
 #include "core_dll/sync/NetplaySession.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
 #include "core_dll/mbaa_mem/MbaaInputDefs.hpp"
-#include "core_dll/mbaa_mem/GamePhaseDetector.hpp"
-#include "core_dll/hook/DirectInputHook.hpp"
 #include <atomic>
 
 namespace cccaster::domain::scene {
@@ -62,85 +60,25 @@ void MatchScene::OnCharaSelect(session::MatchContext& ctx) {
 }
 
 // ============================================================================
-// Loading — FrameInputBuffer 読取 → WriteInput (CharaSelectと同一処理)
+// Loading — CB書込みなし（バリアは SceneRunner が管理）
 // ============================================================================
 void MatchScene::ResetLoading() {
     // 状態なし
 }
 
 void MatchScene::OnLoading(session::MatchContext& ctx) {
-    // IntroBarrier 事前通知: Loading 中に localPhaseReady=true を設定し
-    // GAME_TICK に乗せて peer に通知。InGame 到達時にはバリア待機ゼロを実現。
-    auto& ms = cccaster::core::netplay::NetplaySession::GetMutableState();
-    if (!ms.localPhaseReady.load(std::memory_order_relaxed)) {
-        ms.localPhaseReady.store(true, std::memory_order_release);
-        DebugLog("[IntroBarrier] Pre-signaling during Loading phase.");
-    }
-    ReadBufferAndWrite(GamePhase::Loading, ctx.isHost);
+    // Loading 中は CB 書込みなし（SceneRunner が shouldWrite=false）
+    // 遷移同期は SceneRunner の transitionId バリアが管理
 }
 
 // ============================================================================
-// InGame — ラウンド開始同期 + FrameInputBuffer読取
+// InGame — FrameInputBuffer 読取 + 入力書込み
 // ============================================================================
-static bool s_syncInitiated = false;
-
-static bool HandleRoundStartSync(session::MatchContext& ctx) {
-    if (ctx.roundStartSynced) return false;
-
-    uint8_t introState = *CC_INTRO_STATE_ADDR;
-    if (introState != 2) {
-        return true;  // まだ intro=2 に到達していない → 待機
-    }
-
-    // ステップ1: intro=2 到達を即座に通知（isSynced 待ち中もパケットに乗る）
-    auto& ms = cccaster::core::netplay::NetplaySession::GetMutableState();
-    if (!s_syncInitiated) {
-        ms.localPhaseReady.store(true, std::memory_order_release);
-        GC::SetModePause();
-        s_syncInitiated = true;
-        DebugLog("[InGame] introState=2 reached. localPhaseReady=true. Checking NetplaySession...");
-    }
-
-    // ステップ2: NetplaySession 同期待ち
-    auto& syncState = cccaster::core::netplay::NetplaySession::GetState();
-    if (!syncState.isSynced.load(std::memory_order_acquire)) {
-        return true;
-    }
-
-    // ステップ3: IntroBarrier — peer も intro=2 に到達するまで待機
-    //   SetModePause 中なのでフレーム進行は停止。return でゲームスレッドを
-    //   EndScene に戻し、通信スレッドの GAME_TICK 送受信を妨げない。
-    if (!ms.peerPhaseReady.load(std::memory_order_acquire)) {
-        return true;  // peer 未到達 → 次フレームで再チェック
-    }
-
-    // ステップ4: 双方揃い → 通常速度でフレーム進行開始
-    auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
-    uint32_t baseFrame = buf.GetWriteHead() + 1;
-    ms.phaseBaseFrame.store(baseFrame, std::memory_order_release);
-    DebugLog("[IntroBarrier] Both peers at intro=2! phaseBaseFrame=%u (WT=%u RT=%u) Go!",
-             baseFrame, *CC_WORLD_TIMER_ADDR, *CC_REAL_TIMER_ADDR);
-
-    GC::SetModeNormalSpeed();
-    ctx.roundStartSynced = true;
-    s_syncInitiated = false;
-    DebugLog("[InGame] Round ready! Game is live.");
-
-    return true;  // 同期完了フレームは待機
-}
-
 void MatchScene::ResetInGame() {
-    s_syncInitiated = false;
-    // IntroBarrier: peerPhaseReady のみリセット（peer の次の intro=2 到達を待つため）
-    // localPhaseReady は true のまま維持 → GAME_TICK で常に flags=0x01 を送信
-    auto& syncState = cccaster::core::netplay::NetplaySession::GetMutableState();
-    syncState.peerPhaseReady.store(false, std::memory_order_relaxed);
+    // transitionId バリアで同期するため、追加のリセットは不要
 }
 
 void MatchScene::OnInGame(session::MatchContext& ctx) {
-    // ラウンド開始同期 + IntroBarrier（intro=2 で双方ブロック）
-    if (HandleRoundStartSync(ctx)) return;
-
     uint8_t introNow = *CC_INTRO_STATE_ADDR;
     bool noInputFlag = *CC_P1_NO_INPUT_FLAG_ADDR != 0;
     if (introNow != 0 || noInputFlag) return;
@@ -149,165 +87,72 @@ void MatchScene::OnInGame(session::MatchContext& ctx) {
 }
 
 // ============================================================================
-// Rematch — メニュー選択同期 + 自動ナビ + FrameInputBuffer読取
+// Rematch — 自動リトライ（Phase 1 実装）
 // ============================================================================
-// TODO: AsmHacks モジュールを v10 に統合後、正式な配置に変更
-namespace AsmHacks {
-    uint32_t currentMenuIndex = 0;
-    uint32_t menuConfirmState = 0;
-}
+// Phase 1: 双方が自動的に「もう1回」(menuIndex=0) で合意し、
+//   確定入力をゲームメモリに書込む。
+// Phase 2（将来）: MBAA メニューカーソルアドレス特定後に正式ナビ。
+// ============================================================================
 
-static constexpr int8_t MENU_INDEX_RETRY       = 0;
-static constexpr int8_t MENU_INDEX_CHARA_SEL   = 1;
-static constexpr int8_t MENU_INDEX_REPLAY_SAVE = 2;
-static constexpr int8_t MENU_INDEX_NONE        = -1;
-static constexpr uint32_t REMOTE_TIMEOUT_FRAMES = 1800;
-// MAX_RETRY_MENU_INDEX は MbaaAddresses.hpp のマクロを使用
-static constexpr int8_t kMaxRetryMenuIndex = MAX_RETRY_MENU_INDEX;
+static std::atomic<int8_t> s_remoteRetryMenuIndex{-1};
+static constexpr int8_t MENU_INDEX_RETRY = 0;
+static constexpr int8_t MENU_INDEX_NONE  = -1;
 
-// Rematch static 変数
-static int8_t  s_localRetryMenuIndex  = MENU_INDEX_NONE;
-static std::atomic<int8_t> s_remoteRetryMenuIndex{MENU_INDEX_NONE};
-static bool    s_localIndexSent       = false;
-static int8_t  s_targetMenuState      = -1;
-static int8_t  s_targetMenuIndex      = MENU_INDEX_NONE;
-static uint32_t s_retryMenuStateCounter = 0;
-static uint32_t s_remoteWaitFrames    = 0;
+// Rematch 状態
+static bool    s_localRetryReady    = false;
+static bool    s_rematchResolved    = false;
+static uint32_t s_rematchConfirmFrames = 0;
 
 void MatchScene::ResetRematch() {
-    s_localRetryMenuIndex  = MENU_INDEX_NONE;
+    s_localRetryReady     = false;
+    s_rematchResolved     = false;
+    s_rematchConfirmFrames = 0;
     s_remoteRetryMenuIndex.store(MENU_INDEX_NONE, std::memory_order_relaxed);
-    s_localIndexSent       = false;
-    s_targetMenuState      = -1;
-    s_targetMenuIndex      = MENU_INDEX_NONE;
-    s_retryMenuStateCounter = *CC_MENU_STATE_COUNTER_ADDR + 1;
-    s_remoteWaitFrames     = 0;
-    AsmHacks::currentMenuIndex = 0;
-    AsmHacks::menuConfirmState = 0;
     // SharedSyncState もリセット
     cccaster::core::netplay::NetplaySession::GetMutableState()
-        .localRetryMenuIndex.store(-1, std::memory_order_release);
+        .localRetryMenuIndex.store(MENU_INDEX_RETRY, std::memory_order_release);
+    DebugLog("[Rematch] Reset. Auto-retry mode (menuIndex=0).");
 }
 
 void MatchScene::SetRemoteRetryMenuIndex(int8_t menuIndex) {
-    s_remoteRetryMenuIndex.store(menuIndex, std::memory_order_relaxed);
-    DebugLog("[Rematch] Remote selected: menuIndex=%d", menuIndex);
-}
-
-/// 自動ナビゲーション — カーソル移動 + 確定操作
-static uint16_t HandleAutoNavigation() {
-    if (s_targetMenuState == -1 || s_targetMenuIndex == MENU_INDEX_NONE) return 0;
-
-    int currentState = static_cast<int>(AsmHacks::menuConfirmState);
-
-    if (currentState >= s_targetMenuState) {
-        s_targetMenuState = -1;
-        s_targetMenuIndex = MENU_INDEX_NONE;
-        DebugLog("[Rematch] AutoNav complete.");
-        return 0;
+    int8_t prev = s_remoteRetryMenuIndex.load(std::memory_order_relaxed);
+    if (prev != menuIndex) {
+        s_remoteRetryMenuIndex.store(menuIndex, std::memory_order_relaxed);
+        DebugLog("[Rematch] Remote selected: menuIndex=%d", menuIndex);
     }
-
-    int currentIndex = static_cast<int>(AsmHacks::currentMenuIndex);
-    int targetIndex  = static_cast<int>(s_targetMenuIndex);
-
-    if (currentIndex < targetIndex) {
-        return 0x0002; // 下
-    } else if (currentIndex > targetIndex) {
-        return 0x0001; // 上
-    } else {
-        return CC_BUTTON_A | CC_BUTTON_CONFIRM;
-    }
-}
-
-/// 双方の選択からメニュー決定
-static bool ResolveMenuSelection(uint16_t& input) {
-    int8_t remoteIndex = s_remoteRetryMenuIndex.load(std::memory_order_relaxed);
-
-    // ローカル選択検出
-    if (s_localRetryMenuIndex == MENU_INDEX_NONE) {
-        if (input & (CC_BUTTON_A | CC_BUTTON_CONFIRM)) {
-            s_localRetryMenuIndex = static_cast<int8_t>(AsmHacks::currentMenuIndex);
-            // SharedSyncState に書込み → GAME_TICK パケットで相手に送信される
-            cccaster::core::netplay::NetplaySession::GetMutableState()
-                .localRetryMenuIndex.store(s_localRetryMenuIndex, std::memory_order_release);
-            DebugLog("[Rematch] Local selected: menuIndex=%d", s_localRetryMenuIndex);
-            input &= ~(CC_BUTTON_A | CC_BUTTON_CONFIRM); // 即確定を防止
-        }
-    }
-
-    // 双方揃い
-    if (s_localRetryMenuIndex != MENU_INDEX_NONE && remoteIndex != MENU_INDEX_NONE) {
-        int8_t finalIndex = (s_localRetryMenuIndex > remoteIndex)
-                           ? s_localRetryMenuIndex : remoteIndex;
-        s_targetMenuIndex = finalIndex;
-        s_targetMenuState = 2;
-        DebugLog("[Rematch] Resolved: local=%d remote=%d → final=%d",
-                 s_localRetryMenuIndex, remoteIndex, finalIndex);
-        return true;
-    }
-
-    return false;
-}
-
-/// メニューゲート制御
-static bool HandleMenuGate(uint16_t& input) {
-    // メニュー選択肢制限 (シーン別フィルタとして後日実装)
-    if (AsmHacks::currentMenuIndex > static_cast<uint32_t>(kMaxRetryMenuIndex)) {
-        // TODO: SceneInputFilter 経由に移行
-    }
-
-    // リプレイ保存サブメニュー
-    if (AsmHacks::currentMenuIndex == static_cast<uint32_t>(MENU_INDEX_REPLAY_SAVE)
-        || *CC_MENU_STATE_COUNTER_ADDR > s_retryMenuStateCounter) {
-        AsmHacks::menuConfirmState = 2;
-        return true;
-    }
-
-    return false;
 }
 
 void MatchScene::OnRematch(session::MatchContext& ctx) {
-    // ステップ 1: 自動ナビ中
-    if (s_targetMenuState != -1 && s_targetMenuIndex != MENU_INDEX_NONE) {
-        uint16_t navInput = HandleAutoNavigation();
-        if (navInput != 0) {
-            uint32_t input32 = static_cast<uint32_t>(navInput);
-            if (ctx.isHost) {
-                GC::WriteInput(input32, 0);
-            } else {
-                GC::WriteInput(0, input32);
-            }
-        }
-        return;
+    // ステップ 1: ローカル側は即座に「もう1回」を宣言
+    if (!s_localRetryReady) {
+        s_localRetryReady = true;
+        cccaster::core::netplay::NetplaySession::GetMutableState()
+            .localRetryMenuIndex.store(MENU_INDEX_RETRY, std::memory_order_release);
+        DebugLog("[Rematch] Local auto-retry ready (menuIndex=0).");
     }
 
-    // ステップ 2: 入力取得 (DirectInputHook から)
-    cccaster::game_interface::DirectInputHook::Poll();
-    uint32_t rawInput = ctx.isHost
-        ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
-        : cccaster::game_interface::DirectInputHook::GetPlayer2Input();
-    uint16_t input = static_cast<uint16_t>(rawInput & 0xFFFF);
-
-    // ステップ 3: メニューゲート
-    if (HandleMenuGate(input)) {
-        return;
-    }
-
-    // ステップ 4: 最終決定判定
-    ResolveMenuSelection(input);
-
-    // ステップ 5: ゲートリセット
-    AsmHacks::menuConfirmState = 0;
-
-    // タイムアウト検出
-    if (s_localRetryMenuIndex != MENU_INDEX_NONE
-        && s_remoteRetryMenuIndex.load(std::memory_order_relaxed) == MENU_INDEX_NONE) {
-        s_remoteWaitFrames++;
-        if (s_remoteWaitFrames >= REMOTE_TIMEOUT_FRAMES) {
-            DebugLog("[Rematch] TIMEOUT: Remote did not select within %u frames.",
-                     REMOTE_TIMEOUT_FRAMES);
+    // ステップ 2: 双方合意チェック
+    if (!s_rematchResolved) {
+        int8_t remoteIndex = s_remoteRetryMenuIndex.load(std::memory_order_relaxed);
+        if (remoteIndex >= 0) {
+            s_rematchResolved = true;
+            DebugLog("[Rematch] Resolved! local=0 remote=%d → Confirming retry.", remoteIndex);
+        } else {
+            return;  // 相手未到着 → 待機
         }
     }
+
+    // ステップ 3: 確定入力送出（数フレーム A ボタンを押す）
+    s_rematchConfirmFrames++;
+    if (s_rematchConfirmFrames <= 30) {
+        uint32_t confirmInput = static_cast<uint32_t>(CC_BUTTON_A | CC_BUTTON_CONFIRM);
+        if (ctx.isHost) {
+            GC::WriteInput(confirmInput, 0);
+        } else {
+            GC::WriteInput(0, confirmInput);
+        }
+    }
+    // 30F経過後は入力なし → ゲーム側が遷移するのを待つ
 }
 
 } // namespace cccaster::domain::scene
