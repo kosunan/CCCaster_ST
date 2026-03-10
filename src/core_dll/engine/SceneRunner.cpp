@@ -88,7 +88,7 @@ static bool s_running = false;
 static bool s_syncReported = false;
 static bool s_ready = false;
 static uint8_t s_prevIntroState = 255;  // introState 変化追跡用
-static bool    s_inBarrier      = false; // 遷移バリア待機中フラグ
+static bool    s_introStarted  = false; // intro 0→1 遷移が発生したか（InGame CB書込みゲート）
 
 // ================================================================
 // Init — 初期化（InitThread から1回だけ呼ばれる）
@@ -114,6 +114,7 @@ void SceneRunner::Init(MatchContext& ctx, SendFunc send) {
     s_prev = GamePhase::Unknown;
     s_running = true;
     s_syncReported = false;
+    s_introStarted = false;
     s_lastPacketReceiveTimeMs.store(GetCurrentTimeMs(), std::memory_order_relaxed);
 
     // FastBoot 初期化
@@ -136,53 +137,13 @@ void SceneRunner::Step() {
     // (A) Phase検出
     GamePhase phase = cccaster::game_interface::PhaseMonitor::GetCurrentPhase();
 
-    // (B) 画面遷移検出 → transitionId++ バリア開始
+    // (B) 画面遷移検出
     if (phase != s_prev) {
         OnPhaseChanged(s_prev, phase, ctx);
         ctx.framesInPhase = 0;
-        // Phase 変化 → transitionId++ + バリア開始
-        if (phase >= GamePhase::CharaSelect) {
-            auto& ms = cccaster::core::netplay::NetplaySession::GetMutableState();
-            uint32_t newId = ms.localTransitionId.load(std::memory_order_relaxed) + 1;
-            ms.localTransitionId.store(newId, std::memory_order_release);
-            s_inBarrier = true;
-            DebugLog("[Barrier] Phase %d->%d → transitionId=%u (barrier ON)",
-                     static_cast<int>(s_prev), static_cast<int>(phase), newId);
-        }
-    }
-
-    // (B2) InGame 中の intro 遷移検出 → transitionId++ バリア開始
-    if (phase == GamePhase::InGame) {
-        uint8_t curIntro = *CC_INTRO_STATE_ADDR;
-        if (curIntro != s_prevIntroState) {
-            DebugLog("[IntroTrack] intro %u->%u fip=%u WT=%u RT=%u",
-                     s_prevIntroState, curIntro, ctx.framesInPhase,
-                     *CC_WORLD_TIMER_ADDR, *CC_REAL_TIMER_ADDR);
-            auto& ms = cccaster::core::netplay::NetplaySession::GetMutableState();
-            uint32_t newId = ms.localTransitionId.load(std::memory_order_relaxed) + 1;
-            ms.localTransitionId.store(newId, std::memory_order_release);
-            s_inBarrier = true;
-            DebugLog("[Barrier] intro %u->%u → transitionId=%u (barrier ON)",
-                     s_prevIntroState, curIntro, newId);
-            s_prevIntroState = curIntro;
-        }
-    }
-
-    // (B3) 遷移バリア待機: peer の transitionId が追いつくまで CB書込みスキップ
-    if (s_inBarrier) {
-        auto& ss = cccaster::core::netplay::NetplaySession::GetState();
-        uint32_t local = ss.localTransitionId.load(std::memory_order_acquire);
-        uint32_t peer  = ss.peerTransitionId.load(std::memory_order_acquire);
-        if (peer >= local) {
-            s_inBarrier = false;
-            DebugLog("[Barrier] Cleared! local=%u peer=%u (GO)", local, peer);
-        } else {
-            // バリア中 → keepalive 送信、CB書込みなし、ゲームスレッドを返す
-            cccaster::core::netplay::NetplaySession::GetMutableState()
-                .needKeepalive.store(true, std::memory_order_release);
-            s_prev = phase;
-            ctx.framesInPhase++;
-            return;
+        // InGame に入ったら intro 遷移フラグをリセット
+        if (phase == GamePhase::InGame) {
+            s_introStarted = false;
         }
     }
 
@@ -200,6 +161,7 @@ void SceneRunner::Step() {
     // (D) メトロノーム精密待機 or キャッチアップ
     //   gap = peerLatestFrame - localWriteHead
     //   gap >= 2: 相手が先行 → メトロノーム待ち不要（即座に処理）
+    //   + フェーズが遅れている場合もスキップ
     //   gap <  2: 通常 → メトロノームの次ティックまで Sleep+CPUスピン
     {
         auto& metronome = cccaster::core::netplay::NetplaySession::GetInstance().GetMetronome();
@@ -212,7 +174,15 @@ void SceneRunner::Step() {
         uint32_t localHead = buf.GetWriteHead();
         int32_t gap = static_cast<int32_t>(peerFrame) - static_cast<int32_t>(localHead);
 
-        bool skipWait = (gap >= 2);
+        // 相手が次のフェーズ(ロード画面、キャラ選択、InGame開始前など)に既に到達(Ready)しており、
+        // 自分がまだ到達していない場合は「フェーズが遅れている」と判定してメトロノーム待機をスキップする
+        bool isPhaseDelayed = false;
+        if (syncState.peerPhaseReady.load(std::memory_order_acquire) && 
+            !syncState.localPhaseReady.load(std::memory_order_acquire)) {
+            isPhaseDelayed = true;
+        }
+        
+        bool skipWait = (gap >= 2) || isPhaseDelayed;
         GC::SetRenderSkipByGap(gap);
 
         if (metronome.IsRunning()) {
@@ -221,12 +191,25 @@ void SceneRunner::Step() {
     }
 
     // (E) 入力取得 → CB書込み
-    //   入力が意味を持つ Phase のみ書込む:
-    //     CharaSelect: キャラ選択入力
-    //     InGame かつ intro=0: 実際の対戦入力
-    //   intro≠0 (イントロ再生中) は書込まない → wh が進まず両者一致を保つ
+    //   「いつ・何を書くか」は SceneRunner が判断する。
+    //   FrameInputBuffer は純粋なデータ格納のみ。
     {
         auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
+
+        // InGame の intro 遷移検出およびCB書込み判定
+        // CC_INTRO_STATE_ADDR:
+        // 0: 書き込み不可
+        // 1: 書き込みOK
+        // 2: 書き込みOK
+        // (以前は 0->1 の遷移エッジを s_introStarted で管理していましたが、
+        // 状態依存での制御に変更します)
+        uint8_t introNow = *CC_INTRO_STATE_ADDR;
+        if (phase == GamePhase::InGame && !s_introStarted) {
+            if (introNow >= 1 && introNow <= 2) {
+                s_introStarted = true;
+                DebugLog("[SceneRunner] intro %u detected. InGame CB writing enabled.", introNow);
+            }
+        }
 
         // CB 書込み判定
         bool shouldWrite = false;
@@ -234,8 +217,9 @@ void SceneRunner::Step() {
         if (phase == GamePhase::CharaSelect) {
             shouldWrite = true;
         } else if (phase == GamePhase::InGame) {
-            uint8_t introNow = *CC_INTRO_STATE_ADDR;
-            if (introNow == 0) {
+            // introNow が 1 または 2 の場合のみ書き込み可能
+            uint8_t currentIntro = *CC_INTRO_STATE_ADDR;
+            if (currentIntro == 1 || currentIntro == 2) {
                 shouldWrite = true;
                 rollbackable = true;
             }
@@ -280,30 +264,63 @@ void SceneRunner::Step() {
             break;
     }
 
-    // (G) CB → ゲームメモリ書込み（Rematch は OnRematch が独自処理）
+    // (G) 相手入力待機 + CB → ゲームメモリ書込み
+    //   Rematch では OnRematch が独自に入力を処理するためスキップ。
+    //   readPos が confirmedRemoteFrame を超えている場合、
+    //   相手の入力パケット到着を待ってからゲームメモリに書込む。
     if (phase != GamePhase::Rematch) {
         auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
+        uint32_t readPos = buf.GetReadPos();
+
+        if (readPos > 0) {
+            uint32_t crf = buf.GetConfirmedRemoteFrame();
+            if (readPos > crf) {
+                // 相手入力未到着 → crf が readPos 以上になるまで待機
+                static constexpr int WAIT_TIMEOUT_MS = 3000;
+                auto startWait = GetCurrentTimeMs();
+                while (buf.GetConfirmedRemoteFrame() < readPos) {
+                    if ((GetCurrentTimeMs() - startWait) > WAIT_TIMEOUT_MS) {
+                        DebugLog("[SceneRunner] Remote input wait TIMEOUT at readPos=%u crf=%u (waited %dms)",
+                                 readPos, buf.GetConfirmedRemoteFrame(), WAIT_TIMEOUT_MS);
+                        break;
+                    }
+                    Sleep(0);
+                }
+            }
+        }
+
         uint32_t p1 = 0, p2 = 0;
         if (buf.ReadFrameForGame(ctx.isHost, p1, p2)) {
             GC::WriteInput(p1, p2);
         }
     }
 
-    // (H) 統合フロー確認ログ（60フレームごと）
+    // (F) 統合フロー確認ログ（60フレームごと）
     if (ctx.framesInPhase % 60 == 0 && phase >= GamePhase::CharaSelect) {
         auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
         auto& syncState = cccaster::core::netplay::NetplaySession::GetState();
         uint32_t wt = *CC_WORLD_TIMER_ADDR;
         uint32_t rt = *CC_REAL_TIMER_ADDR;
         uint8_t intro = *CC_INTRO_STATE_ADDR;
-        uint32_t ltid = syncState.localTransitionId.load(std::memory_order_relaxed);
-        uint32_t ptid = syncState.peerTransitionId.load(std::memory_order_relaxed);
-        DebugLog("[SceneRunner] phase=%d fip=%u wh=%u rp=%u ef=%u crf=%u WT=%u RT=%u intro=%u tid=%u/%u synced=%d",
+        DebugLog("[SceneRunner] phase=%d fip=%u wh=%u rp=%u ef=%u crf=%u WT=%u RT=%u intro=%u synced=%d alive=%d",
                  static_cast<int>(phase), ctx.framesInPhase,
                  buf.GetWriteHead(), buf.GetReadPos(), buf.GetEffectiveHead(),
                  buf.GetConfirmedRemoteFrame(),
-                 wt, rt, intro, ltid, ptid,
-                 syncState.isSynced.load() ? 1 : 0);
+                 wt, rt, intro,
+                 syncState.isSynced.load() ? 1 : 0,
+                 syncState.isPeerAlive.load() ? 1 : 0);
+    }
+
+    // (F2) introState 変化検出（InGame 中のみ）
+    if (phase == GamePhase::InGame) {
+        uint8_t curIntro = *CC_INTRO_STATE_ADDR;
+        if (curIntro != s_prevIntroState) {
+            uint32_t wt = *CC_WORLD_TIMER_ADDR;
+            uint32_t rt = *CC_REAL_TIMER_ADDR;
+            DebugLog("[IntroTrack] intro %u->%u fip=%u WT=%u RT=%u",
+                     s_prevIntroState, curIntro, ctx.framesInPhase, wt, rt);
+            s_prevIntroState = curIntro;
+        }
     }
 
     // (G) 同期状態チェック + 疎通チェック

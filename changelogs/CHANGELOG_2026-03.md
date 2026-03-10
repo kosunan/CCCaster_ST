@@ -1,49 +1,19 @@
-# feat: transitionId バリアによる全遷移同期ポイント + intro=0 限定 CB 書込み
-
-## 2026-03-10: 全遷移同期ポイントの実装
-
-### 概要
-Phase 遷移 (CharaSelect→Loading→InGame→Rematch) と intro 遷移 (255→2, 2→1, 1→0, 0→2) の
-全箇所に transitionId カウンター方式の同期バリアを導入。
-さらに CB 書込み条件を InGame かつ intro=0 のみに限定し、イントロ中の wh ズレを根本排除。
-
-### 修正ファイル (4ファイル)
-
-#### NetplaySession.hpp
-- SharedSyncState: 旧 `localPhaseReady`/`peerPhaseReady` (bool) を
-  `localTransitionId`/`peerTransitionId` (uint32_t カウンター) に置換
-
-#### SyncCodec.hpp / SyncCodec.cpp
-- SyncPayload に `transitionId` フィールド追加
-- 送信: localTransitionId をパケットに載せる
-- 受信: peerTransitionId を単調増加で更新
-- `FLAG_PHASE_READY` 定数を削除
-
-#### SceneRunner.cpp
-- (B) Phase 遷移時: transitionId++ + バリア ON
-- (B2) intro 遷移時: transitionId++ + バリア ON
-- (B3) バリア待機: peer の transitionId が追いつくまで return (keepalive 送信継続)
-- (E) shouldWrite: InGame は intro=0 のみ（イントロ中は wh を凍結）
-- (G) 旧3秒ブロッキング待機を撤去
-- `s_introStarted` 変数を撤去
-- ログに tid=local/peer を追加
-
-#### MatchScene.cpp
-- 旧 HandleRoundStartSync (SetModePause + localPhaseReady/peerPhaseReady 方式) を撤去
-- OnLoading: Pre-signaling 撤去
-- ResetInGame: peerPhaseReady リセット撤去
-- OnRematch: 自動リトライ方式に簡素化 (AsmHacks 依存撤去)
-
-### テスト結果
-- wh 完全一致: HOST=3904, CLIENT=3904 (イントロ中凍結)
-- intro 遷移 fip 完全一致: 2→1 で 136/136, 1→0 で 360/360
-- 全バリアが正常動作: tid=1〜6 の全箇所で peer 追いつき確認
-
----
-
 # docs: engine/ フォルダのコメントを実装と整合
 
-## 2026-03-10: 廃止済み参照の削除 + 実装乖離の修正
+## fix: メトロノーム待機のフェーズ遅延判定追加と、InGame CB書き込みのintroState条件厳格化
+
+### 2026-03-10: 相手のフェーズ先行時の待機スキップと、introState(1,2)明示的チェック
+
+### 概要
+1. 自分のフェーズ到達が相手より遅れている場合（`!localPhaseReady && peerPhaseReady`）、メトロノーム待機をスキップして高速に相手に追いつかせるロジックを追加。
+2. `FrameInputBuffer` への書き込み条件を修正し、`InGame` フェーズでは `introState` が `1` または `2` の場合のみ書き込みを許可するよう厳格化。
+
+### 変更ファイル
+- [MODIFY] `engine/SceneRunner.cpp`:
+  - `(D) メトロノーム精密待機` で `syncState.peerPhaseReady` と `syncState.localPhaseReady` を比較する `isPhaseDelayed` 判定を追加。
+  - `(E) CB書込み` で `introNow` が `1` または `2` であることを明示的にチェックするロジックに変更。
+
+---## 2026-03-10: 廃止済み参照の削除 + 実装乖離の修正
 
 ### 修正ファイル (6ファイル)
 - `SceneRunner.cpp`: Step() 処理フロー (A)-(I) を現在の実装に合わせて書き換え (SleepFrame → メトロノーム等)
