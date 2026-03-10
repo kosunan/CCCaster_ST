@@ -228,6 +228,14 @@ public:
         _confirmedRemoteFrame.store(frame, std::memory_order_release);
     }
 
+    /// @brief 絶対フレーム → Phase 相対フレーム変換
+    /// @param absFrame   CB 上の絶対フレーム番号
+    /// @param baseFrame  Phase 開始時の基準フレーム (phaseBaseFrame)
+    /// @return Phase 開始からの相対フレーム（0始まり）
+    static int32_t ToRelativeFrame(uint32_t absFrame, uint32_t baseFrame) {
+        return static_cast<int32_t>(absFrame) - static_cast<int32_t>(baseFrame);
+    }
+
 private:
     FrameInputBuffer() = default;
 

@@ -1,17 +1,17 @@
-﻿#pragma once
+#pragma once
 // ============================================================================
 // NetplaySession — 通信スレッド統括
 //
 // 【責務】
 //   パケットの送受信に専念する。
-//   パケット解析・Θ計算・α補正・FrameInputBuffer操作は GameTickCodec に委譲。
+//   パケット解析・Θ計算・α補正・FrameInputBuffer操作は SyncCodec に委譲。
 //   フレームリズム生成は Metronome に委譲。
 //
 // 【モード遷移】
 //   WaitReady  → (双方READY) → WaitStart → (θ安定+合意時刻到達) → Counting
 //
 // 【スレッド間ルール】
-//   - 通信スレッドは送受信と GameTickCodec 呼出しのみ。
+//   - 通信スレッドは送受信と SyncCodec 呼出しのみ。
 //   - Metronome は独立スレッドでカウンタをカウントアップ。
 //   - DLLスレッド（ゲームスレッド）は FrameInputBuffer を監視するだけ。
 // ============================================================================
@@ -22,7 +22,7 @@
 #include <vector>
 #include <string>
 #include <mutex>
-#include "core_dll/network/GameTickCodec.hpp"
+#include "core_dll/network/SyncCodec.hpp"
 #include "core_dll/timing/Metronome.hpp"
 
 namespace cccaster {
@@ -53,9 +53,13 @@ struct SharedSyncState {
     std::atomic<int64_t>  clockOffsetUs{0};
     std::atomic<int64_t>  lastRttUs{0};
 
-    // ─── IntroBarrier（ゲーム↔通信スレッド間）───────────────
-    std::atomic<bool>     localIntroComplete{false};  // ゲームスレッドが設定
-    std::atomic<bool>     peerIntroComplete{false};    // 通信スレッドが設定（受信時）
+    // ─── IntroBarrier / Phase遷移同期（ゲーム↔通信スレッド間）───
+    std::atomic<bool>     localPhaseReady{false};    // ゲームスレッドが設定
+    std::atomic<bool>     peerPhaseReady{false};      // 通信スレッドが設定（受信時）
+
+    // ─── Phase 遷移同期 ─────────────────────────────────
+    std::atomic<uint32_t> phaseBaseFrame{0};          // InGame 開始時の wh 基準点
+    std::atomic<uint32_t> peerPhaseBaseFrame{0};      // Peer の基準フレーム
 
     // ─── Keepalive 要求（ゲーム→通信スレッド）─────────────────
     std::atomic<bool>     needKeepalive{true};         // CB書込みしないPhaseで true
@@ -107,13 +111,13 @@ public:
     /// @brief メトロノームへのアクセサ（DLLスレッドから WaitForNextTick 用）
     Metronome& GetMetronome() { return _metronome; }
 
-    // ─── 時計データ読取り（オーバーレイ用、GameTickCodec 委譲）──
+    // ─── 時計データ読取り（オーバーレイ用、SyncCodec 委譲）──
     int64_t GetRttUs() const        { return _calc.GetRttUs(); }
     int64_t GetThetaUs() const      { return _calc.GetThetaUs(); }
     int64_t GetBaselineTheta() const { return _calc.GetBaselineTheta(); }
     uint32_t GetLatestPeerFrame() const { return _calc.GetLatestPeerFrame(); }
 
-    // ─── D/R 動的変更（GameTickCodec 委譲）─────────────
+    // ─── D/R 動的変更（SyncCodec 委譲）─────────────
     void SetDelayFrames(int d)  { _calc.SetDelayFrames(d); }
     void SetMaxRollback(int r)  { _calc.SetMaxRollback(r); }
 
@@ -126,9 +130,9 @@ public:
     static constexpr int64_t START_MARGIN_US            = 500000;
 
     // パケット定数
-    static constexpr int      UNIFIED_HEADER_SIZE   = GameTickCodec::UNIFIED_HEADER_SIZE;
-    static constexpr uint32_t CC10_MAGIC            = GameTickCodec::CC10_MAGIC;
-    static constexpr uint8_t  PKT_GAME_TICK         = GameTickCodec::PKT_GAME_TICK;
+    static constexpr int      UNIFIED_HEADER_SIZE   = SyncCodec::UNIFIED_HEADER_SIZE;
+    static constexpr uint32_t CC10_MAGIC            = SyncCodec::CC10_MAGIC;
+    static constexpr uint8_t  PKT_SYNC_TICK         = SyncCodec::PKT_SYNC_TICK;
 
 private:
     NetplaySession() = default;
@@ -149,7 +153,7 @@ private:
     SyncMode _mode = SyncMode::WaitReady;
 
     // ─── 委譲先 ────────────────────────────────────────
-    GameTickCodec _calc;
+    SyncCodec _calc;
     Metronome _metronome;
 
     // ─── 構成 ──────────────────────────────────────────

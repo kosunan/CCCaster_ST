@@ -4,7 +4,7 @@
 //
 // 【責務】
 //   α1 + α2 補正付き間隔で精密待機を提供する。
-//   フレーム番号の管理は行わない（GameTickCodec に委譲）。
+//   フレーム番号の管理は行わない（SyncCodec に委譲）。
 //   通信やFrameInputBuffer操作は一切行わない。
 //
 // 【使い方】
@@ -18,7 +18,7 @@
 //
 // 【スレッド安全性】
 //   WaitForNextTick() はゲームスレッドから呼ばれる。
-//   α1/α2 の設定は GameTickCodec が行う（atomic 書込み）。
+//   α1/α2 の設定は SyncCodec が行う（atomic 書込み）。
 // ============================================================================
 
 #include <atomic>
@@ -40,7 +40,7 @@ public:
     /// @param skipWait true: 待機せず次ティック時刻のみ進める（キャッチアップ用）
     void WaitForNextTick(bool skipWait = false);
 
-    // ─── α補正設定（GameTickCodec から呼ばれる） ───────
+    // ─── α補正設定（SyncCodec から呼ばれる） ───────
     void SetAlpha1(int64_t alpha1Us) { _alpha1Us.store(alpha1Us, std::memory_order_release); }
     void SetAlpha2(int64_t alpha2Us) { _alpha2Us.store(alpha2Us, std::memory_order_release); }
 

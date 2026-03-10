@@ -33,7 +33,7 @@ add_library(cccaster_hook SHARED
     network/UdpSocket.cpp
     network/NetworkSimulator.cpp
     network/NetplayManager.cpp
-    network/GameTickCodec.cpp
+    network/SyncCodec.cpp
     network/PacketRouter.cpp
 
     # === sync/ — 同期 ===

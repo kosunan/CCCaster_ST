@@ -1,17 +1,17 @@
-﻿#pragma once
+#pragma once
 // ============================================================================
-// GameTickCodec — 同期計算器
+// SyncCodec — 同期計算器
 //
 // 【責務】
 //   - 受信パケット解析 → Θ/RTT 計算（NetplayClock 利用）
 //   - α1 算出: RTT/2 ベースのパケットディレイ不足補正
 //   - α2 算出: Θ変化量ベースの相手ドリフト補正
 //   - FrameInputBuffer 書込み（入力データ）
-//   - 送信パケット組立て（GAME_TICK のみ）
+//   - 送信パケット組立て（SYNC_TICK のみ）
 //   - D/R dirty 管理
 //
 // 【パケット設計】
-//   全フェーズ（WaitReady/WaitStart/Counting）で GAME_TICK 1種類のみ使用。
+//   全フェーズ（WaitReady/WaitStart/Counting）で SYNC_TICK 1種類のみ使用。
 //   フェーズの違いは flags と startTimeUs フィールドで表現する。
 //
 // 【スレッド安全性】
@@ -30,7 +30,7 @@ namespace netplay {
 
 class Metronome;  // 前方宣言
 
-class GameTickCodec {
+class SyncCodec {
 public:
     // ─── 初期化 ─────────────────────────────────────────
     void Initialize(bool isHost, int delayFrames, int maxRollback,
@@ -49,16 +49,8 @@ public:
     /// @param localInput ローカル入力 (Counting時のみ有効)
     /// @param ready     true: 準備完了シグナル (WaitReady/WaitStart)
     /// @param startTimeUs メトロノーム開始時刻 (WaitStart時のみ有効、0=未設定)
-    std::vector<uint8_t> BuildGameTickPacket(uint32_t frame, uint32_t localInput,
+    std::vector<uint8_t> BuildPacket(uint32_t frame, uint32_t localInput,
                                              bool ready = false, int64_t startTimeUs = 0);
-
-    // ─── フレーム番号管理 ────────────────────────────
-    void SetInitialFrame(uint32_t frame) { _currentFrame = frame; }
-    uint32_t AdvanceFrame(uint32_t localInput);
-    uint32_t GetCurrentFrame() const { return _currentFrame; }
-
-    // ─── FrameInputBuffer書込み ────────────────────────
-    void WriteFrameSlot(uint32_t frame, uint32_t localInput);
 
     // ─── α補正の更新 ────────────────────────────────────
     void UpdateAlphaCorrections();
@@ -96,11 +88,11 @@ public:
     static constexpr uint32_t CC10_MAGIC           = 0x30314343u;
 
     // パケットタイプ（GAME_TICK のみ）
-    static constexpr uint8_t PKT_GAME_TICK = 0x30;
+    static constexpr uint8_t PKT_SYNC_TICK = 0x30;
 
-    // GameTickPayload flags
+    // SyncPayload flags
     static constexpr uint8_t FLAG_READY          = 0x01;  // 準備完了
-    static constexpr uint8_t FLAG_INTRO_COMPLETE = 0x02;  // イントロ完了
+    static constexpr uint8_t FLAG_PHASE_READY    = 0x02;  // Phase遷移準備完了（旧INTRO_COMPLETE）
 
 private:
     static std::vector<uint8_t> BuildUnifiedPacket(
@@ -126,10 +118,8 @@ private:
     bool     _peerReady = false;
     int      _framesSinceLastRecv = 0;
     uint32_t _latestPeerFrame = 0;
-
-    // ─── フレーム番号 ────────────────────────────
-    uint32_t _currentFrame = 0;
 };
+
 
 } // namespace netplay
 } // namespace core

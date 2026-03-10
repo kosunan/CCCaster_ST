@@ -69,11 +69,11 @@ void MatchScene::ResetLoading() {
 }
 
 void MatchScene::OnLoading(session::MatchContext& ctx) {
-    // IntroBarrier 事前通知: Loading 中に localIntroComplete=true を設定し
+    // IntroBarrier 事前通知: Loading 中に localPhaseReady=true を設定し
     // GAME_TICK に乗せて peer に通知。InGame 到達時にはバリア待機ゼロを実現。
     auto& ms = cccaster::core::netplay::NetplaySession::GetMutableState();
-    if (!ms.localIntroComplete.load(std::memory_order_relaxed)) {
-        ms.localIntroComplete.store(true, std::memory_order_release);
+    if (!ms.localPhaseReady.load(std::memory_order_relaxed)) {
+        ms.localPhaseReady.store(true, std::memory_order_release);
         DebugLog("[IntroBarrier] Pre-signaling during Loading phase.");
     }
     ReadBufferAndWrite(GamePhase::Loading, ctx.isHost);
@@ -95,10 +95,10 @@ static bool HandleRoundStartSync(session::MatchContext& ctx) {
     // ステップ1: intro=2 到達を即座に通知（isSynced 待ち中もパケットに乗る）
     auto& ms = cccaster::core::netplay::NetplaySession::GetMutableState();
     if (!s_syncInitiated) {
-        ms.localIntroComplete.store(true, std::memory_order_release);
+        ms.localPhaseReady.store(true, std::memory_order_release);
         GC::SetModePause();
         s_syncInitiated = true;
-        DebugLog("[InGame] introState=2 reached. localIntroComplete=true. Checking NetplaySession...");
+        DebugLog("[InGame] introState=2 reached. localPhaseReady=true. Checking NetplaySession...");
     }
 
     // ステップ2: NetplaySession 同期待ち
@@ -110,13 +110,17 @@ static bool HandleRoundStartSync(session::MatchContext& ctx) {
     // ステップ3: IntroBarrier — peer も intro=2 に到達するまで待機
     //   SetModePause 中なのでフレーム進行は停止。return でゲームスレッドを
     //   EndScene に戻し、通信スレッドの GAME_TICK 送受信を妨げない。
-    if (!ms.peerIntroComplete.load(std::memory_order_acquire)) {
+    if (!ms.peerPhaseReady.load(std::memory_order_acquire)) {
         return true;  // peer 未到達 → 次フレームで再チェック
     }
 
     // ステップ4: 双方揃い → 通常速度でフレーム進行開始
-    DebugLog("[IntroBarrier] Both peers at intro=2! (WT=%u RT=%u) Go!",
-             *CC_WORLD_TIMER_ADDR, *CC_REAL_TIMER_ADDR);
+    auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
+    uint32_t baseFrame = buf.GetWriteHead() + 1;
+    ms.phaseBaseFrame.store(baseFrame, std::memory_order_release);
+    DebugLog("[IntroBarrier] Both peers at intro=2! phaseBaseFrame=%u (WT=%u RT=%u) Go!",
+             baseFrame, *CC_WORLD_TIMER_ADDR, *CC_REAL_TIMER_ADDR);
+
     GC::SetModeNormalSpeed();
     ctx.roundStartSynced = true;
     s_syncInitiated = false;
@@ -127,10 +131,10 @@ static bool HandleRoundStartSync(session::MatchContext& ctx) {
 
 void MatchScene::ResetInGame() {
     s_syncInitiated = false;
-    // IntroBarrier: peerIntroComplete のみリセット（peer の次の intro=2 到達を待つため）
-    // localIntroComplete は true のまま維持 → GAME_TICK で常に flags=0x01 を送信
+    // IntroBarrier: peerPhaseReady のみリセット（peer の次の intro=2 到達を待つため）
+    // localPhaseReady は true のまま維持 → GAME_TICK で常に flags=0x01 を送信
     auto& syncState = cccaster::core::netplay::NetplaySession::GetMutableState();
-    syncState.peerIntroComplete.store(false, std::memory_order_relaxed);
+    syncState.peerPhaseReady.store(false, std::memory_order_relaxed);
 }
 
 void MatchScene::OnInGame(session::MatchContext& ctx) {

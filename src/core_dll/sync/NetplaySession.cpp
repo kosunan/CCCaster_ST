@@ -1,9 +1,9 @@
-﻿// ============================================================================
+// ============================================================================
 // NetplaySession.cpp — 通信スレッド統括
 //
 // 【設計】
 //   通信スレッドはパケット送受信に専念する。
-//   パケット解析・Θ計算・α補正・FrameInputBuffer操作は GameTickCodec に委譲。
+//   パケット解析・Θ計算・α補正・FrameInputBuffer操作は SyncCodec に委譲。
 //   フレームリズム生成は Metronome に委譲。
 // ============================================================================
 
@@ -58,7 +58,7 @@ void NetplaySession::Start(bool isHost,
     cccaster::domain::ui::StateUiLogic::SetDelay(delayFrames);
     cccaster::domain::ui::StateUiLogic::SetRollback(maxRollback);
 
-    // GameTickCodec 初期化
+    // SyncCodec 初期化
     _calc.Initialize(isHost, delayFrames, maxRollback, &_metronome);
 
     // キュークリア
@@ -103,7 +103,7 @@ void NetplaySession::OnPacketReceived(const std::vector<uint8_t>& data,
 }
 
 // ============================================================================
-// DrainAndProcessPackets — 受信キューを drain して GameTickCodec に委譲
+// DrainAndProcessPackets — 受信キューを drain して SyncCodec に委譲
 // ============================================================================
 void NetplaySession::DrainAndProcessPackets() {
     {
@@ -116,7 +116,7 @@ void NetplaySession::DrainAndProcessPackets() {
         _state.isPeerAlive.store(true, std::memory_order_release);
         _peerActualPort = pkt.fromPort;
 
-        // GameTickCodec に処理を委譲
+        // SyncCodec に処理を委譲
         _calc.ProcessReceivedPacket(pkt.data, pkt.fromIp, pkt.fromPort, pkt.receiveTimeUs);
 
         // SharedSyncState 更新
@@ -187,7 +187,7 @@ void NetplaySession::ThreadMain() {
         // Mode::WaitReady — 準備完了待機
         // ================================================================
         case SyncMode::WaitReady: {
-            SendPacket(_calc.BuildGameTickPacket(0, 0, true, 0));
+            SendPacket(_calc.BuildPacket(0, 0, true, 0));
 
             if (_calc.IsPeerReady()) {
                 _mode = SyncMode::WaitStart;
@@ -210,7 +210,7 @@ void NetplaySession::ThreadMain() {
                 sendStartTime = _calc.GetAgreedStartTime() > 0
                     ? _calc.GetAgreedStartTime() : 0;
             }
-            SendPacket(_calc.BuildGameTickPacket(0, 0, true, sendStartTime));
+            SendPacket(_calc.BuildPacket(0, 0, true, sendStartTime));
 
             int64_t agreedStart = _calc.GetAgreedStartTime();
             if (agreedStart > 0 && now >= agreedStart) {
@@ -219,7 +219,6 @@ void NetplaySession::ThreadMain() {
                 _state.isSynced.store(true, std::memory_order_release);
 
                 uint32_t startFrame = cccaster::core::sync::FrameInputBuffer::GetInstance().GetWriteHead();
-                _calc.SetInitialFrame(startFrame);
                 _metronome.Start();
 
                 cccaster::domain::session::DebugLog(
@@ -243,14 +242,14 @@ void NetplaySession::ThreadMain() {
             uint32_t newHead = cccaster::core::sync::FrameInputBuffer::GetInstance().GetWriteHead();
             if (newHead > _lastSentFrame) {
                 const auto& slot = cccaster::core::sync::FrameInputBuffer::GetInstance().GetSlot(newHead);
-                SendPacket(_calc.BuildGameTickPacket(newHead, slot.localInput));
+                SendPacket(_calc.BuildPacket(newHead, slot.localInput));
                 _lastSentFrame = newHead;
                 _keepaliveCounter = 0;
             } else if (_state.needKeepalive.load(std::memory_order_acquire)) {
                 // (2) CB書込みなし + keepalive要求 → 定期 keepalive
                 _keepaliveCounter++;
                 if (_keepaliveCounter >= KEEPALIVE_INTERVAL_FRAMES) {
-                    SendPacket(_calc.BuildGameTickPacket(_lastSentFrame, 0));
+                    SendPacket(_calc.BuildPacket(_lastSentFrame, 0));
                     _keepaliveCounter = 0;
                 }
             }
