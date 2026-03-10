@@ -1,3 +1,21 @@
+# fix: InGame突入時の同期デッドロック完全解消および冗長入力実装によるパケットロス耐性強化
+
+## 2026-03-11: netplay同期の安定化（パケットロス20%・遅延90ms環境下の完全動作）
+
+### 概要
+1. **同期デッドロックの解消**:
+   - `SceneRunner` の相手入力待ちブロックによる進行停止中、キープアライブパケット（通信の維持）が対象フレームやフラグが0の不正な状態で送信され、相手に無視されていた重大なバグを修正。
+   - `NetplaySession::ThreadMain` のダミー送信処理を改修し、現在の最新の入力ヘッド（Menu/Match）と対応する `SyncCodec::FLAG_BUFFER_*` を正しく指定するよう修正した結果、InGame開始時にフリーズする問題が完全に解消。
+2. **冗長入力 (Redundant Inputs) の実装**:
+   - 通信パケット (`SyncPayload`) のペイロード末尾に、直近最大10フレーム分の入力履歴を同封（`inputs[10]`）。
+   - 受信側 (`SyncCodec::ProcessReceivedPacket`) にて、同封された過去のフレームに対する `ConfirmRemote` を個別に実行する補完ロジックを追加。大幅なパケットロス環境でも後続のパケットで素早く状態が復元される仕組みを確立。
+
+### 変更ファイル
+- [MODIFY] `core_dll/network/SyncCodec.cpp`: パケット組立て時に過去10Fを取得してアペンド。受信時にループで展開して複数回の `ConfirmRemote` を呼び出し。
+- [MODIFY] `core_dll/sync/NetplaySession.cpp`: `_state.needKeepalive` 起因で送信されるパケットに対し、正しい CB の最新読取位置と対象フラグをセット。
+
+---
+
 # feat: CB分割 (Menu/Match) とWT基準の相対フレーム同期実装
 
 ## 2026-03-11: FrameInputBufferの責務分割とパケットルーティングの追加

@@ -226,9 +226,8 @@ void SceneRunner::Step() {
         if (phase == GamePhase::CharaSelect) {
             shouldWrite = true;
         } else if (phase == GamePhase::InGame) {
-            // introNow が 1 または 2 の場合のみ書き込み可能
-            uint8_t currentIntro = *CC_INTRO_STATE_ADDR;
-            if (currentIntro == 1 || currentIntro == 2) {
+            // 一度でもintro遷移が発生(s_introStarted=true) ＆ IntroBarrierのラウンド同期完了以降のみ書込み
+            if (s_introStarted && ctx.roundStartSynced) {
                 shouldWrite = true;
                 rollbackable = true;
             }
@@ -304,6 +303,11 @@ void SceneRunner::Step() {
                 // 相手入力未到着 → crf が readPos 以上になるまで待機
                 static constexpr int WAIT_TIMEOUT_MS = 3000;
                 auto startWait = GetCurrentTimeMs();
+
+                // ブロック中は強制的に通信を促すため keepalive を要求する
+                cccaster::core::netplay::NetplaySession::GetMutableState()
+                    .needKeepalive.store(true, std::memory_order_release);
+
                 while (true) {
                     uint32_t currentCrf = isMenu 
                         ? cccaster::core::sync::MenuInputBuffer::GetInstance().GetConfirmedRemoteFrame()
@@ -317,6 +321,10 @@ void SceneRunner::Step() {
                     }
                     Sleep(0);
                 }
+
+                // ブロック解除後は一旦元の設定(CB書込み済なら不要)に戻すため false に
+                cccaster::core::netplay::NetplaySession::GetMutableState()
+                    .needKeepalive.store(false, std::memory_order_release);
             }
         }
 

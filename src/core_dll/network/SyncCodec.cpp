@@ -29,8 +29,7 @@ struct SyncPayload {
     int64_t  echo_t2;
     // フレーム同期 (Counting 時のみ有効)
     uint32_t baseFrame;
-    uint16_t buttons;
-    uint16_t direction;
+    uint8_t  inputCount;
     // 同期パラメータ
     uint8_t  delay;
     uint8_t  maxRollback;
@@ -42,6 +41,8 @@ struct SyncPayload {
     int8_t   retryMenuIndex;
     // Phase 遷移同期: InGame 開始時の writeHead 基準点 (0=未設定)
     uint32_t phaseBaseFrame;
+    // 冗長入力 (最大10フレーム。0が最新baseFrame、1がbaseFrame-1...)
+    uint32_t inputs[10];
 };
 #pragma pack(pop)
 
@@ -108,6 +109,8 @@ void SyncCodec::ProcessReceivedPacket(const std::vector<uint8_t>& data,
     SyncPayload gtp{};
     std::memcpy(&gtp, data.data() + UNIFIED_HEADER_SIZE, sizeof(gtp));
 
+    cccaster::domain::session::DebugLog("[SyncCodec] RECV pkt: baseFr=%u flags=%x inputCount=%d t_send=%lld", gtp.baseFrame, gtp.flags, gtp.inputCount, gtp.t_send);
+
     // (1) NTP θ推定（常時）
     if (gtp.echo_t1 > 0 && gtp.echo_t2 > 0) {
         _clock.AddNtpSample(gtp.echo_t1, gtp.echo_t2, gtp.t_send, receiveTimeUs);
@@ -133,14 +136,24 @@ void SyncCodec::ProcessReceivedPacket(const std::vector<uint8_t>& data,
     }
 
     // (5) 該当バッファへの相手入力確定書込み（フレーム>0 なら Counting 中）
-    if (gtp.baseFrame > 0) {
-        uint32_t remoteInput = static_cast<uint32_t>(gtp.buttons)
-                             | (static_cast<uint32_t>(gtp.direction) << 16);
-        if (gtp.flags & FLAG_BUFFER_MENU) {
-            cccaster::core::sync::MenuInputBuffer::GetInstance().ConfirmRemote(gtp.baseFrame, remoteInput);
-        } else if (gtp.flags & FLAG_BUFFER_MATCH) {
-            cccaster::core::sync::MatchInputBuffer::GetInstance().ConfirmRemote(gtp.baseFrame, remoteInput);
+    if (gtp.baseFrame > 0 && gtp.inputCount > 0) {
+        // パケットロス耐性向上のため、通信パケットは過去複数の入力(最大10)を保持している。
+        // これを古いフレームから順に(または受信したすべてを)適用・確定する。
+        for (int i = 0; i < gtp.inputCount; i++) {
+            uint32_t historicFrame = gtp.baseFrame - i;
+            if (historicFrame == 0) break;
+            
+            uint32_t remoteInput = gtp.inputs[i];
+            if (gtp.flags & FLAG_BUFFER_MENU) {
+                cccaster::core::sync::MenuInputBuffer::GetInstance().ConfirmRemote(historicFrame, remoteInput);
+                cccaster::domain::session::DebugLog("[SyncCodec] ConfirmRemote MENU: fr=%u input=%x", historicFrame, remoteInput);
+            } else if (gtp.flags & FLAG_BUFFER_MATCH) {
+                cccaster::core::sync::MatchInputBuffer::GetInstance().ConfirmRemote(historicFrame, remoteInput);
+                cccaster::domain::session::DebugLog("[SyncCodec] ConfirmRemote MATCH: fr=%u input=%x flags=%x", historicFrame, remoteInput, gtp.flags);
+            }
         }
+    } else if (gtp.baseFrame > 0) {
+        cccaster::domain::session::DebugLog("[SyncCodec] Ignoring packet: baseFrame=%u inputCount=%d flags=%x", gtp.baseFrame, gtp.inputCount, gtp.flags);
     }
 
     // (6) D/R 受信
@@ -190,8 +203,25 @@ std::vector<uint8_t> SyncCodec::BuildPacket(
     gtp.echo_t1     = _lastPeerT1;
     gtp.echo_t2     = _lastPeerRecvUs;
     gtp.baseFrame   = frame;
-    gtp.buttons     = static_cast<uint16_t>(localInput & 0xFFFF);
-    gtp.direction   = static_cast<uint16_t>((localInput >> 16) & 0xFFFF);
+    
+    // 冗長入力の取得
+    gtp.inputCount = 0;
+    if (frame > 0) {
+        int maxCount = std::min(static_cast<int>(frame), 10);
+        gtp.inputCount = static_cast<uint8_t>(maxCount);
+        for (int i = 0; i < maxCount; i++) {
+            uint32_t historicFrame = frame - i;
+            uint32_t histInput = 0;
+            if (bufferTargetFlag == FLAG_BUFFER_MATCH) {
+                histInput = cccaster::core::sync::MatchInputBuffer::GetInstance().GetSlot(historicFrame).localInput;
+            } else if (bufferTargetFlag == FLAG_BUFFER_MENU) {
+                histInput = cccaster::core::sync::MenuInputBuffer::GetInstance().GetSlot(historicFrame).localInput;
+            } else {
+                histInput = localInput;
+            }
+            gtp.inputs[i] = histInput;
+        }
+    }
 
     static constexpr uint8_t DR_NO_CHANGE = 0xFF;
     gtp.delay       = _delayDirty    ? static_cast<uint8_t>(_delayFrames) : DR_NO_CHANGE;

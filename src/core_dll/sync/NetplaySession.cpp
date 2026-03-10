@@ -265,7 +265,13 @@ void NetplaySession::ThreadMain() {
                 // (2) CB書込みなし + keepalive要求 → 定期 keepalive
                 _keepaliveCounter++;
                 if (_keepaliveCounter >= KEEPALIVE_INTERVAL_FRAMES) {
-                    SendPacket(_calc.BuildPacket(newMenuHead, 0)); // ダミー送信としてMenuの現在フレーム送信
+                    if (newMatchHead > 0) {
+                        SendPacket(_calc.BuildPacket(newMatchHead, 0, false, 0, SyncCodec::FLAG_BUFFER_MATCH));
+                    } else if (newMenuHead > 0) {
+                        SendPacket(_calc.BuildPacket(newMenuHead, 0, false, 0, SyncCodec::FLAG_BUFFER_MENU));
+                    } else {
+                        SendPacket(_calc.BuildPacket(0, 0, false, 0, 0));
+                    }
                     _keepaliveCounter = 0;
                 }
             }
