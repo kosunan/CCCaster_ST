@@ -49,8 +49,10 @@ public:
     /// @param localInput ローカル入力 (Counting時のみ有効)
     /// @param ready     true: 準備完了シグナル (WaitReady/WaitStart)
     /// @param startTimeUs メトロノーム開始時刻 (WaitStart時のみ有効、0=未設定)
+    /// @param bufferTargetFlag 宛先のCB指定フラグ (FLAG_BUFFER_MENU または FLAG_BUFFER_MATCH)
     std::vector<uint8_t> BuildPacket(uint32_t frame, uint32_t localInput,
-                                             bool ready = false, int64_t startTimeUs = 0);
+                                             bool ready = false, int64_t startTimeUs = 0,
+                                             uint8_t bufferTargetFlag = 0);
 
     // ─── α補正の更新 ────────────────────────────────────
     void UpdateAlphaCorrections();
@@ -92,6 +94,9 @@ public:
 
     // SyncPayload flags
     static constexpr uint8_t FLAG_READY          = 0x01;  // 準備完了
+    static constexpr uint8_t FLAG_PHASE_READY    = 0x02;  // Phase遷移準備完了（旧INTRO_COMPLETE）
+    static constexpr uint8_t FLAG_BUFFER_MENU    = 0x10;  // 宛先: MenuInputBuffer
+    static constexpr uint8_t FLAG_BUFFER_MATCH   = 0x20;  // 宛先: MatchInputBuffer
 
 private:
     static std::vector<uint8_t> BuildUnifiedPacket(

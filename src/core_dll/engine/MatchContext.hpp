@@ -35,7 +35,8 @@ struct MatchContext {
     bool     rollbackReady        = false;  // RollbackEngine始動済み
 
     // ---- フレームカウンタ ----
-    uint32_t framesInPhase = 0;   // 各画面に入ってからの経過フレーム
+    uint32_t framesInPhase       = 0;   // 各画面に入ってからの単純な経過フレーム
+    uint32_t phaseBaseWorldTimer = 0;   // フェーズ開始時の基準ワールドタイム（WT）。ここから引算で「相対フレーム」を算出
 };
 
 } // namespace cccaster::domain::session

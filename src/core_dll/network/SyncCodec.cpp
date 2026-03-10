@@ -9,7 +9,8 @@
 #include "core_dll/sync/NetplaySession.hpp"
 #include "core_dll/timing/Metronome.hpp"
 #include "core_dll/timing/WasapiClock.hpp"
-#include "core_dll/sync/FrameInputBuffer.hpp"
+#include "core_dll/sync/MenuInputBuffer.hpp"
+#include "core_dll/sync/MatchInputBuffer.hpp"
 #include "core_dll/common/DebugLog.hpp"
 #include "core_dll/engine/MatchScene.hpp"
 #include "core_dll/ui/State_Ui_Logic.hpp"
@@ -41,8 +42,6 @@ struct SyncPayload {
     int8_t   retryMenuIndex;
     // Phase 遷移同期: InGame 開始時の writeHead 基準点 (0=未設定)
     uint32_t phaseBaseFrame;
-    // 遷移同期カウンター (Phase変化 + intro変化で++)
-    uint32_t transitionId;
 };
 #pragma pack(pop)
 
@@ -133,12 +132,15 @@ void SyncCodec::ProcessReceivedPacket(const std::vector<uint8_t>& data,
             "[SyncCodec] Peer startTime=%lld us", gtp.startTimeUs);
     }
 
-    // (5) FrameInputBuffer に相手入力を確定書込み（フレーム>0 なら Counting 中）
+    // (5) 該当バッファへの相手入力確定書込み（フレーム>0 なら Counting 中）
     if (gtp.baseFrame > 0) {
         uint32_t remoteInput = static_cast<uint32_t>(gtp.buttons)
                              | (static_cast<uint32_t>(gtp.direction) << 16);
-        cccaster::core::sync::FrameInputBuffer::GetInstance().ConfirmRemote(
-            gtp.baseFrame, remoteInput);
+        if (gtp.flags & FLAG_BUFFER_MENU) {
+            cccaster::core::sync::MenuInputBuffer::GetInstance().ConfirmRemote(gtp.baseFrame, remoteInput);
+        } else if (gtp.flags & FLAG_BUFFER_MATCH) {
+            cccaster::core::sync::MatchInputBuffer::GetInstance().ConfirmRemote(gtp.baseFrame, remoteInput);
+        }
     }
 
     // (6) D/R 受信
@@ -147,8 +149,8 @@ void SyncCodec::ProcessReceivedPacket(const std::vector<uint8_t>& data,
     if (gtp.delay != DR_NO_CHANGE) { _delayFrames = gtp.delay; drChanged = true; }
     if (gtp.maxRollback != DR_NO_CHANGE) { _maxRollback = gtp.maxRollback; drChanged = true; }
     if (drChanged) {
-        cccaster::core::sync::FrameInputBuffer::GetInstance().SetSyncParams(
-            _delayFrames, _maxRollback);
+        cccaster::core::sync::MenuInputBuffer::GetInstance().SetDelay(_delayFrames);
+        cccaster::core::sync::MatchInputBuffer::GetInstance().SetSyncParams(_delayFrames, _maxRollback);
         cccaster::domain::ui::StateUiLogic::SetDelay(_delayFrames);
         cccaster::domain::ui::StateUiLogic::SetRollback(_maxRollback);
     }
@@ -158,13 +160,10 @@ void SyncCodec::ProcessReceivedPacket(const std::vector<uint8_t>& data,
         _latestPeerFrame = gtp.baseFrame;
     }
 
-    // (8) 遷移同期カウンター受信
-    {
-        auto& ms = cccaster::core::netplay::NetplaySession::GetMutableState();
-        uint32_t prevPeer = ms.peerTransitionId.load(std::memory_order_relaxed);
-        if (gtp.transitionId > prevPeer) {
-            ms.peerTransitionId.store(gtp.transitionId, std::memory_order_release);
-        }
+    // (8) phaseReady フラグ受信
+    if (gtp.flags & FLAG_PHASE_READY) {
+        cccaster::core::netplay::NetplaySession::GetMutableState()
+            .peerPhaseReady.store(true, std::memory_order_release);
     }
 
     // (9) Rematch メニュー選択受信
@@ -183,7 +182,7 @@ void SyncCodec::ProcessReceivedPacket(const std::vector<uint8_t>& data,
 // BuildPacket — 全フェーズ共通パケット組立て
 // ============================================================================
 std::vector<uint8_t> SyncCodec::BuildPacket(
-    uint32_t frame, uint32_t localInput, bool ready, int64_t startTimeUs)
+    uint32_t frame, uint32_t localInput, bool ready, int64_t startTimeUs, uint8_t bufferTargetFlag)
 {
     int64_t now = timer::WasapiClock::GetTimeUs();
     SyncPayload gtp{};
@@ -203,6 +202,11 @@ std::vector<uint8_t> SyncCodec::BuildPacket(
     // flags
     gtp.flags = 0;
     if (ready) gtp.flags |= FLAG_READY;
+    if (cccaster::core::netplay::NetplaySession::GetState()
+            .localPhaseReady.load(std::memory_order_acquire)) {
+        gtp.flags |= FLAG_PHASE_READY;
+    }
+    gtp.flags |= bufferTargetFlag;
 
     gtp.startTimeUs = startTimeUs;
 
@@ -213,10 +217,6 @@ std::vector<uint8_t> SyncCodec::BuildPacket(
     // Phase 遷移同期: phaseBaseFrame
     gtp.phaseBaseFrame = cccaster::core::netplay::NetplaySession::GetState()
         .phaseBaseFrame.load(std::memory_order_acquire);
-
-    // 遷移同期カウンター
-    gtp.transitionId = cccaster::core::netplay::NetplaySession::GetState()
-        .localTransitionId.load(std::memory_order_acquire);
 
     return BuildUnifiedPacket(0x00, PKT_SYNC_TICK, now, &gtp, sizeof(gtp));
 }

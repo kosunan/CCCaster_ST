@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // UIManager.cpp — 画面切替エントリポイント実装
 // ============================================================================
 
@@ -8,7 +8,8 @@
 #include "core_dll/ui/InGame_Ui_View.hpp"
 #include "core_dll/ui/Rematch_Ui_View.hpp"
 #include "core_dll/ui/Controller_Ui_View.hpp"
-#include "core_dll/sync/FrameInputBuffer.hpp"
+#include "core_dll/sync/MenuInputBuffer.hpp"
+#include "core_dll/sync/MatchInputBuffer.hpp"
 #include "core_dll/sync/NetplaySession.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
 #include "core_dll/hook/DirectInputHook.hpp"
@@ -41,9 +42,10 @@ void UIManager::OnDelayInput(int num) {
     StateUiLogic::SetDelay(num);
     StateUiLogic::NotifyDelayChanged();
     // ★ 実処理にも即反映
-    cccaster::core::sync::FrameInputBuffer::GetInstance().SetSyncParams(
+    cccaster::core::sync::MenuInputBuffer::GetInstance().SetDelay(static_cast<int16_t>(num));
+    cccaster::core::sync::MatchInputBuffer::GetInstance().SetSyncParams(
         static_cast<int16_t>(num),
-        cccaster::core::sync::FrameInputBuffer::GetInstance().GetMaxRollback());
+        cccaster::core::sync::MatchInputBuffer::GetInstance().GetMaxRollback());
     if (cccaster::core::netplay::NetplaySession::GetInstance().IsRunning())
         cccaster::core::netplay::NetplaySession::GetInstance().SetDelayFrames(num);
 }
@@ -51,9 +53,9 @@ void UIManager::OnDelayInput(int num) {
 void UIManager::OnRollbackInput(int num) {
     StateUiLogic::SetRollback(num);
     StateUiLogic::NotifyRollbackChanged();
-    // ★ 実処理にも即反映
-    cccaster::core::sync::FrameInputBuffer::GetInstance().SetSyncParams(
-        cccaster::core::sync::FrameInputBuffer::GetInstance().GetDelay(),
+    // ★ 実処理にも即反映 (Menuはロールバックを持たないため設定不要)
+    cccaster::core::sync::MatchInputBuffer::GetInstance().SetSyncParams(
+        cccaster::core::sync::MatchInputBuffer::GetInstance().GetDelay(),
         static_cast<int16_t>(num));
     if (cccaster::core::netplay::NetplaySession::GetInstance().IsRunning())
         cccaster::core::netplay::NetplaySession::GetInstance().SetMaxRollback(num);

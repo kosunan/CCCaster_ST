@@ -1,3 +1,24 @@
+# feat: CB分割 (Menu/Match) とWT基準の相対フレーム同期実装
+
+## 2026-03-11: FrameInputBufferの責務分割とパケットルーティングの追加
+
+### 概要
+1. 単一の `FrameInputBuffer` を、UI入力用の `MenuInputBuffer`（ロールバックなし）と対戦入力用の `MatchInputBuffer`（ロールバックおよびWT基準フレーム対応）に分割。
+2. 同期におけるフレーム計算の基準を、絶対WTから「各フェーズ開始時のWT（`phaseBaseWorldTimer`）を0フレーム目とした相対WTフレーム」へ変更。
+3. `SyncCodec` で送受信するパケットに対し、Menu用かMatch用かを示す識別フラグ (`bufferTargetFlag`) を付与し、受信時に対応するバッファへ正確にルーティングする機構を追加。
+4. `SceneRunner` のフェーズ遷移時に、前画面のバッファを初期化し過去の入力による汚染を防ぐ処理を追加。
+
+### 変更ファイル
+- [NEW] `core_dll/sync/MenuInputBuffer.hpp`
+- [NEW] `core_dll/sync/MatchInputBuffer.hpp`
+- [DELETE] `core_dll/sync/FrameInputBuffer.hpp`
+- [MODIFY] `core_dll/engine/MatchContext.hpp`: `phaseBaseWorldTimer` 追加
+- [MODIFY] `core_dll/network/SyncCodec.hpp` & `.cpp`: パケットへのフラグ付与、バッファ振り分けでの `ConfirmRemote` 呼び出し
+- [MODIFY] `core_dll/sync/NetplaySession.hpp` & `.cpp`: 両バッファの監視・送信に対応、初期化処理追加
+- [MODIFY] `core_dll/ui/UIManager.cpp` & `core_dll/engine/MatchScene.cpp` & `core_dll/engine/SceneRunner.cpp`: `FrameInputBuffer` 参照を新しい2つのバッファに置換し、場面ごとに読み書き先を切り替え
+
+---
+
 # docs: engine/ フォルダのコメントを実装と整合
 
 ## fix: メトロノーム待機のフェーズ遅延判定追加と、InGame CB書き込みのintroState条件厳格化

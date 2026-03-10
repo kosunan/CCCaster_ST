@@ -26,7 +26,8 @@
 #include "core_dll/engine/MatchScene.hpp"
 #include "core_dll/engine/SceneFastBoot.hpp"
 #include "core_dll/sync/NetplaySession.hpp"
-#include "core_dll/sync/FrameInputBuffer.hpp"
+#include "core_dll/sync/MenuInputBuffer.hpp"
+#include "core_dll/sync/MatchInputBuffer.hpp"
 #include "core_dll/mbaa_mem/GamePhaseDetector.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
 #include "core_dll/hook/DirectInputHook.hpp"
@@ -63,15 +64,18 @@ static void OnPhaseChanged(GamePhase from, GamePhase to, MatchContext& ctx) {
         GC::SetModeNormalSpeed();
         ctx.roundStartSynced = false;
         ctx.rollbackReady = false;
+        cccaster::core::sync::MenuInputBuffer::GetInstance().Reset();
         scene::MatchScene::ResetLoading();
         DebugLog("[SceneRunner] Loading entered.");
     }
     if (to == GamePhase::CharaSelect) {
         GC::SetModeNormalSpeed();
+        cccaster::core::sync::MatchInputBuffer::GetInstance().Reset();
         scene::MatchScene::ResetCharaSelect();
         DebugLog("[SceneRunner] CharaSelect entered.");
     }
     if (to == GamePhase::InGame) {
+        cccaster::core::sync::MenuInputBuffer::GetInstance().Reset();
         scene::MatchScene::ResetInGame();
     }
     if (to == GamePhase::Rematch) {
@@ -166,12 +170,18 @@ void SceneRunner::Step() {
     {
         auto& metronome = cccaster::core::netplay::NetplaySession::GetInstance().GetMetronome();
         auto& syncState = cccaster::core::netplay::NetplaySession::GetState();
-        auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
-
+        
         uint32_t peerFrame = syncState.isSynced.load(std::memory_order_acquire)
             ? cccaster::core::netplay::NetplaySession::GetInstance().GetLatestPeerFrame()
             : 0;
-        uint32_t localHead = buf.GetWriteHead();
+            
+        uint32_t localHead = 0;
+        if (phase == GamePhase::CharaSelect || phase == GamePhase::Loading) {
+            localHead = cccaster::core::sync::MenuInputBuffer::GetInstance().GetWriteHead();
+        } else {
+            localHead = cccaster::core::sync::MatchInputBuffer::GetInstance().GetWriteHead();
+        }
+        
         int32_t gap = static_cast<int32_t>(peerFrame) - static_cast<int32_t>(localHead);
 
         // 相手が次のフェーズ(ロード画面、キャラ選択、InGame開始前など)に既に到達(Ready)しており、
@@ -192,9 +202,8 @@ void SceneRunner::Step() {
 
     // (E) 入力取得 → CB書込み
     //   「いつ・何を書くか」は SceneRunner が判断する。
-    //   FrameInputBuffer は純粋なデータ格納のみ。
+    //   各 InputBuffer は純粋なデータ格納のみ。
     {
-        auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
 
         // InGame の intro 遷移検出およびCB書込み判定
         // CC_INTRO_STATE_ADDR:
@@ -230,11 +239,18 @@ void SceneRunner::Step() {
             uint32_t localInput = ctx.isHost
                 ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
                 : cccaster::game_interface::DirectInputHook::GetPlayer2Input();
-            uint8_t phaseU8 = static_cast<uint8_t>(phase);
 
-            uint32_t frame = buf.GetWriteHead() + 1;
-            buf.WriteSlot(frame, phaseU8, rollbackable, localInput, 0, false);
-            buf.SetWriteHead(frame);
+            if (phase == GamePhase::CharaSelect) {
+                auto& buf = cccaster::core::sync::MenuInputBuffer::GetInstance();
+                uint32_t frame = buf.GetWriteHead() + 1;
+                buf.WriteSlot(frame, localInput, 0, false);
+                buf.SetWriteHead(frame);
+            } else if (phase == GamePhase::InGame) {
+                auto& buf = cccaster::core::sync::MatchInputBuffer::GetInstance();
+                uint32_t frame = buf.GetWriteHead() + 1;
+                buf.WriteSlot(frame, rollbackable, localInput, 0, false);
+                buf.SetWriteHead(frame);
+            }
 
             // CB書込み中 → keepalive 不要
             cccaster::core::netplay::NetplaySession::GetMutableState()
@@ -269,19 +285,34 @@ void SceneRunner::Step() {
     //   readPos が confirmedRemoteFrame を超えている場合、
     //   相手の入力パケット到着を待ってからゲームメモリに書込む。
     if (phase != GamePhase::Rematch) {
-        auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
-        uint32_t readPos = buf.GetReadPos();
+        uint32_t readPos = 0;
+        uint32_t crf = 0;
+        bool isMenu = (phase == GamePhase::CharaSelect || phase == GamePhase::Loading);
+
+        if (isMenu) {
+            auto& buf = cccaster::core::sync::MenuInputBuffer::GetInstance();
+            readPos = buf.GetReadPos();
+            crf = buf.GetConfirmedRemoteFrame();
+        } else {
+            auto& buf = cccaster::core::sync::MatchInputBuffer::GetInstance();
+            readPos = buf.GetReadPos();
+            crf = buf.GetConfirmedRemoteFrame();
+        }
 
         if (readPos > 0) {
-            uint32_t crf = buf.GetConfirmedRemoteFrame();
             if (readPos > crf) {
                 // 相手入力未到着 → crf が readPos 以上になるまで待機
                 static constexpr int WAIT_TIMEOUT_MS = 3000;
                 auto startWait = GetCurrentTimeMs();
-                while (buf.GetConfirmedRemoteFrame() < readPos) {
+                while (true) {
+                    uint32_t currentCrf = isMenu 
+                        ? cccaster::core::sync::MenuInputBuffer::GetInstance().GetConfirmedRemoteFrame()
+                        : cccaster::core::sync::MatchInputBuffer::GetInstance().GetConfirmedRemoteFrame();
+                    if (currentCrf >= readPos) break;
+
                     if ((GetCurrentTimeMs() - startWait) > WAIT_TIMEOUT_MS) {
                         DebugLog("[SceneRunner] Remote input wait TIMEOUT at readPos=%u crf=%u (waited %dms)",
-                                 readPos, buf.GetConfirmedRemoteFrame(), WAIT_TIMEOUT_MS);
+                                 readPos, currentCrf, WAIT_TIMEOUT_MS);
                         break;
                     }
                     Sleep(0);
@@ -290,22 +321,33 @@ void SceneRunner::Step() {
         }
 
         uint32_t p1 = 0, p2 = 0;
-        if (buf.ReadFrameForGame(ctx.isHost, p1, p2)) {
+        bool hasFrame = isMenu 
+            ? cccaster::core::sync::MenuInputBuffer::GetInstance().ReadFrameForGame(ctx.isHost, p1, p2)
+            : cccaster::core::sync::MatchInputBuffer::GetInstance().ReadFrameForGame(ctx.isHost, p1, p2);
+
+        if (hasFrame) {
             GC::WriteInput(p1, p2);
         }
     }
 
     // (F) 統合フロー確認ログ（60フレームごと）
     if (ctx.framesInPhase % 60 == 0 && phase >= GamePhase::CharaSelect) {
-        auto& buf = cccaster::core::sync::FrameInputBuffer::GetInstance();
+        bool isMenu = (phase == GamePhase::CharaSelect || phase == GamePhase::Loading);
+        uint32_t wh = 0, rp = 0, ef = 0, crf = 0;
+        if (isMenu) {
+            auto& buf = cccaster::core::sync::MenuInputBuffer::GetInstance();
+            wh = buf.GetWriteHead(); rp = buf.GetReadPos(); ef = buf.GetEffectiveHead(); crf = buf.GetConfirmedRemoteFrame();
+        } else {
+            auto& buf = cccaster::core::sync::MatchInputBuffer::GetInstance();
+            wh = buf.GetWriteHead(); rp = buf.GetReadPos(); ef = buf.GetEffectiveHead(); crf = buf.GetConfirmedRemoteFrame();
+        }
         auto& syncState = cccaster::core::netplay::NetplaySession::GetState();
         uint32_t wt = *CC_WORLD_TIMER_ADDR;
         uint32_t rt = *CC_REAL_TIMER_ADDR;
         uint8_t intro = *CC_INTRO_STATE_ADDR;
         DebugLog("[SceneRunner] phase=%d fip=%u wh=%u rp=%u ef=%u crf=%u WT=%u RT=%u intro=%u synced=%d alive=%d",
                  static_cast<int>(phase), ctx.framesInPhase,
-                 buf.GetWriteHead(), buf.GetReadPos(), buf.GetEffectiveHead(),
-                 buf.GetConfirmedRemoteFrame(),
+                 wh, rp, ef, crf,
                  wt, rt, intro,
                  syncState.isSynced.load() ? 1 : 0,
                  syncState.isPeerAlive.load() ? 1 : 0);

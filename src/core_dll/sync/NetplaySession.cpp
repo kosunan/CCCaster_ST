@@ -10,7 +10,8 @@
 #include "core_dll/sync/NetplaySession.hpp"
 #include "core_dll/timing/WasapiClock.hpp"
 #include "core_dll/network/NetplayManager.hpp"
-#include "core_dll/sync/FrameInputBuffer.hpp"
+#include "core_dll/sync/MenuInputBuffer.hpp"
+#include "core_dll/sync/MatchInputBuffer.hpp"
 #include "core_dll/common/DebugLog.hpp"
 #include "core_dll/ui/State_Ui_Logic.hpp"
 #include <windows.h>
@@ -39,8 +40,9 @@ void NetplaySession::Start(bool isHost,
     _targetPort   = targetPort;
     _localPort    = localPort;
     _startSent    = false;
-    _lastSentFrame = 0;
-    _lastLogFrame  = 0;
+    _lastSentMenuFrame  = 0;
+    _lastSentMatchFrame = 0;
+    _lastLogFrame       = 0;
     _peerActualPort = 0;
 
     // SharedSyncState リセット
@@ -51,8 +53,9 @@ void NetplaySession::Start(bool isHost,
     _state.clockOffsetUs.store(0);
     _state.lastRttUs.store(0);
 
-    // FrameInputBuffer 初期化
-    cccaster::core::sync::FrameInputBuffer::GetInstance().Initialize(200, delayFrames, maxRollback);
+    // InputBuffer 初期化
+    cccaster::core::sync::MenuInputBuffer::GetInstance().Initialize(200, delayFrames);
+    cccaster::core::sync::MatchInputBuffer::GetInstance().Initialize(200, delayFrames, maxRollback);
 
     // オーバーレイ初期表示
     cccaster::domain::ui::StateUiLogic::SetDelay(delayFrames);
@@ -218,7 +221,7 @@ void NetplaySession::ThreadMain() {
                 _calc.SetBaselineTheta();
                 _state.isSynced.store(true, std::memory_order_release);
 
-                uint32_t startFrame = cccaster::core::sync::FrameInputBuffer::GetInstance().GetWriteHead();
+                uint32_t startFrame = cccaster::core::sync::MatchInputBuffer::GetInstance().GetWriteHead();
                 _metronome.Start();
 
                 cccaster::domain::session::DebugLog(
@@ -239,29 +242,42 @@ void NetplaySession::ThreadMain() {
             _calc.UpdateAlphaCorrections();
 
             // (1) CB writeHead 監視 → ゲームデータ送信
-            uint32_t newHead = cccaster::core::sync::FrameInputBuffer::GetInstance().GetWriteHead();
-            if (newHead > _lastSentFrame) {
-                const auto& slot = cccaster::core::sync::FrameInputBuffer::GetInstance().GetSlot(newHead);
-                SendPacket(_calc.BuildPacket(newHead, slot.localInput));
-                _lastSentFrame = newHead;
+            uint32_t newMenuHead = cccaster::core::sync::MenuInputBuffer::GetInstance().GetWriteHead();
+            uint32_t newMatchHead = cccaster::core::sync::MatchInputBuffer::GetInstance().GetWriteHead();
+            
+            bool sent = false;
+            if (newMenuHead > _lastSentMenuFrame) {
+                const auto& slot = cccaster::core::sync::MenuInputBuffer::GetInstance().GetSlot(newMenuHead);
+                SendPacket(_calc.BuildPacket(newMenuHead, slot.localInput, false, 0, SyncCodec::FLAG_BUFFER_MENU));
+                _lastSentMenuFrame = newMenuHead;
                 _keepaliveCounter = 0;
-            } else if (_state.needKeepalive.load(std::memory_order_acquire)) {
+                sent = true;
+            }
+            if (!sent && newMatchHead > _lastSentMatchFrame) {
+                const auto& slot = cccaster::core::sync::MatchInputBuffer::GetInstance().GetSlot(newMatchHead);
+                SendPacket(_calc.BuildPacket(newMatchHead, slot.localInput, false, 0, SyncCodec::FLAG_BUFFER_MATCH));
+                _lastSentMatchFrame = newMatchHead;
+                _keepaliveCounter = 0;
+                sent = true;
+            }
+            
+            if (!sent && _state.needKeepalive.load(std::memory_order_acquire)) {
                 // (2) CB書込みなし + keepalive要求 → 定期 keepalive
                 _keepaliveCounter++;
                 if (_keepaliveCounter >= KEEPALIVE_INTERVAL_FRAMES) {
-                    SendPacket(_calc.BuildPacket(_lastSentFrame, 0));
+                    SendPacket(_calc.BuildPacket(newMenuHead, 0)); // ダミー送信としてMenuの現在フレーム送信
                     _keepaliveCounter = 0;
                 }
             }
 
             // 進捗ログ（60フレームごと）
-            if (newHead % 60 == 0 && newHead != _lastLogFrame) {
+            if (newMatchHead % 60 == 0 && newMatchHead != _lastLogFrame) {
                 cccaster::domain::session::DebugLog(
-                    "[NetplaySession] wh=%u tick=%lldus α1=%lld α2=%lld RTT=%lldus peerF=%u",
-                    newHead, _metronome.GetCurrentIntervalUs(),
+                    "[NetplaySession] whMenu=%u whMatch=%u tick=%lldus α1=%lld α2=%lld RTT=%lldus peerF=%u",
+                    newMenuHead, newMatchHead, _metronome.GetCurrentIntervalUs(),
                     _metronome.GetAlpha1(), _metronome.GetAlpha2(),
                     _calc.GetRttUs(), _calc.GetLatestPeerFrame());
-                _lastLogFrame = newHead;
+                _lastLogFrame = newMatchHead;
             }
             break;
         }

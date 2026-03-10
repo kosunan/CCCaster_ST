@@ -53,9 +53,9 @@ struct SharedSyncState {
     std::atomic<int64_t>  clockOffsetUs{0};
     std::atomic<int64_t>  lastRttUs{0};
 
-    // ─── 遷移同期カウンター（Phase変化 + intro変化で++）──────
-    std::atomic<uint32_t> localTransitionId{0};     // ゲームスレッドが++ する
-    std::atomic<uint32_t> peerTransitionId{0};      // 通信スレッドが受信時に設定
+    // ─── IntroBarrier / Phase遷移同期（ゲーム↔通信スレッド間）───
+    std::atomic<bool>     localPhaseReady{false};    // ゲームスレッドが設定
+    std::atomic<bool>     peerPhaseReady{false};      // 通信スレッドが設定（受信時）
 
     // ─── Phase 遷移同期 ─────────────────────────────────
     std::atomic<uint32_t> phaseBaseFrame{0};          // InGame 開始時の wh 基準点
@@ -169,8 +169,9 @@ private:
     std::vector<ReceivedPacket> _recvQueueSwap;
 
     // ─── CB writeHead 監視用 ──────────────────────────
-    uint32_t _lastSentFrame = 0;
-    uint32_t _lastLogFrame  = 0;
+    uint32_t _lastSentMenuFrame  = 0;
+    uint32_t _lastSentMatchFrame = 0;
+    uint32_t _lastLogFrame       = 0;
     int      _keepaliveCounter = 0;
 
     // ─── 実ピアポート（NAT越え用）──────────────────────
