@@ -3,17 +3,19 @@
 //
 // 【アーキテクチャ】
 //   Init()  : InitThread から呼ばれ、状態変数を初期化して即リターン。
-//   Step()  : ゲームスレッド (DxHook::Hooked_EndScene) から毎フレーム呼ばれ、
+//   Step()  : ゲームスレッド (DxHook::Hooked_Present) から毎フレーム呼ばれ、
 //             1フレーム分の処理を実行する。
 //
 // 【Step() 処理フロー】
-//   (A) Phase検出
+//   (A) Phase検出 (GamePhaseDetector)
 //   (B) 画面遷移検出 → OnPhaseChanged
-//   (C) FastBoot処理
-//   (D) MatchScene ディスパッチ（Phase別）
-//   (E) SleepFrame
-//   (F) 同期状態チェック + 疎通チェック
-//   (G) 中断チェック (F12)
+//   (C) FastBoot処理 (phase < CharaSelect)
+//   (D) メトロノーム精密待機 (Metronome)
+//   (E) CB書込み (CharaSelect/InGame: DirectInputHook → FrameInputBuffer)
+//   (F) Scene別ディスパッチ (MatchScene::OnXxx)
+//   (G) 相手入力待機 + CB→ゲームメモリ書込み (Rematch以外)
+//   (H) 統合フロー確認ログ (60Fごと)
+//   (I) 同期状態チェック + Peer切断検出
 // ============================================================================
 
 #include <windows.h>

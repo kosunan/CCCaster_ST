@@ -3,34 +3,30 @@
  * @file FrameControl.hpp
  * @brief ゲーム制御ファサード — メモリ操作を階層化した統一API
  *
- * 【3層アーキテクチャ】
+ * 【2層構成】
  *
- *   Layer 3 (Scene)     : MatchScene 等の業務ロジック
- *                         → FrameControl の束ねた関数を呼び出して業務を遂行
+ *   制御層 (public)   : 速度モード切替・入力書込み・終了要求
+ *                       Scene は「何をしたいか」だけを指示する
+ *                       例: SetModeHighSpeedSkip(), WriteInput(p1, p2)
  *
- *   Layer 2 (FrameControl): このファイル — 複数の操作を束ねた制御関数
- *                         例: SetModePause() = SpeedFlags::SetNormalSpeed()
- *                         Scene は「何をしたいか」だけを知り、制御の詳細は知らない
- *
- *   Layer 1 (Primitive)  : 個別メモリ読み書き（このファイル下部の private セクション）
- *                         例: GetInputBasePtr(), WriteP1Input(), WriteP2Input()
- *                         MbaaAddresses.hpp で定義された生アドレスへの直接操作
+ *   プリミティブ層 (private) : MbaaAddresses.hpp 定義の生アドレスへの直接操作
+ *                       例: GetInputBasePtr(), WriteP1Input(), WriteP2Input()
  *
  * 【設計思想】
  *   - Scene は FrameControl:: の関数のみを呼ぶ（メモリアドレスを直接触らない）
  *   - 速度制御は SpeedFlags（RenderSkip + TickBypass）で直接管理
- *   - 同期制御は NetplaySession に完全委譲（DLLスレッドは Read-only）
- *   - 個別メモリ操作は private メソッドとして隠蔽
- *   - 全メソッドは static — シングルトンへの委譲で状態管理
+ *   - フレーム待機は Metronome に委譲（本クラスは関与しない）
+ *   - 同期制御は NetplaySession に完全委譲
+ *   - 全メソッドは static
  *
  * 【使用例】
- *   FrameControl::SetModePause();         // 同期ポイントで一時停止
- *   FrameControl::SetModeHighSpeedSkip(); // 起動時・FastBoot 用高速化
- *   FrameControl::SleepFrame();           // gap ベースのフレーム待機
+ *   FrameControl::SetModeHighSpeedSkip(); // FastBoot / ロールアップ用高速化
+ *   FrameControl::SetModeNormalSpeed();   // 通常速度復帰
+ *   FrameControl::WriteInput(p1, p2);     // ゲームメモリに入力書込み
  *
  * @see SpeedFlags         描画スキップ + ティックバイパスの2フラグ
- * @see NetplaySession      通信同期（θ推定・ティックマスター）
- * @see MbaaAddresses.hpp     メモリアドレス定義
+ * @see Metronome          フレーム精密待機
+ * @see MbaaAddresses.hpp  メモリアドレス定義
  */
 
 #include "core_dll/timing/SpeedFlags.hpp"
@@ -62,6 +58,7 @@ public:
     /**
      * @brief 高速スキップ_ロールアップ
      * @details RenderSkip=ON, TickBypass=ON（HighSpeedSkip と同一動作）
+     * @param frames 現在未使用（将来的にロールアップ深度制御用を想定）
      */
     static void SetModeRollupSkip(uint32_t /*frames*/) {
         cccaster::core::SpeedFlags::SetHighSpeed();
@@ -69,15 +66,16 @@ public:
 
     /**
      * @brief 通常速度
-     * @details RenderSkip=OFF（SleepFrame が gap に応じて動的に ON/OFF 制御）
+     * @details RenderSkip=OFF, TickBypass=OFF
      */
     static void SetModeNormalSpeed() {
         cccaster::core::SpeedFlags::SetNormalSpeed();
     }
 
     /**
-     * @brief 一時停止
-     * @details RenderSkip=OFF, currentFrame が進まないので SleepFrame で自然待機
+     * @brief 一時停止（通常速度と同一）
+     * @details Metronome がフレーム進行を制御するため、
+     *          フレームが進まない状態では自然に待機状態になる。
      */
     static void SetModePause() {
         cccaster::core::SpeedFlags::SetNormalSpeed();

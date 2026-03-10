@@ -1,3 +1,17 @@
+# docs: engine/ フォルダのコメントを実装と整合
+
+## 2026-03-10: 廃止済み参照の削除 + 実装乖離の修正
+
+### 修正ファイル (6ファイル)
+- `SceneRunner.cpp`: Step() 処理フロー (A)-(I) を現在の実装に合わせて書き換え (SleepFrame → メトロノーム等)
+- `FrameControl.hpp`: 3層→2層構成、SleepFrame 使用例削除、Pause/Rollup 説明改善
+- `MatchScene.hpp`: 各画面業務を実装と一致 (Loading: CB書込みなし / Rematch: DirectInputHook 直接)
+- `MatchContext.hpp`: Run()→Step()、UdpSocket→FrameInputBuffer
+- `SceneRunner.hpp`: SendFunc をレガシー表記
+- `SceneInputFilter.hpp`: 「後日詳細実装」→ 現在の状況記載
+
+---
+
 # refactor: WndProcHook の UI 処理を UIManager に分離
 
 ## 2026-03-10: hook 層とロジック層の責務分離

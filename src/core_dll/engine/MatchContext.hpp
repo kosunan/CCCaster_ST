@@ -3,10 +3,10 @@
 // MatchContext — 画面間で持ち回す業務変数（POD構造体）
 // 
 // ★ dllmain.cpp の InitThread で IPC から構築され、
-//   SceneRunner::Run() に渡されて全Sceneで共有される
+//   SceneRunner::Step() で参照されて全Sceneで共有される
 //
-// 重いオブジェクト（RollbackEngine, atomic, UdpSocket*）は
-// SceneRunner側の static に配置し、Scene関数にはポインタ渡しする
+// 重いオブジェクト（RollbackEngine, FrameInputBuffer 等）は
+// 各モジュールの static に配置し、Scene関数にはポインタ渡しする
 // ============================================================================
 
 #include <cstdint>

@@ -4,18 +4,18 @@
 //
 // 【責務】
 //   各画面でのネット対戦特有の業務処理を集約する。
-//   FrameInputBuffer からの入力読取 → SceneInputFilter → WriteInput の
-//   共通フローを内部で呼び出す。
+//   SceneRunner::Step() の Scene別ディスパッチから呼ばれる。
 //
 // 【各画面の業務】
-//   CharaSelect: FrameInputBuffer 読取 → 入力フィルタ → WriteInput
-//   Loading:     FrameInputBuffer 読取 → 入力フィルタ → WriteInput
-//   InGame:      ラウンド開始同期 → FrameInputBuffer 読取 → 入力フィルタ → WriteInput
-//   Rematch:     メニュー選択同期 + 自動ナビ + FrameInputBuffer 読取
+//   CharaSelect: CB書込み → ReadBufferAndWrite → ゲームメモリ反映
+//   Loading:     CB書込みなし（needKeepalive=true で通信維持）
+//   InGame:      Intro同期(0→1遷移) → CB書込み → ReadBufferAndWrite
+//   Rematch:     DirectInputHook 直接読取り → メニュー選択検出 →
+//                retryMenuIndex 同期 + 自動メニューナビゲーション
 //
-// 【削除された処理】
-//   - パケット作成/送信 (NetplaySession に完全委譲)
-//   - RollbackEngine 管理 (FrameInputBuffer が自動的に処理)
+// 【委譲先】
+//   - パケット送受信: NetplaySession
+//   - フレーム同期:   FrameInputBuffer + Metronome
 // ============================================================================
 
 #include "core_dll/engine/MatchContext.hpp"

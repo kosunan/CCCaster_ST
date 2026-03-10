@@ -26,7 +26,7 @@ namespace cccaster::domain::session {
 
 class SceneRunner {
 public:
-    /// @brief 送信関数の型 — GameHooks が UdpSocket::Send をラップして渡す。
+    /// @brief 送信関数の型（レガシー — 現在はNetplaySessionに完全委譲のため未使用）
     using SendFunc = std::function<void(const std::vector<uint8_t>&)>;
 
     /// @brief 初期化（InitThread から1回だけ呼ぶ）
