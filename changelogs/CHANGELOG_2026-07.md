@@ -1,3 +1,53 @@
+# refactor: フレーム空間を一本化 — MenuInputBuffer と宛先フラグを撤去 (2b)
+
+## 2026-07-27: 入力パイプライン再構築 2b
+
+### 概要
+MENU と MATCH で別々に管理されていた2つのフレーム空間を、セッション通しの
+単一フレーム空間に統合した。3月11日版の画面停止（`peerF=12551` の跨ぎ汚染）は
+これで構造的に発生しなくなる。
+
+### 撤去したもの
+| 対象 | 理由 |
+|---|---|
+| `MenuInputBuffer`（ファイルごと削除） | 2つ目のフレーム空間そのもの |
+| `FLAG_BUFFER_MENU` / `FLAG_BUFFER_MATCH` | パケットが受信側の内部データ構造を指名する設計。フェーズ認識が両者でずれた瞬間に別々のバッファへ振り分けられていた |
+| `_lastSentMenuFrame` / `_lastSentMatchFrame` | `_lastSentFrame` 1本に統合 |
+| writeHead 後退の検知コード | フレーム空間をリセットしないので後退しえない |
+| `ConfirmRemote` の分岐ログ（毎フレーム10行） | 3月の実機ログ 118,204行の主因 |
+
+`BuildPacket` から `bufferTargetFlag` 引数を削除した。
+
+### 調査で判明したこと
+両バッファとも `NetplaySession::Start` で frame 200 に一度初期化されるだけで、
+フェーズ遷移でのリセットは既に存在しなかった（CB撤去の際に一緒に消えていた）。
+つまりフレーム空間は実質すでにセッション通しで、2本に分かれていたことだけが
+残骸として残っていた。`_latestPeerFrame` の単調最大値は、フレーム空間が1本で
+リセットもされない以上、常に正しい意味を持つ。
+
+### 検証
+harness（ロード 60F/240F）で退行なし。
+
+| 項目 | 結果 |
+|---|---|
+| IntroBarrier | HOST=WT512 / CLIENT=WT483（2b 修正を維持） |
+| パケット往復 | 両者 439 受信で対称 |
+| ログ量 | 4,500行 → 536行 |
+
+実行末尾の `Peer Disconnected!` は HOST が正常終了した後に CLIENT が検出したもの。
+非対称実行では HOST が 180F 早く終わるため必然であり、退行ではない。
+
+`ctest` 4スイート全緑（`input_buffers` は Menu 分を除いて 69 → 61チェック）。
+
+### 変更ファイル
+- [DELETE] `sync/MenuInputBuffer.hpp`
+- [MODIFY] `network/SyncCodec.hpp/.cpp` — 宛先フラグ撤去、確定先と冗長入力取得を一本化
+- [MODIFY] `sync/NetplaySession.hpp/.cpp` — 送信経路と追跡変数を一本化
+- [MODIFY] `ui/UIManager.cpp` — MenuInputBuffer への delay 反映を削除
+- [MODIFY] `src/tests/test_input_buffers.cpp` — MenuInputBuffer 節を削除
+
+---
+
 # refactor: MatchInputBuffer を安全化 — デシンクが黙って通る経路を塞いだ (2a)
 
 ## 2026-07-27: 入力パイプライン再構築 2a

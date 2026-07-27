@@ -1,5 +1,5 @@
 // ============================================================================
-// test_input_buffers.cpp — MatchInputBuffer / MenuInputBuffer のテスト
+// test_input_buffers.cpp — MatchInputBuffer のテスト
 //
 // 【MatchInputBuffer】
 //   入力パイプライン再構築(2a)で安全化した後の「あるべき挙動」を定める。
@@ -13,20 +13,17 @@
 //     ミスマッチ「なし」をフレーム0で表す  → HasMismatch/ConsumeMismatch(bool)
 //     フレーム0が永久に読めない            → valid フラグで区別するので読める
 //
-// 【MenuInputBuffer】
-//   まだ安全化していない。フレーム空間の一本化(2b)で撤去する予定のため、
-//   現状の挙動を記録するにとどめる（[LEGACY] 印）。
+// MenuInputBuffer はフレーム空間の一本化(2b)で撤去済み。入力は
+// セッション通しの単一フレーム空間で MatchInputBuffer だけが扱う。
 //
 // 【依存】
-//   両クラスはヘッダオンリーで依存ゼロ。ゲーム・DLL・通信を一切必要としない。
+//   ヘッダオンリーで依存ゼロ。ゲーム・DLL・通信を一切必要としない。
 // ============================================================================
 
 #include "test_support.hpp"
 #include "core_dll/sync/MatchInputBuffer.hpp"
-#include "core_dll/sync/MenuInputBuffer.hpp"
 
 using cccaster::core::sync::MatchInputBuffer;
-using cccaster::core::sync::MenuInputBuffer;
 
 // ============================================================================
 // MatchInputBuffer — 読取位置の算出
@@ -309,59 +306,6 @@ static void Singleton_SharesStateAcrossCallSites() {
 }
 
 // ============================================================================
-// MenuInputBuffer — 未安全化（2b で撤去予定）
-// ============================================================================
-
-static void Menu_ReadPos_UsesDelayOnly() {
-    CC_CASE("MenuInputBuffer: readPos = writeHead - delay（rollback を含まない）");
-    auto& m = MenuInputBuffer::GetInstance();
-    m.Initialize(100, /*delay*/ 2);
-
-    CC_CHECK_EQ(m.GetReadPos(), 98u);
-}
-
-static void Menu_ReadPos_ClampsOffsetToAtLeastOne() {
-    CC_CASE("MenuInputBuffer: delay=0 でも最低1F遅れる");
-    auto& m = MenuInputBuffer::GetInstance();
-    m.Initialize(100, 0);
-
-    CC_CHECK_EQ(m.GetReadPos(), 99u);
-}
-
-static void Menu_ReadFrameForGame_SwapsSidesByHostRole() {
-    CC_CASE("MenuInputBuffer: isHost で P1/P2 が入れ替わる");
-    auto& m = MenuInputBuffer::GetInstance();
-    m.Initialize(100, 2);   // readPos = 98
-    m.WriteSlot(98, /*local*/ 0x0F0F, /*remote*/ 0xF0F0, /*confirmed*/ true);
-
-    uint32_t p1 = 0, p2 = 0;
-    CC_CHECK(m.ReadFrameForGame(true, p1, p2));
-    CC_CHECK_EQ(p1, 0x0F0Fu);
-    CC_CHECK_EQ(p2, 0xF0F0u);
-}
-
-static void Menu_LegacyWrapIsUnchecked() {
-    CC_CASE("[LEGACY] MenuInputBuffer: 周回検証がない（2b で撤去予定）");
-    auto& m = MenuInputBuffer::GetInstance();
-    m.Initialize(0, 2);
-    m.WriteSlot(10, 0x1111, 0x2222, true);
-    m.WriteSlot(10 + MenuInputBuffer::RING_SIZE, 0x3333, 0x4444, true);
-
-    CC_CHECK_EQ(m.GetSlot(10).localInput, 0x3333u);   // 別フレームのデータが返る
-}
-
-static void Menu_Reset_KeepsDelay() {
-    CC_CASE("MenuInputBuffer: Reset は delay を残す");
-    auto& m = MenuInputBuffer::GetInstance();
-    m.Initialize(100, 3);
-
-    m.Reset();
-
-    CC_CHECK_EQ(m.GetDelay(), 3);
-    CC_CHECK_EQ(m.GetWriteHead(), 0u);
-}
-
-// ============================================================================
 
 int main() {
     ReadPos_SubtractsDelayPlusRollback();
@@ -386,12 +330,6 @@ int main() {
     EffectiveHead_IsCappedByPeerConfirmation();
     Reset_KeepsSessionParamsButClearsProgress();
     Singleton_SharesStateAcrossCallSites();
-
-    Menu_ReadPos_UsesDelayOnly();
-    Menu_ReadPos_ClampsOffsetToAtLeastOne();
-    Menu_ReadFrameForGame_SwapsSidesByHostRole();
-    Menu_LegacyWrapIsUnchecked();
-    Menu_Reset_KeepsDelay();
 
     return cccaster::test::Summarize("input_buffers");
 }

@@ -9,7 +9,6 @@
 #include "core_dll/sync/NetplaySession.hpp"
 #include "core_dll/timing/Metronome.hpp"
 #include "core_dll/timing/WasapiClock.hpp"
-#include "core_dll/sync/MenuInputBuffer.hpp"
 #include "core_dll/sync/MatchInputBuffer.hpp"
 #include "core_dll/common/DebugLog.hpp"
 #include "core_dll/engine/MatchScene.hpp"
@@ -144,13 +143,7 @@ void SyncCodec::ProcessReceivedPacket(const std::vector<uint8_t>& data,
             if (historicFrame == 0) break;
             
             uint32_t remoteInput = gtp.inputs[i];
-            if (gtp.flags & FLAG_BUFFER_MENU) {
-                cccaster::core::sync::MenuInputBuffer::GetInstance().ConfirmRemote(historicFrame, remoteInput);
-                cccaster::domain::session::DebugLog("[SyncCodec] ConfirmRemote MENU: fr=%u input=%x", historicFrame, remoteInput);
-            } else if (gtp.flags & FLAG_BUFFER_MATCH) {
-                cccaster::core::sync::MatchInputBuffer::GetInstance().ConfirmRemote(historicFrame, remoteInput);
-                cccaster::domain::session::DebugLog("[SyncCodec] ConfirmRemote MATCH: fr=%u input=%x flags=%x", historicFrame, remoteInput, gtp.flags);
-            }
+            cccaster::core::sync::MatchInputBuffer::GetInstance().ConfirmRemote(historicFrame, remoteInput);
         }
     } else if (gtp.baseFrame > 0) {
         cccaster::domain::session::DebugLog("[SyncCodec] Ignoring packet: baseFrame=%u inputCount=%d flags=%x", gtp.baseFrame, gtp.inputCount, gtp.flags);
@@ -162,7 +155,6 @@ void SyncCodec::ProcessReceivedPacket(const std::vector<uint8_t>& data,
     if (gtp.delay != DR_NO_CHANGE) { _delayFrames = gtp.delay; drChanged = true; }
     if (gtp.maxRollback != DR_NO_CHANGE) { _maxRollback = gtp.maxRollback; drChanged = true; }
     if (drChanged) {
-        cccaster::core::sync::MenuInputBuffer::GetInstance().SetDelay(_delayFrames);
         cccaster::core::sync::MatchInputBuffer::GetInstance().SetSyncParams(_delayFrames, _maxRollback);
         cccaster::domain::ui::StateUiLogic::SetDelay(_delayFrames);
         cccaster::domain::ui::StateUiLogic::SetRollback(_maxRollback);
@@ -195,7 +187,7 @@ void SyncCodec::ProcessReceivedPacket(const std::vector<uint8_t>& data,
 // BuildPacket — 全フェーズ共通パケット組立て
 // ============================================================================
 std::vector<uint8_t> SyncCodec::BuildPacket(
-    uint32_t frame, uint32_t localInput, bool ready, int64_t startTimeUs, uint8_t bufferTargetFlag)
+    uint32_t frame, uint32_t localInput, bool ready, int64_t startTimeUs)
 {
     int64_t now = timer::WasapiClock::GetTimeUs();
     SyncPayload gtp{};
@@ -211,15 +203,12 @@ std::vector<uint8_t> SyncCodec::BuildPacket(
         gtp.inputCount = static_cast<uint8_t>(maxCount);
         for (int i = 0; i < maxCount; i++) {
             uint32_t historicFrame = frame - i;
+            // 周回で別フレームになっていれば 0 のまま送る（誤った過去入力を配らない）
             uint32_t histInput = 0;
-            if (bufferTargetFlag == FLAG_BUFFER_MATCH) {
-                // 周回で別フレームになっていれば 0 のまま送る（誤った過去入力を配らない）
-                if (const auto* s = cccaster::core::sync::MatchInputBuffer::GetInstance().FindSlot(historicFrame))
-                    histInput = s->localInput;
-            } else if (bufferTargetFlag == FLAG_BUFFER_MENU) {
-                histInput = cccaster::core::sync::MenuInputBuffer::GetInstance().GetSlot(historicFrame).localInput;
-            } else {
-                histInput = localInput;
+            if (const auto* s = cccaster::core::sync::MatchInputBuffer::GetInstance().FindSlot(historicFrame)) {
+                histInput = s->localInput;
+            } else if (i == 0) {
+                histInput = localInput;   // 最新フレームは呼び出し元の値を使う
             }
             gtp.inputs[i] = histInput;
         }
@@ -238,8 +227,6 @@ std::vector<uint8_t> SyncCodec::BuildPacket(
             .localPhaseReady.load(std::memory_order_acquire)) {
         gtp.flags |= FLAG_PHASE_READY;
     }
-    gtp.flags |= bufferTargetFlag;
-
     gtp.startTimeUs = startTimeUs;
 
     // Rematch メニュー選択

@@ -49,10 +49,8 @@ public:
     /// @param localInput ローカル入力 (Counting時のみ有効)
     /// @param ready     true: 準備完了シグナル (WaitReady/WaitStart)
     /// @param startTimeUs メトロノーム開始時刻 (WaitStart時のみ有効、0=未設定)
-    /// @param bufferTargetFlag 宛先のCB指定フラグ (FLAG_BUFFER_MENU または FLAG_BUFFER_MATCH)
     std::vector<uint8_t> BuildPacket(uint32_t frame, uint32_t localInput,
-                                             bool ready = false, int64_t startTimeUs = 0,
-                                             uint8_t bufferTargetFlag = 0);
+                                     bool ready = false, int64_t startTimeUs = 0);
 
     // ─── α補正の更新 ────────────────────────────────────
     void UpdateAlphaCorrections();
@@ -93,10 +91,12 @@ public:
     static constexpr uint8_t PKT_SYNC_TICK = 0x30;
 
     // SyncPayload flags
+    //   宛先バッファを指定するフラグ (FLAG_BUFFER_MENU/MATCH) は廃止した。
+    //   パケットが受信側の内部データ構造を指名する設計だったため、
+    //   フェーズ認識が両者でずれた瞬間に別々のバッファへ振り分けられていた。
+    //   入力はセッション通しの単一フレーム空間で扱う。
     static constexpr uint8_t FLAG_READY          = 0x01;  // 準備完了
-    static constexpr uint8_t FLAG_PHASE_READY    = 0x02;  // Phase遷移準備完了（旧INTRO_COMPLETE）
-    static constexpr uint8_t FLAG_BUFFER_MENU    = 0x10;  // 宛先: MenuInputBuffer
-    static constexpr uint8_t FLAG_BUFFER_MATCH   = 0x20;  // 宛先: MatchInputBuffer
+    static constexpr uint8_t FLAG_PHASE_READY    = 0x02;  // Phase遷移準備完了
 
 private:
     static std::vector<uint8_t> BuildUnifiedPacket(

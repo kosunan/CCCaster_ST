@@ -168,10 +168,9 @@ private:
     std::vector<ReceivedPacket> _recvQueue;
     std::vector<ReceivedPacket> _recvQueueSwap;
 
-    // ─── CB writeHead 監視用 ──────────────────────────
-    uint32_t _lastSentMenuFrame  = 0;
-    uint32_t _lastSentMatchFrame = 0;
-    uint32_t _lastLogFrame       = 0;
+    // ─── 入力バッファ writeHead 監視用 ─────────────────
+    uint32_t _lastSentFrame = 0;
+    uint32_t _lastLogFrame  = 0;
     int      _keepaliveCounter = 0;
 
     // ─── 実ピアポート（NAT越え用）──────────────────────
