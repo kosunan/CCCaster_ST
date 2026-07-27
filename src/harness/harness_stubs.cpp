@@ -6,6 +6,8 @@
 //   DirectInputHook  — dinput / ConfigManager / ImGui を引き込むため
 //   StateUiLogic     — OverlayRenderer(ImGui) を引き込むため
 //   TimeHooks        — MinHook を引き込むため。実 QPC をそのまま返す
+//   MbaaMemTrace     — 実アドレスを直接読む観測モジュール。harness には
+//                      実ゲームのメモリが無いので何もしない。
 //   SceneFastBoot    — seam の外に置いた3アドレス (CC_GAME_STATE_ADDR /
 //                      CC_SFX_ARRAY_ADDR / CC_FORCE_GOTO_ADDR) を直接触るため。
 //                      ハーネスでは FakeGame がタイムラインで画面を進めるので
@@ -21,6 +23,7 @@
 #include "core_dll/engine/SceneFastBoot.hpp"
 #include "core_dll/mbaa_mem/IGameMemory.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
+#include "core_dll/mbaa_mem/MbaaMemTrace.hpp"
 
 #include <windows.h>
 #include <cstdio>
@@ -127,6 +130,12 @@ bool SceneFastBoot::ProcessFrame(bool) {
 }
 
 } // namespace cccaster::domain::scene
+
+// ── MbaaMemTrace ───────────────────────────────────────────
+namespace cccaster::game_memory {
+bool MbaaMemTrace::IsEnabled() { return false; }
+void MbaaMemTrace::Sample(uint32_t) {}
+}
 
 // ── TimeHooks ──────────────────────────────────────────────
 // ハーネスは時間を加速しない。実 QPC をそのまま返す。

@@ -30,6 +30,7 @@
 #include "core_dll/hook/DirectInputHook.hpp"
 #include "core_dll/common/ScriptedInput.hpp"
 #include "core_dll/sync/NetplaySession.hpp"
+#include "core_dll/sync/MatchInputBuffer.hpp"
 
 #include <windows.h>
 
@@ -175,6 +176,11 @@ int main(int argc, char** argv) {
         game.Advance();
         cccaster::domain::session::SceneRunner::Step();
 
+        // 実機の [MEM] トレースと同じ形でゲーム状態を記録する。
+        // 同じ netFrame で両プロセスの状態が揃っているかを判定するため。
+        game.SampleState(
+            cccaster::core::sync::MatchInputBuffer::GetInstance().GetWriteHead());
+
         if (game.CurrentStage() != lastStage) {
             lastStage = game.CurrentStage();
             std::printf("[harness] frame=%u stage=%s\n", game.Frame(), game.StageName());
@@ -195,5 +201,10 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::printf("[harness] 記録を書き出しました: %s\n", opt.outPath.c_str());
+
+    const std::string statePath = opt.outPath + ".state";
+    if (game.DumpStatesTo(statePath)) {
+        std::printf("[harness] 状態を書き出しました: %s\n", statePath.c_str());
+    }
     return 0;
 }

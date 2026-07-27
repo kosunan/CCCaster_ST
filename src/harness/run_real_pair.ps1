@@ -15,7 +15,8 @@ param(
     [string] $SimDelay     = '',      # 例 '50,90'。空なら遅延注入なし
     [int]    $SimLoss      = 0,       # パケットロス率 %
     [int]    $Port         = 7500,
-    [int]    $WaitSeconds  = 75
+    [int]    $WaitSeconds  = 75,
+    [switch] $MemTrace                # ゲームメモリを毎フレーム記録して突き合わせる
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -50,7 +51,8 @@ foreach ($i in 1,2) {
 
 # ── [3] 起動（入力は自動生成）──
 $env:CCCASTER_SCRIPT_INPUT = '1'
-Write-Output '[3] 起動 (CCCASTER_SCRIPT_INPUT=1 — 手動操作は不要)'
+if ($MemTrace) { $env:CCCASTER_MEM_TRACE = '1' } else { Remove-Item Env:\CCCASTER_MEM_TRACE -ErrorAction SilentlyContinue }
+Write-Output "[3] 起動 (SCRIPT_INPUT=1, MEM_TRACE=$([bool]$MemTrace) — 手動操作は不要)" 
 
 $common = @()
 if ($SimDelay -ne '') { $common += @('--sim-delay', $SimDelay) }
@@ -123,4 +125,48 @@ if ($mismatch.Count -eq 0) {
         Write-Output ("    netFrame={0}  host=[{1}]  client=[{2}]" -f $f, $h[$f], $c[$f])
     }
 }
+
+# ── [7] ゲームメモリの突き合わせ ──
+if ($MemTrace) {
+    function Read-Mem($path) {
+        $map = @{}
+        foreach ($line in Get-Content $path) {
+            if ($line -notmatch '^\[MEM\] ') { continue }
+            $a = $line.Substring(6).Split(' ')
+            if ($a.Count -lt 17) { continue }
+            $f = [uint32]$a[0]
+            if (-not $map.ContainsKey($f)) { $map[$f] = $a }   # 同一 netFrame は最初を採用
+        }
+        return $map
+    }
+    $mh = Read-Mem $logs[1]
+    $mc = Read-Mem $logs[2]
+
+    Write-Output ''
+    Write-Output '===== ゲームメモリの突き合わせ ====='
+    Write-Output ("  host  : {0} サンプル / client: {1} サンプル" -f $mh.Count, $mc.Count)
+
+    # 列名（[MEM] netFrame の次から）
+    $cols = @('mode','intro','state','WT','RT','roundTimer','menuCtr',
+              'rng0','rng1','p1seq','p2seq','p1hp','p2hp','roundCnt','p1win','p2win')
+
+    $keys = $mh.Keys | Where-Object { $mc.ContainsKey($_) } | Sort-Object
+    Write-Output ("  共通 netFrame: {0}" -f $keys.Count)
+
+    # 各列について最初に食い違った netFrame を出す
+    foreach ($i in 0..($cols.Count-1)) {
+        $idx = $i + 1
+        $first = $null
+        foreach ($k in $keys) {
+            if ($mh[$k][$idx] -ne $mc[$k][$idx]) { $first = $k; break }
+        }
+        if ($null -eq $first) {
+            Write-Output ("    {0,-11}: 一致" -f $cols[$i])
+        } else {
+            Write-Output ("    {0,-11}: netFrame={1} で分岐 (host={2} client={3})" -f `
+                $cols[$i], $first, $mh[$first][$idx], $mc[$first][$idx])
+        }
+    }
+}
+
 Write-Output 'DONE'

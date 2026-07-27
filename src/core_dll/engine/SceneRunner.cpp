@@ -33,6 +33,7 @@
 #include "core_dll/hook/DirectInputHook.hpp"
 #include "core_dll/engine/SceneInputFilter.hpp"
 #include "core_dll/common/ScriptedInput.hpp"
+#include "core_dll/mbaa_mem/MbaaMemTrace.hpp"
 #include "core_dll/hook/TimeHooks.hpp"
 #include "shared_contracts/IpcData.hpp"
 #include <atomic>
@@ -333,6 +334,10 @@ void SceneRunner::Step() {
 
     s_prev = phase;
     ctx.framesInPhase++;
+
+    // 実機メモリの毎フレーム記録（CCCASTER_MEM_TRACE=1 のときのみ）
+    cccaster::game_memory::MbaaMemTrace::Sample(
+        cccaster::core::sync::MatchInputBuffer::GetInstance().GetWriteHead());
 
     // (H) 中断チェック
     if (GetAsyncKeyState(VK_F12) & 0x8000) {

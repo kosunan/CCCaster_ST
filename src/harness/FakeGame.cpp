@@ -119,6 +119,23 @@ void FakeGame::WriteInput(GameInput p1, GameInput p2) {
     _written.push_back(Record{ _frame, netFrame, _gameMode, _introState, p1, p2 });
 }
 
+void FakeGame::SampleState(uint32_t netFrame) {
+    _states.push_back(StateSample{ netFrame, _gameMode, _introState, _worldTimer, _realTimer });
+}
+
+bool FakeGame::DumpStatesTo(const std::string& path) const {
+    FILE* fp = std::fopen(path.c_str(), "w");
+    if (!fp) return false;
+    std::fprintf(fp, "# netFrame mode intro WT RT\n");
+    for (const StateSample& s : _states) {
+        std::fprintf(fp, "%u %u %u %u %u\n",
+                     s.netFrame, s.gameMode, static_cast<unsigned>(s.introState),
+                     s.worldTimer, s.realTimer);
+    }
+    std::fclose(fp);
+    return true;
+}
+
 bool FakeGame::DumpTo(const std::string& path) const {
     FILE* fp = std::fopen(path.c_str(), "w");
     if (!fp) return false;

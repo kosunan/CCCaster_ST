@@ -109,6 +109,46 @@ if ($common.Count -eq 0) {
 }
 
 Write-Output ''
+Write-Output '===== ゲーム状態の突き合わせ ====='
+# 実機の [MEM] 判定と同じ形。同じ netFrame で両者のゲーム状態が揃っているか。
+# 入力列が一致していても、ここがずれていれば実際の対戦はデシンクする。
+function Read-State($path) {
+    $map = @{}
+    if (-not (Test-Path $path)) { return $map }
+    foreach ($line in Get-Content $path) {
+        if ($line -match '^#') { continue }
+        $a = $line.Split(' ')
+        if ($a.Count -lt 5) { continue }
+        $f = [uint32]$a[0]
+        if (-not $map.ContainsKey($f)) { $map[$f] = $a }   # 同一 netFrame は最初を採用
+    }
+    return $map
+}
+$sh = Read-State "$hostRec.state"
+$sc = Read-State "$clientRec.state"
+
+if ($sh.Count -eq 0 -or $sc.Count -eq 0) {
+    Write-Output '  状態記録がありません'
+} else {
+    $cols = @('mode','intro','WT','RT')
+    $skeys = $sh.Keys | Where-Object { $sc.ContainsKey($_) } | Sort-Object
+    Write-Output ("  共通 netFrame: {0}" -f $skeys.Count)
+    foreach ($i in 0..($cols.Count-1)) {
+        $idx = $i + 1
+        $first = $null
+        foreach ($k in $skeys) {
+            if ($sh[$k][$idx] -ne $sc[$k][$idx]) { $first = $k; break }
+        }
+        if ($null -eq $first) {
+            Write-Output ("    {0,-6}: 一致" -f $cols[$i])
+        } else {
+            Write-Output ("    {0,-6}: netFrame={1} で分岐 (host={2} client={3})" -f `
+                $cols[$i], $first, $sh[$first][$idx], $sc[$first][$idx])
+        }
+    }
+}
+
+Write-Output ''
 Write-Output '===== stall / conflict ====='
 foreach ($p in @(@('host',$hostLog), @('client',$clientLog))) {
     $last = Get-Content $p[1] | Where-Object { $_ -match 'stall=' } | Select-Object -Last 1

@@ -11,6 +11,7 @@ add_library(cccaster_hook SHARED
     mbaa_mem/MbaaPatcher.cpp
     mbaa_mem/PhaseMonitor.cpp
     mbaa_mem/GameMemory.cpp
+    mbaa_mem/MbaaMemTrace.cpp
     mbaa_mem/RealGameMemory.cpp
     mbaa_mem/FastBootRunner.cpp
 

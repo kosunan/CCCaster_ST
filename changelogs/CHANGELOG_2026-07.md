@@ -1,3 +1,96 @@
+# feat: 実機メモリトレースを追加し、実測値で harness を校正 — デシンクの再現に成功
+
+## 2026-07-27: 実機の振る舞いをテスト環境へ反映
+
+### 概要
+実機のゲームメモリを毎フレーム記録する `MbaaMemTrace` を追加し、
+その実測値で `FakeGame` のタイムラインを校正した。あわせて harness にも
+実機と同じ「同じ netFrame でゲーム状態が一致するか」の判定を追加した。
+結果、**実機でしか見えなかったデシンクが harness で再現するようになった**。
+
+### 追加した観測
+`CCCASTER_MEM_TRACE=1` で毎フレーム1行を出力する。
+
+```
+[MEM] netFrame mode intro state WT RT roundTimer menuCtr
+      rng0 rng1 p1seq p2seq p1hp p2hp roundCnt p1win p2win
+```
+
+`netFrame`(writeHead) を先頭に置き、両プロセスをこの番号で突き合わせる。
+RNG 状態とキャラのシーケンス番号を入れたのは、体力やタイマーより早く確実に
+差が出るため。判定は列ごとに「最初に食い違った netFrame」を出す形にした。
+
+トレースは seam の外に置いた。`IGameMemory` は同期ロジックが使う最小の窓口で、
+観測用の値を足すと責務がぼやけるため。harness ではスタブに置換する。
+
+### 実測で確定した原因
+
+```
+HOST   : WT - netFrame  開始 -156 → 終了 207   （差 363 = starve 363）
+CLIENT : WT - netFrame  開始 -156 → 終了 203   （差 359 = starve 359）
+```
+
+**`starve` の回数がそのままゲームフレームとネットプレイフレームの対応ずれ量**。
+両者は WT=45 / netFrame=201 で揃って始まるが、背圧で書込みを止めるたびに
+ゲームだけが進み、対応が1ずつ崩れる。
+
+その結果、実機では以下のように状態が分岐していた。
+
+| 列 | 分岐点 |
+|---|---|
+| `rng0` | netFrame=201（ほぼ即座） |
+| `WT` | netFrame=208 (host=380 / client=52) |
+| `p1seq` / `p1hp` | netFrame=367 |
+
+同じ netFrame でも両者のゲームが全く違う地点にいるため、乱数消費もキャラ状態も
+一致しない。**入力の伝送は正しく（共通フレームの入力列は一致、conflict 0）、
+ゲーム進行の対応付けが壊れている**という切り分けが確定した。
+
+### 実測値による FakeGame の校正
+| 区間 | 旧（机上） | 新（実測） |
+|---|---|---|
+| CharaSelect | 180F | 456F |
+| Loading | 60F | 55F |
+| intro=2 | 60F | 138F |
+| intro=1 | 60F | **224F** |
+| ラウンド(intro=0) | 300F | 1761F |
+
+intro=1 の 224F は `MbaaAddresses.hpp` の `CC_PRE_GAME_INTRO_FRAMES (224)` と
+一致しており、測定が正しいことの裏付けになる。
+
+### harness に状態突き合わせを追加
+これまで harness は入力列しか比べておらず、状態の乖離を見ていなかった。
+前回 harness が [OK] を出したのに実機がデシンクしていたのはこのため。
+実機と同じ物差し（同じ netFrame での mode / intro / WT / RT 一致）を入れた。
+
+### 再現の確認
+| | 最初に分岐する列 | 内容 |
+|---|---|---|
+| 実機 | `WT` | netFrame=208 で host=380 / client=52 |
+| harness（校正後） | `WT` | netFrame=231 で host=100 / client=75 |
+
+同じ列が同じ機構で分岐する。85秒の実機テストでしか見えなかったものが
+47秒の harness で捕まえられるようになった。
+
+### 次の一手（未着手）
+ネットプレイフレームが自由走行のカウンタで、ゲームの進行に紐付いていないことが
+根本原因。`WorldTimer` はゲームフレームと 1:1 で進むので、合意した基準点からの
+相対値をフレーム番号にすれば、netFrame N が両者で同じゲーム瞬間を指すようになる。
+`ctx.phaseBaseWorldTimer` は IntroBarrier 解除時に既に記録されており、
+コミット `f5241e3` の「WT基準の相対フレーム同期」が CB撤去で失われた形。
+
+### 変更ファイル
+- [NEW] `mbaa_mem/MbaaMemTrace.hpp/.cpp` — 実機メモリの毎フレーム記録
+- [MODIFY] `engine/SceneRunner.cpp` — トレース呼び出し
+- [MODIFY] `src/harness/FakeGame.hpp/.cpp` — 実測値で校正、状態サンプリング追加
+- [MODIFY] `src/harness/harness_main.cpp` — 状態記録の書き出し
+- [MODIFY] `src/harness/harness_stubs.cpp` — MbaaMemTrace のスタブ
+- [MODIFY] `src/harness/run_pair.ps1` — ゲーム状態の突き合わせ
+- [MODIFY] `src/harness/run_real_pair.ps1` — `-MemTrace` オプション
+- [MODIFY] `src/core_dll/CMakeLists.txt`
+
+---
+
 # feat: 実機テストを自動化 — デプロイ強制・入力自動生成・決定性判定
 
 ## 2026-07-27: 実機テストのゲート整備
