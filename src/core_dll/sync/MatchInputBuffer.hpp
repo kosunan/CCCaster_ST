@@ -160,8 +160,7 @@ public:
         _writeHead.store(0, std::memory_order_relaxed);
         _mismatchFrame.store(0, std::memory_order_relaxed);
         _confirmedRemoteFrame.store(0, std::memory_order_relaxed);
-        _delay = 0;
-        _maxRollback = 0;
+        // _delay と _maxRollback はセッション固有パラメータなのでクリアしない
     }
 
     void InitializeConfirmedRemoteFrame(uint32_t frame) {

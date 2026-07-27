@@ -245,6 +245,14 @@ void NetplaySession::ThreadMain() {
             uint32_t newMenuHead = cccaster::core::sync::MenuInputBuffer::GetInstance().GetWriteHead();
             uint32_t newMatchHead = cccaster::core::sync::MatchInputBuffer::GetInstance().GetWriteHead();
             
+            // バッファ初期化（フェーズ遷移による Reset）を検知してパケット追跡変数をリセット
+            if (newMenuHead < _lastSentMenuFrame) {
+                _lastSentMenuFrame = 0;
+            }
+            if (newMatchHead < _lastSentMatchFrame) {
+                _lastSentMatchFrame = 0;
+            }
+
             bool sent = false;
             if (newMenuHead > _lastSentMenuFrame) {
                 const auto& slot = cccaster::core::sync::MenuInputBuffer::GetInstance().GetSlot(newMenuHead);

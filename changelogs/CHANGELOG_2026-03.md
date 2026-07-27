@@ -1,3 +1,36 @@
+# refactor: DLL側CB干渉処理の全面削除 — 入力パイプラインのリセット
+
+## 2026-03-12: SceneRunner / MatchScene から CB 操作を完全撤去
+
+### 概要
+SceneRunner.cpp と MatchScene.cpp に蓄積していた CB（MenuInputBuffer / MatchInputBuffer）への
+全干渉処理を削除し、入力パイプラインをゼロベースからの再構築に備えるリセットを実施。
+通信スレッド側（NetplaySession / SyncCodec）および UIManager は変更なし。
+
+### 削除内容（計 17箇所）
+
+#### SceneRunner.cpp（12箇所）
+- `OnPhaseChanged` 内の `MenuInputBuffer::Reset()` ×2, `MatchInputBuffer::Reset()` ×1
+- メトロノーム gap 計算の `GetWriteHead()` ×2 → CB非依存に簡素化（常にメトロノーム待機）
+- セクション(E) 丸ごと：入力ポーリング + CB書込み（`DirectInputHook::Poll`, `WriteSlot`, `SetWriteHead`）
+- `s_introStarted` ゲートフラグ（変数定義 + Init内初期化 + フェーズ遷移リセット + intro検出ロジック）
+- セクション(G) 丸ごと：相手入力待機ブロッキングループ + `ReadFrameForGame` + `WriteInput`
+- 統合フローログから CB 変数参照（`wh`, `rp`, `ef`, `crf`）を除去
+- 不要 include 削除: `MenuInputBuffer.hpp`, `MatchInputBuffer.hpp`, `DirectInputHook.hpp`
+
+#### MatchScene.cpp（5箇所）
+- `ReadBufferAndWrite()` 関数全体の削除（CB→SceneInputFilter→WriteInput パイプライン）
+- `OnCharaSelect`, `OnLoading`, `OnInGame` 内の `ReadBufferAndWrite()` 呼出し削除
+- `HandleRoundStartSync` 内の `MatchInputBuffer::GetWriteHead()` → `phaseBaseFrame=0` に
+- `OnInGame` 内の introState/noInputFlag ゲートチェックを削除
+- 不要 include 削除: `SceneInputFilter.hpp`, `MenuInputBuffer.hpp`, `MatchInputBuffer.hpp`, `GamePhaseDetector.hpp`
+
+### 変更ファイル
+- [MODIFY] `engine/SceneRunner.cpp`: CB干渉12箇所を全削除、needKeepalive=true固定
+- [MODIFY] `engine/MatchScene.cpp`: CB干渉5箇所を全削除、各OnXxxは空関数orフラグ管理のみ
+
+---
+
 # fix: InGame突入時の同期デッドロック完全解消および冗長入力実装によるパケットロス耐性強化
 
 ## 2026-03-11: netplay同期の安定化（パケットロス20%・遅延90ms環境下の完全動作）

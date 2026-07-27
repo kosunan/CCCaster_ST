@@ -14,11 +14,8 @@
 // ============================================================================
 
 #include "core_dll/engine/MatchScene.hpp"
-#include "core_dll/engine/SceneInputFilter.hpp"
 #include "core_dll/engine/FrameControl.hpp"
 #include "core_dll/common/DebugLog.hpp"
-#include "core_dll/sync/MenuInputBuffer.hpp"
-#include "core_dll/sync/MatchInputBuffer.hpp"
 #include "core_dll/sync/NetplaySession.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
 #include "core_dll/mbaa_mem/MbaaInputDefs.hpp"
@@ -32,30 +29,8 @@ using GC = cccaster::domain::session::FrameControl;
 using cccaster::domain::session::DebugLog;
 using cccaster::game_interface::GamePhase;
 
-// ============================================================================
-// 共通: FrameInputBuffer → SceneInputFilter → WriteInput
-// ============================================================================
-static void ReadBufferAndWrite(GamePhase phase, bool isHost) {
-    uint32_t p1 = 0, p2 = 0;
-    bool readSuccess = false;
-
-    if (phase == GamePhase::CharaSelect || phase == GamePhase::Loading) {
-        readSuccess = cccaster::core::sync::MenuInputBuffer::GetInstance().ReadFrameForGame(isHost, p1, p2);
-    } else {
-        readSuccess = cccaster::core::sync::MatchInputBuffer::GetInstance().ReadFrameForGame(isHost, p1, p2);
-    }
-
-    if (!readSuccess) {
-        GC::ClearInput();
-        return;
-    }
-
-    // SceneInputFilter でフィルタ適用
-    p1 = SceneInputFilter::Apply(phase, p1);
-    p2 = SceneInputFilter::Apply(phase, p2);
-
-    GC::WriteInput(p1, p2);
-}
+// [撤去] ReadBufferAndWrite はリセットにより削除。
+//   CB読取→SceneInputFilter→WriteInput パイプラインは再構築フェーズで実装する。
 
 // ============================================================================
 // CharaSelect — FrameInputBuffer 読取 → WriteInput
@@ -65,7 +40,7 @@ void MatchScene::ResetCharaSelect() {
 }
 
 void MatchScene::OnCharaSelect(session::MatchContext& ctx) {
-    ReadBufferAndWrite(GamePhase::CharaSelect, ctx.isHost);
+    // [撤去] CB読取→WriteInput は再構築フェーズで実装
 }
 
 // ============================================================================
@@ -83,7 +58,7 @@ void MatchScene::OnLoading(session::MatchContext& ctx) {
         ms.localPhaseReady.store(true, std::memory_order_release);
         DebugLog("[IntroBarrier] Pre-signaling during Loading phase.");
     }
-    ReadBufferAndWrite(GamePhase::Loading, ctx.isHost);
+    // [撤去] CB読取→WriteInput は再構築フェーズで実装
 }
 
 // ============================================================================
@@ -125,11 +100,10 @@ static bool HandleRoundStartSync(session::MatchContext& ctx) {
     // フェーズ開始時の基準となるワールドタイム（WT）を記録する
     ctx.phaseBaseWorldTimer = *CC_WORLD_TIMER_ADDR;
 
-    auto& buf = cccaster::core::sync::MatchInputBuffer::GetInstance();
-    uint32_t baseFrame = buf.GetWriteHead() + 1;
-    ms.phaseBaseFrame.store(baseFrame, std::memory_order_release);
-    DebugLog("[IntroBarrier] Both peers at intro=2! phaseBaseFrame=%u (WT=%u BaseWT=%u) Go!",
-             baseFrame, *CC_WORLD_TIMER_ADDR, ctx.phaseBaseWorldTimer);
+    // [撤去] CB依存の phaseBaseFrame 算出
+    ms.phaseBaseFrame.store(0, std::memory_order_release);
+    DebugLog("[IntroBarrier] Both peers at intro=2! phaseBaseFrame=0 (WT=%u BaseWT=%u) Go!",
+             *CC_WORLD_TIMER_ADDR, ctx.phaseBaseWorldTimer);
 
     GC::SetModeNormalSpeed();
     ctx.roundStartSynced = true;
@@ -151,11 +125,7 @@ void MatchScene::OnInGame(session::MatchContext& ctx) {
     // ラウンド開始同期 + IntroBarrier（intro=2 で双方ブロック）
     if (HandleRoundStartSync(ctx)) return;
 
-    uint8_t introNow = *CC_INTRO_STATE_ADDR;
-    bool noInputFlag = *CC_P1_NO_INPUT_FLAG_ADDR != 0;
-    if (introNow != 0 || noInputFlag) return;
-
-    ReadBufferAndWrite(GamePhase::InGame, ctx.isHost);
+    // [撤去] CB読取→WriteInput は再構築フェーズで実装
 }
 
 // ============================================================================

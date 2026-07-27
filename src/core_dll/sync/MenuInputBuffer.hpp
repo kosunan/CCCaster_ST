@@ -135,7 +135,7 @@ public:
         std::memset(_ring, 0, sizeof(_ring));
         _writeHead.store(0, std::memory_order_relaxed);
         _confirmedRemoteFrame.store(0, std::memory_order_relaxed);
-        _delay = 0;
+        // _delay はセッション固有パラメータなのでクリアしない
     }
 
     void InitializeConfirmedRemoteFrame(uint32_t frame) {
