@@ -19,10 +19,9 @@ CCCaster_v10 は、旧来の解析難易度が高く密結合だったツール�
 
 ## プロジェクト構造
 
-* `src/`: ソースコード（`core_dll`, `main_app`, `launcher` に分離）
-* `docs/`: 要件定義、詳細設計などのドキュメント
+* `src/`: ソースコード（`core_dll`, `cli_launcher`, `launcher` に分離）
+* `docs/`: 過去の要件定義・設計資料（現行仕様との乖離あり。[AGENTS.md](AGENTS.md) 参照）
 * `tests/`: ユニットテストおよびベンチマークコード
-* `tools/`: 擬似クライアント (DummyPeer) などの開発ツール
 * `changelogs/`: バージョンおよび月別の変更履歴
 
 ## ビルド方法
