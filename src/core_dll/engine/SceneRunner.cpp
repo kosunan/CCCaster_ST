@@ -29,6 +29,9 @@
 #include "core_dll/mbaa_mem/GamePhaseDetector.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
 #include "core_dll/mbaa_mem/IGameMemory.hpp"
+#include "core_dll/sync/MatchInputBuffer.hpp"
+#include "core_dll/hook/DirectInputHook.hpp"
+#include "core_dll/engine/SceneInputFilter.hpp"
 #include "core_dll/hook/TimeHooks.hpp"
 #include "shared_contracts/IpcData.hpp"
 #include <atomic>
@@ -88,6 +91,10 @@ static bool s_syncReported = false;
 static bool s_ready = false;
 static uint8_t s_prevIntroState = 255;  // introState 変化追跡用
 
+static bool     s_haveDelivered = false;  // 一度でも配信できたか
+static uint32_t s_stallFrames   = 0;  // 配信できず直前入力を保持した累計フレーム数
+static uint32_t s_starvedFrames = 0;  // 背圧で書込みを止めた累計フレーム数
+
 // ================================================================
 // Init — 初期化（InitThread から1回だけ呼ばれる）
 // ================================================================
@@ -112,6 +119,9 @@ void SceneRunner::Init(MatchContext& ctx, SendFunc send) {
     s_prev = GamePhase::Unknown;
     s_running = true;
     s_syncReported = false;
+    s_haveDelivered = false;
+    s_stallFrames = 0;
+    s_starvedFrames = 0;
     s_lastPacketReceiveTimeMs.store(GetCurrentTimeMs(), std::memory_order_relaxed);
 
     // FastBoot 初期化
@@ -161,8 +171,43 @@ void SceneRunner::Step() {
         }
     }
 
-    // (E) [撤去] 入力取得→CB書込みはリセットにより全削除
-    //   再構築フェーズで新しい入力パイプラインをここに実装する
+    // (E) ローカル入力 → 入力バッファ書込み
+    //   書き込んだ writeHead を通信スレッドが監視し、パケットとして送出する。
+    {
+        auto& buf = cccaster::core::sync::MatchInputBuffer::GetInstance();
+
+        cccaster::game_interface::DirectInputHook::Poll();
+        const uint32_t localInput = ctx.isHost
+            ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
+            : cccaster::game_interface::DirectInputHook::GetPlayer2Input();
+
+        // 予測は「相手の最後の確定入力を繰り返す」。ロールバック導入までは
+        // 予測が外れても巻き戻せないため、確定するまでゲームには渡さない。
+        uint32_t predicted = 0;
+        if (buf.HasConfirmedRemote()) {
+            buf.TryGetRemoteInput(buf.GetConfirmedRemoteFrame(), predicted);
+        }
+
+        // 背圧: 相手の確定フレームから delay+maxRollback 以上は先行しない。
+        //   ここで止めないと、先行した側は相手がまだ生成していないフレームを
+        //   読み続けることになり、永久に配信できない。ロールバック netplay で
+        //   先行側を抑えるのは「入力の枯渇」であり、その入口がこの判定。
+        const uint32_t head = buf.GetWriteHead();
+        const uint32_t confirmed = buf.HasConfirmedRemote()
+            ? buf.GetConfirmedRemoteFrame() : head;
+        const int32_t lead = static_cast<int32_t>(head) - static_cast<int32_t>(confirmed);
+        const int32_t maxLead = static_cast<int32_t>(ctx.delay) + static_cast<int32_t>(ctx.maxRollback);
+
+        if (lead <= maxLead) {
+            buf.WriteLocal(head + 1, localInput, predicted,
+                           cccaster::game_interface::PhaseMonitor::IsRoundActive());
+        } else {
+            ++s_starvedFrames;   // 相手待ちで先行を止めたフレーム数
+        }
+    }
+
+    // 入力を毎フレーム送るので keepalive は本来不要だが、
+    // 送信が止まった場合の保険として要求は立てたままにする。
     cccaster::core::netplay::NetplaySession::GetMutableState()
         .needKeepalive.store(true, std::memory_order_release);
 
@@ -184,7 +229,28 @@ void SceneRunner::Step() {
             break;
     }
 
-    // [撤去] 相手入力待機 + CB→ゲームメモリ書込みはリセットにより全削除
+    // (F2) 確定フレーム → フィルタ → ゲームメモリ書込み
+    //   readPos = writeHead - (delay + maxRollback)。相手入力が届いていない
+    //   フレームは書き込まず、直前の入力を保持する（ゲームスレッドは絶対に
+    //   ブロックしない — ブロックすると keepalive が途絶えて切断扱いになる）。
+    {
+        auto& buf = cccaster::core::sync::MatchInputBuffer::GetInstance();
+
+        uint32_t p1 = 0, p2 = 0;
+        if (buf.TryReadForGame(ctx.isHost, p1, p2)) {
+            using cccaster::game_interface::GameInput;
+            namespace filter = cccaster::domain::scene;
+            GC::WriteInput(
+                GameInput::Unpack(filter::SceneInputFilter::Apply(phase, p1)),
+                GameInput::Unpack(filter::SceneInputFilter::Apply(phase, p2)));
+            s_haveDelivered = true;
+        } else {
+            // 未確定 → 何も書かない。ゲームメモリには直前フレームの値が
+            // そのまま残るため「保持」と同じ挙動になる。古い入力を新しい
+            // フレームの分として書き直さないので、記録も実態とずれない。
+            ++s_stallFrames;
+        }
+    }
 
     // (G) 統合フロー確認ログ（60フレームごと）
     if (ctx.framesInPhase % 60 == 0 && phase >= GamePhase::CharaSelect) {
@@ -193,11 +259,15 @@ void SceneRunner::Step() {
         uint32_t wt = mem.WorldTimer();
         uint32_t rt = mem.RealTimer();
         uint8_t intro = mem.IntroState();
-        DebugLog("[SceneRunner] phase=%d fip=%u WT=%u RT=%u intro=%u synced=%d alive=%d",
+        auto& buf = cccaster::core::sync::MatchInputBuffer::GetInstance();
+        DebugLog("[SceneRunner] phase=%d fip=%u wh=%u rp=%u WT=%u RT=%u intro=%u "
+                 "synced=%d alive=%d stall=%u starve=%u conflict=%u",
                  static_cast<int>(phase), ctx.framesInPhase,
+                 buf.GetWriteHead(), buf.GetReadPos(),
                  wt, rt, intro,
                  syncState.isSynced.load() ? 1 : 0,
-                 syncState.isPeerAlive.load() ? 1 : 0);
+                 syncState.isPeerAlive.load() ? 1 : 0,
+                 s_stallFrames, s_starvedFrames, buf.ConfirmConflicts());
     }
 
     // (F2) introState 変化検出（InGame 中のみ）

@@ -45,7 +45,8 @@ public:
     enum class Stage { Boot, CharaSelect, Loading, InGame, Rematch, Finished };
 
     struct Record {
-        uint32_t  frame;
+        uint32_t  frame;        ///< FakeGame 自身のフレーム（プロセスごとに異なる）
+        uint32_t  netFrame;     ///< 配信されたネットプレイフレーム（両者で一致すべき）
         uint32_t  gameMode;
         uint8_t   introState;
         GameInput p1;

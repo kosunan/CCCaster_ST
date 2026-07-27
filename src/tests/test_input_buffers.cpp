@@ -124,8 +124,8 @@ static void Read_RejectsWrappedSlot() {
     // 同じスロットを 600F 先のフレームで踏み潰す
     b.WriteLocal(10 + MatchInputBuffer::RING_SIZE, 0x3333, 0, false);
 
-    CC_CHECK(b.FindSlot(10) == nullptr);          // フレーム10 はもう存在しない
-    CC_CHECK(b.FindSlot(610) != nullptr);
+    CC_CHECK(!b.HasLocal(10));          // フレーム10 はもう存在しない
+    CC_CHECK(b.HasLocal(610));
 
     b.SetWriteHead(11);                            // readPos = 10
     uint32_t p1 = 0xDEAD, p2 = 0xBEEF;
@@ -144,11 +144,11 @@ static void Confirm_SetsFrameEvenWithoutLocalWrite() {
 
     b.ConfirmRemote(50, 0x99);
 
-    const auto* s = b.FindSlot(50);
-    CC_CHECK(s != nullptr);
-    CC_CHECK_EQ(s->frame, 50u);
-    CC_CHECK_EQ(s->remoteInput, 0x99u);
-    CC_CHECK(s->confirmed);
+    uint32_t remote = 0;
+    CC_CHECK(b.TryGetRemoteInput(50, remote));
+    CC_CHECK_EQ(remote, 0x99u);
+    CC_CHECK(b.HasRemote(50));
+    CC_CHECK(!b.HasLocal(50));   // 自入力はまだ来ていない
 }
 
 static void Confirm_PreservesRemoteWhenLocalArrivesLater() {
@@ -159,11 +159,11 @@ static void Confirm_PreservesRemoteWhenLocalArrivesLater() {
     b.ConfirmRemote(50, 0x99);
     b.WriteLocal(50, 0xAA, /*predicted*/ 0x00, false);
 
-    const auto* s = b.FindSlot(50);
-    CC_CHECK(s != nullptr);
-    CC_CHECK_EQ(s->localInput, 0xAAu);
-    CC_CHECK_EQ(s->remoteInput, 0x99u);   // 予測で上書きされない
-    CC_CHECK(s->confirmed);
+    uint32_t local = 0, remote = 0;
+    CC_CHECK(b.TryGetLocalInput(50, local));
+    CC_CHECK(b.TryGetRemoteInput(50, remote));
+    CC_CHECK_EQ(local, 0xAAu);
+    CC_CHECK_EQ(remote, 0x99u);   // 予測で上書きされない
 }
 
 static void Mismatch_DetectsWrongPrediction() {
@@ -230,8 +230,9 @@ static void Confirm_ConflictOnAlreadyConfirmedIsCounted() {
     CC_CHECK_EQ(b.ConfirmConflicts(), 1u);
     CC_CHECK(b.HasMismatch());
 
-    const auto* s = b.FindSlot(30);
-    CC_CHECK_EQ(s->remoteInput, 0xAAu);   // 最初の確定値を正とする
+    uint32_t remote = 0;
+    CC_CHECK(b.TryGetRemoteInput(30, remote));
+    CC_CHECK_EQ(remote, 0xAAu);   // 最初の確定値を正とする
 }
 
 static void Confirm_AdvancesConfirmedFrameMonotonically() {
@@ -290,7 +291,8 @@ static void Reset_KeepsSessionParamsButClearsProgress() {
     CC_CHECK(!b.HasConfirmedRemote());
     CC_CHECK(!b.HasMismatch());
     CC_CHECK_EQ(b.ConfirmConflicts(), 0u);
-    CC_CHECK(b.FindSlot(94) == nullptr);
+    CC_CHECK(!b.HasLocal(94));
+    CC_CHECK(!b.HasRemote(94));
 }
 
 static void Singleton_SharesStateAcrossCallSites() {
@@ -302,7 +304,60 @@ static void Singleton_SharesStateAcrossCallSites() {
 
     auto& b = MatchInputBuffer::GetInstance();
     CC_CHECK(&a == &b);
-    CC_CHECK(b.FindSlot(94) != nullptr);
+    CC_CHECK(b.HasLocal(94));
+}
+
+// ============================================================================
+// レーン分離（2スレッド競合の解消）
+// ============================================================================
+
+static void Lanes_LocalAndRemoteArePublishedIndependently() {
+    CC_CASE("MatchInputBuffer: local と remote は独立に公開される");
+    // ゲームスレッドは local レーン、通信スレッドは remote レーンだけを書く。
+    // 片方だけ揃っている状態が正しく区別できることを固定する。
+    auto& b = MatchInputBuffer::GetInstance();
+    b.Initialize(0, 2, 4);
+
+    uint32_t v = 0;
+    CC_CHECK(!b.HasLocal(40));
+    CC_CHECK(!b.HasRemote(40));
+
+    b.WriteLocal(40, 0x11, 0x00, false);
+    CC_CHECK(b.HasLocal(40));
+    CC_CHECK(!b.HasRemote(40));
+    CC_CHECK(b.TryGetLocalInput(40, v));
+    CC_CHECK_EQ(v, 0x11u);
+    CC_CHECK(!b.TryGetRemoteInput(40, v));
+
+    b.ConfirmRemote(40, 0x22);
+    CC_CHECK(b.HasRemote(40));
+    CC_CHECK(b.TryGetRemoteInput(40, v));
+    CC_CHECK_EQ(v, 0x22u);
+}
+
+static void Lanes_WriteLocalDoesNotClearConfirmedRemote() {
+    CC_CASE("MatchInputBuffer: 自入力の書込みが相手の確定を消さない");
+    // 旧実装は WriteLocal が remoteInput/confirmed を触っていたため、
+    // 確定済みの相手入力を予測値で潰す競合があった。
+    auto& b = MatchInputBuffer::GetInstance();
+    b.Initialize(0, 2, 4);
+
+    b.ConfirmRemote(60, 0xBEEF);
+    b.WriteLocal(60, 0xCAFE, /*predicted*/ 0x0000, false);
+
+    uint32_t remote = 0;
+    CC_CHECK(b.TryGetRemoteInput(60, remote));
+    CC_CHECK_EQ(remote, 0xBEEFu);
+}
+
+static void Lanes_EmptySlotIsDistinguishableFromFrameZero() {
+    CC_CASE("MatchInputBuffer: 未使用スロットとフレーム0を取り違えない");
+    auto& b = MatchInputBuffer::GetInstance();
+    b.Initialize(0, 2, 4);
+
+    CC_CHECK(!b.HasLocal(0));        // Reset 直後は未使用
+    b.WriteLocal(0, 0x55, 0, false);
+    CC_CHECK(b.HasLocal(0));         // フレーム0 を書けば有効になる
 }
 
 // ============================================================================
@@ -330,6 +385,10 @@ int main() {
     EffectiveHead_IsCappedByPeerConfirmation();
     Reset_KeepsSessionParamsButClearsProgress();
     Singleton_SharesStateAcrossCallSites();
+
+    Lanes_LocalAndRemoteArePublishedIndependently();
+    Lanes_WriteLocalDoesNotClearConfirmedRemote();
+    Lanes_EmptySlotIsDistinguishableFromFrameZero();
 
     return cccaster::test::Summarize("input_buffers");
 }

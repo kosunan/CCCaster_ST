@@ -64,13 +64,54 @@ Write-Output '===== CLIENT (末尾8行) ====='
 if (Test-Path $clientLog) { Get-Content $clientLog -Tail 8 }
 
 Write-Output ''
-Write-Output '===== 記録 ====='
-foreach ($p in @($hostRec, $clientRec)) {
-    if (Test-Path $p) {
-        $n = (Get-Content $p | Where-Object { $_ -notmatch '^#' } | Measure-Object -Line).Lines
-        Write-Output ("  {0}: {1} 行" -f (Split-Path $p -Leaf), $n)
-    } else {
-        Write-Output ("  {0}: 出力なし" -f (Split-Path $p -Leaf))
+Write-Output '===== 決定性チェック ====='
+
+if (-not (Test-Path $hostRec) -or -not (Test-Path $clientRec)) {
+    Write-Output '  記録が揃っていません'
+    Write-Output 'DONE'
+    exit 1
+}
+
+# netFrame → "p1dir p1btn p2dir p2btn" の対応表を作る。
+# 両プロセスは進行がずれるので、共通する netFrame だけを突き合わせる。
+function Read-Record($path) {
+    $map = @{}
+    foreach ($line in Get-Content $path) {
+        if ($line -match '^#') { continue }
+        $parts = $line.Split(' ')
+        if ($parts.Count -lt 5) { continue }
+        $map[[uint32]$parts[0]] = ($parts[1..4] -join ' ')
     }
+    return $map
+}
+
+$h = Read-Record $hostRec
+$c = Read-Record $clientRec
+Write-Output ("  host  : {0} フレーム記録" -f $h.Count)
+Write-Output ("  client: {0} フレーム記録" -f $c.Count)
+
+$common = $h.Keys | Where-Object { $c.ContainsKey($_) } | Sort-Object
+$mismatch = @()
+foreach ($f in $common) {
+    if ($h[$f] -ne $c[$f]) { $mismatch += $f }
+}
+
+Write-Output ("  共通フレーム: {0}" -f $common.Count)
+if ($common.Count -eq 0) {
+    Write-Output '  [NG] 突き合わせ可能なフレームがありません'
+} elseif ($mismatch.Count -eq 0) {
+    Write-Output '  [OK] 共通フレームの入力列は完全に一致'
+} else {
+    Write-Output ("  [NG] {0} フレームで不一致。先頭5件:" -f $mismatch.Count)
+    foreach ($f in ($mismatch | Select-Object -First 5)) {
+        Write-Output ("    netFrame={0}  host=[{1}]  client=[{2}]" -f $f, $h[$f], $c[$f])
+    }
+}
+
+Write-Output ''
+Write-Output '===== stall / conflict ====='
+foreach ($p in @(@('host',$hostLog), @('client',$clientLog))) {
+    $last = Get-Content $p[1] | Where-Object { $_ -match 'stall=' } | Select-Object -Last 1
+    Write-Output ("  {0}: {1}" -f $p[0], $last)
 }
 Write-Output 'DONE'

@@ -245,8 +245,10 @@ void NetplaySession::ThreadMain() {
 
             bool sent = false;
             if (newHead > _lastSentFrame) {
-                const auto* slot = cccaster::core::sync::MatchInputBuffer::GetInstance().FindSlot(newHead);
-                SendPacket(_calc.BuildPacket(newHead, slot ? slot->localInput : 0));
+                uint32_t headInput = 0;
+                cccaster::core::sync::MatchInputBuffer::GetInstance()
+                    .TryGetLocalInput(newHead, headInput);
+                SendPacket(_calc.BuildPacket(newHead, headInput));
                 _lastSentFrame = newHead;
                 _keepaliveCounter = 0;
                 sent = true;

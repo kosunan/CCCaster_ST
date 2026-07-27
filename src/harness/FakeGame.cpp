@@ -4,6 +4,7 @@
 
 #include "harness/FakeGame.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
+#include "core_dll/sync/MatchInputBuffer.hpp"
 
 #include <cstdio>
 
@@ -111,21 +112,28 @@ void FakeGame::Advance() {
 }
 
 void FakeGame::WriteInput(GameInput p1, GameInput p2) {
-    _written.push_back(Record{ _frame, _gameMode, _introState, p1, p2 });
+    // 配信元のネットプレイフレームを一緒に記録する。プロセスごとに進行が
+    // ずれても、このフレーム番号で突き合わせれば入力列を比較できる。
+    const uint32_t netFrame =
+        cccaster::core::sync::MatchInputBuffer::GetInstance().GetReadPos();
+    _written.push_back(Record{ _frame, netFrame, _gameMode, _introState, p1, p2 });
 }
 
 bool FakeGame::DumpTo(const std::string& path) const {
     FILE* fp = std::fopen(path.c_str(), "w");
     if (!fp) return false;
 
-    std::fprintf(fp, "# frame gameMode intro p1dir p1btn p2dir p2btn\n");
+    // netFrame を先頭に置く。プロセスごとに進行がずれても、この番号で
+    //突き合わせれば「同じネットプレイフレームに同じ入力が配られたか」を比較できる。
+    std::fprintf(fp, "# netFrame p1dir p1btn p2dir p2btn | frame gameMode intro\n");
     for (const Record& r : _written) {
-        std::fprintf(fp, "%u %u %u %u %u %u %u\n",
-                     r.frame, r.gameMode, static_cast<unsigned>(r.introState),
+        std::fprintf(fp, "%u %u %u %u %u | %u %u %u\n",
+                     r.netFrame,
                      static_cast<unsigned>(r.p1.direction),
                      static_cast<unsigned>(r.p1.buttons),
                      static_cast<unsigned>(r.p2.direction),
-                     static_cast<unsigned>(r.p2.buttons));
+                     static_cast<unsigned>(r.p2.buttons),
+                     r.frame, r.gameMode, static_cast<unsigned>(r.introState));
     }
     std::fclose(fp);
     return true;

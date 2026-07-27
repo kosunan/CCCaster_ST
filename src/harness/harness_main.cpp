@@ -27,6 +27,8 @@
 #include "core_dll/engine/MatchContext.hpp"
 #include "core_dll/mbaa_mem/IGameMemory.hpp"
 #include "core_dll/network/NetplayManager.hpp"
+#include "core_dll/hook/DirectInputHook.hpp"
+#include "core_dll/mbaa_mem/MbaaInputDefs.hpp"
 #include "core_dll/sync/NetplaySession.hpp"
 
 #include <windows.h>
@@ -46,6 +48,25 @@ int64_t NowUs() {
     LARGE_INTEGER c;
     QueryPerformanceCounter(&c);
     return (c.QuadPart * 1000000) / freq.QuadPart;
+}
+
+/// ローカル入力のスクリプト。フレーム番号だけから決まる純関数にしてあるので、
+/// 両プロセスが互いの入力を再現できる。役割ごとに違う列を出す。
+uint32_t ScriptedInput(uint32_t frame, bool isHost) {
+    namespace Dir = cccaster::game_interface::Dir;
+    const uint32_t phase = (frame + (isHost ? 0u : 7u)) % 24;
+
+    uint16_t dir = Dir::Neutral;
+    uint16_t btn = 0;
+    if      (phase < 4)  dir = Dir::Right;
+    else if (phase < 8)  dir = Dir::Down;
+    else if (phase < 12) dir = Dir::Left;
+    else if (phase < 16) dir = Dir::Up;
+
+    if (phase % 6 == 0)  btn = static_cast<uint16_t>(isHost ? CC_BUTTON_A : CC_BUTTON_B);
+    if (phase == 18)     btn = CC_BUTTON_CONFIRM;
+
+    return cccaster::game_interface::GameInput{ dir, btn }.Pack();
 }
 
 /// 次フレームの期限まで待つ。Step() 内のメトロノーム待機で既に時間を
@@ -165,6 +186,11 @@ int main(int argc, char** argv) {
 
     uint32_t frame = 0;
     for (; frame < opt.maxFrames && !game.IsFinished(); ++frame) {
+        // ローカル入力を注入する（スタブの DirectInputHook がそのまま返す）
+        const uint32_t localInput = ScriptedInput(game.Frame(), opt.isHost);
+        if (opt.isHost) cccaster::game_interface::DirectInputHook::SetTestInputP1(localInput);
+        else            cccaster::game_interface::DirectInputHook::SetTestInputP2(localInput);
+
         game.Advance();
         cccaster::domain::session::SceneRunner::Step();
 

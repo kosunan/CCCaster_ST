@@ -205,9 +205,8 @@ std::vector<uint8_t> SyncCodec::BuildPacket(
             uint32_t historicFrame = frame - i;
             // 周回で別フレームになっていれば 0 のまま送る（誤った過去入力を配らない）
             uint32_t histInput = 0;
-            if (const auto* s = cccaster::core::sync::MatchInputBuffer::GetInstance().FindSlot(historicFrame)) {
-                histInput = s->localInput;
-            } else if (i == 0) {
+            if (!cccaster::core::sync::MatchInputBuffer::GetInstance()
+                     .TryGetLocalInput(historicFrame, histInput) && i == 0) {
                 histInput = localInput;   // 最新フレームは呼び出し元の値を使う
             }
             gtp.inputs[i] = histInput;

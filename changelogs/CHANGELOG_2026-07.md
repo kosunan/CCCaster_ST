@@ -1,3 +1,91 @@
+# feat: 入力パイプラインを結線し決定性を確認 — 2スレッド競合と背圧不在を解消 (2c)
+
+## 2026-07-27: 入力パイプライン再構築 2c
+
+### 概要
+撤去されていた入力パイプラインを結線した。あわせてハーネスに決定性テストを
+実装し、2プロセスがゲームに渡す入力列の一致を判定できるようにした。
+結線の過程で、旧実装から引き継いでいた**2スレッド間のデータ競合**と
+**背圧の不在**という2つの根本問題が露見し、いずれも解消した。
+
+### 結線した経路
+```
+DirectInputHook → WriteLocal(head+1, 入力, 予測, rollbackable) → 送信
+相手パケット    → ConfirmRemote(frame, 入力)
+TryReadForGame(readPos = head - (delay+rollback)) → SceneInputFilter → WriteInput
+```
+
+`SceneRunner::Step()` の中では一切ブロックしない。相手入力が未着なら何も書かず
+即座に抜ける（ゲームメモリには直前フレームの値が残るため挙動は「保持」と同じ）。
+ここでブロックすると keepalive が途絶えて切断扱いになる（2026-03-11 の事故）。
+
+### 露見した問題 1: 背圧の不在
+初回実行で HOST だけが netFrame 791 まで一度も配信できなかった。
+ランナーは HOST を 500ms 先に起動するため HOST は約30フレーム先行しており、
+CLIENT がまだ生成していないフレームを読み続けていた。
+`delay + maxRollback = 6` フレーム（100ms）では 500ms の先行を吸収できない。
+
+`writeHead - confirmedRemoteFrame > delay + maxRollback` なら書き込みを止める
+背圧を追加した。ロールバック netplay で先行側を抑えるのは「入力の枯渇」であり、
+その入口がこの判定。IntroBarrier 修正時に「残る課題」とした点の実装にあたる。
+
+### 露見した問題 2: MatchInputBuffer の 2スレッド競合
+背圧を入れると `ConfirmConflicts` が 80 → 1970 に増え、かつ両者で対称になった。
+これにより原因が先行/追従の非対称性ではないと確定できた。
+
+真因は、ゲームスレッドの `WriteLocal` と通信スレッドの `ConfirmRemote` および
+冗長入力の読み出しが、同一スロットの同じフィールド群を非アトミックに
+読み書きしていたこと。`WriteLocal` は `frame`/`valid` を先に立てて `localInput` を
+後に書くため、通信スレッドが「新しいフレーム番号 + 古い入力値」を読み、
+それを冗長入力として相手に配っていた。
+
+**旧実装も同じ競合を抱えていたが、検出口が無いため誰も気づけなかった。**
+2a で `ConfirmConflicts()` を作っていなければ今回も見逃していた。
+
+対処としてレーンを分離した。
+
+| レーン | 書く側 | 内容 |
+|---|---|---|
+| local | ゲームスレッドのみ | `localInput` / `predictedRemote` / `rollbackable` |
+| remote | 通信スレッドのみ | `remoteInput` |
+
+各レーンはペイロードを書いてからフレーム番号を release ストアで公開し、
+読む側は acquire ロードで番号を確認してからペイロードを読む。
+「番号は新しいが中身は古い」が構造的に起きない。
+スロットを外部に露出する `FindSlot` は廃止し、`TryGetLocalInput` /
+`TryGetRemoteInput` に置き換えた（呼び出し側が競合を再導入できないようにするため）。
+
+### 検証の推移
+| | 背圧前 | 背圧後 | レーン分離後 | ラベル修正後 |
+|---|---|---|---|---|
+| conflict (host/client) | 80 / 0 | 1970 / 1907 | 0 / 0 | 0 / 0 |
+| 不一致フレーム | 15 | 376 | 1 | **0** |
+
+最後の1件は計測側の不備だった。未確定フレームで直前入力を再書き込みしていたため、
+記録の netFrame ラベルだけが進んで中身と対応しなくなっていた。
+「未確定なら書かない」方式に変えて解消（保持用の状態変数も不要になった）。
+
+最終結果: 共通 1,026 フレームの入力列が完全一致、`conflict` は両者 0。
+
+### 残る挙動（設計上の必然）
+HOST の `stall=177` に対し CLIENT は `stall=31`。背圧が先行側を
+`confirmed + 6` に抑えるため、HOST は常に境界ぎりぎりを読むことになり、
+相手のパケット到着が間に合わないフレームが出る。
+これを滑らかにするのがロールバックで、現状は予測が外れても巻き戻せないため
+「確定するまでゲームに渡さない」安全側の挙動になっている。
+ディレイのみの netplay としては正しい。
+
+### 変更ファイル
+- [MODIFY] `sync/MatchInputBuffer.hpp` — レーン分離と公開順序の明示、`FindSlot` 廃止
+- [MODIFY] `engine/SceneRunner.cpp` — (E) 入力書込み + 背圧、(F2) 確定フレームの配信
+- [MODIFY] `network/SyncCodec.cpp` / `sync/NetplaySession.cpp` — 新 API へ移行
+- [MODIFY] `src/harness/FakeGame.hpp/.cpp` — 記録に netFrame を追加
+- [MODIFY] `src/harness/harness_main.cpp` — 決定的なスクリプト入力の注入
+- [MODIFY] `src/harness/run_pair.ps1` — 記録の突き合わせによる決定性判定
+- [MODIFY] `src/tests/test_input_buffers.cpp` — レーン分離の検証3件を追加
+
+---
+
 # refactor: フレーム空間を一本化 — MenuInputBuffer と宛先フラグを撤去 (2b)
 
 ## 2026-07-27: 入力パイプライン再構築 2b
