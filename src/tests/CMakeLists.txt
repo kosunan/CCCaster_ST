@@ -36,6 +36,13 @@ add_executable(test_game_input
 )
 target_include_directories(test_game_input PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
+# ── 画面ごとの入力制約 ────────────────────────────
+add_executable(test_scene_input_filter
+    test_scene_input_filter.cpp
+    ${CMAKE_SOURCE_DIR}/src/core_dll/engine/SceneInputFilter.cpp
+)
+target_include_directories(test_scene_input_filter PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
 # ── 入力バッファ（依存ゼロ・ヘッダオンリー）──────────
 add_executable(test_input_buffers
     test_input_buffers.cpp
@@ -61,7 +68,8 @@ add_executable(test_phase_monitor
 target_include_directories(test_phase_monitor PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 if(WIN32)
-    foreach(t test_game_input test_input_buffers test_netplay_clock test_phase_monitor)
+    foreach(t test_game_input test_input_buffers test_netplay_clock test_phase_monitor
+             test_scene_input_filter)
         target_link_options(${t} PRIVATE -static -static-libgcc -static-libstdc++)
     endforeach()
 endif()
@@ -71,3 +79,4 @@ add_test(NAME game_input    COMMAND test_game_input)
 add_test(NAME input_buffers COMMAND test_input_buffers)
 add_test(NAME netplay_clock COMMAND test_netplay_clock)
 add_test(NAME phase_monitor COMMAND test_phase_monitor)
+add_test(NAME scene_input_filter COMMAND test_scene_input_filter)

@@ -61,6 +61,9 @@ static uint64_t GetCurrentTimeMs() {
 static void OnPhaseChanged(GamePhase from, GamePhase to, MatchContext& ctx) {
     DebugLog("[SceneRunner] Phase change: %d -> %d", static_cast<int>(from), static_cast<int>(to));
 
+    // 画面が変わったら入力フィルタの履歴を捨てる
+    scene::SceneInputFilter::Reset();
+
     if (to == GamePhase::Loading) {
         GC::SetModeNormalSpeed();
         ctx.roundStartSynced = false;
@@ -199,7 +202,10 @@ void SceneRunner::Step() {
         const int32_t maxLead = static_cast<int32_t>(ctx.delay) + static_cast<int32_t>(ctx.maxRollback);
 
         if (lead <= maxLead) {
-            buf.WriteLocal(head + 1, localInput, predicted,
+            // フィルタは送信前に適用する。フィルタ済みの値が回線を通るので、
+            // 相手のフェーズ認識とずれても両者が受け取る値は必ず一致する。
+            const uint32_t filtered = scene::SceneInputFilter::Apply(phase, localInput);
+            buf.WriteLocal(head + 1, filtered, predicted,
                            cccaster::game_interface::PhaseMonitor::IsRoundActive());
         } else {
             ++s_starvedFrames;   // 相手待ちで先行を止めたフレーム数
@@ -238,11 +244,10 @@ void SceneRunner::Step() {
 
         uint32_t p1 = 0, p2 = 0;
         if (buf.TryReadForGame(ctx.isHost, p1, p2)) {
+            // ここではフィルタを掛けない。掛けるとローカルのフェーズが引数に
+            // なり、ロード時間差でフェーズがずれたときに両者の結果が食い違う。
             using cccaster::game_interface::GameInput;
-            namespace filter = cccaster::domain::scene;
-            GC::WriteInput(
-                GameInput::Unpack(filter::SceneInputFilter::Apply(phase, p1)),
-                GameInput::Unpack(filter::SceneInputFilter::Apply(phase, p2)));
+            GC::WriteInput(GameInput::Unpack(p1), GameInput::Unpack(p2));
             s_haveDelivered = true;
         } else {
             // 未確定 → 何も書かない。ゲームメモリには直前フレームの値が
