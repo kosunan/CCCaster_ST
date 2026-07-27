@@ -18,6 +18,7 @@
 #include "core_dll/common/DebugLog.hpp"
 #include "core_dll/sync/NetplaySession.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
+#include "core_dll/mbaa_mem/IGameMemory.hpp"
 #include "core_dll/mbaa_mem/MbaaInputDefs.hpp"
 #include "core_dll/mbaa_mem/GamePhaseDetector.hpp"
 #include "core_dll/hook/DirectInputHook.hpp"
@@ -71,7 +72,7 @@ static bool s_syncInitiated = false;
 static bool HandleRoundStartSync(session::MatchContext& ctx) {
     if (ctx.roundStartSynced) return false;
 
-    uint8_t introState = *CC_INTRO_STATE_ADDR;
+    uint8_t introState = cccaster::game_interface::GameMem().IntroState();
     if (introState != 2) {
         return true;  // まだ intro=2 に到達していない → 待機
     }
@@ -100,12 +101,12 @@ static bool HandleRoundStartSync(session::MatchContext& ctx) {
 
     // ステップ4: 双方揃い → 通常速度でフレーム進行開始
     // フェーズ開始時の基準となるワールドタイム（WT）を記録する
-    ctx.phaseBaseWorldTimer = *CC_WORLD_TIMER_ADDR;
+    ctx.phaseBaseWorldTimer = cccaster::game_interface::GameMem().WorldTimer();
 
     // [撤去] CB依存の phaseBaseFrame 算出
     ms.phaseBaseFrame.store(0, std::memory_order_release);
     DebugLog("[IntroBarrier] Both peers at intro=2! phaseBaseFrame=0 (WT=%u BaseWT=%u) Go!",
-             *CC_WORLD_TIMER_ADDR, ctx.phaseBaseWorldTimer);
+             cccaster::game_interface::GameMem().WorldTimer(), ctx.phaseBaseWorldTimer);
 
     GC::SetModeNormalSpeed();
     ctx.roundStartSynced = true;
@@ -162,7 +163,7 @@ void MatchScene::ResetRematch() {
     s_localIndexSent       = false;
     s_targetMenuState      = -1;
     s_targetMenuIndex      = MENU_INDEX_NONE;
-    s_retryMenuStateCounter = *CC_MENU_STATE_COUNTER_ADDR + 1;
+    s_retryMenuStateCounter = cccaster::game_interface::GameMem().MenuStateCounter() + 1;
     s_remoteWaitFrames     = 0;
     AsmHacks::currentMenuIndex = 0;
     AsmHacks::menuConfirmState = 0;
@@ -240,7 +241,7 @@ static bool HandleMenuGate() {
 
     // リプレイ保存サブメニュー
     if (AsmHacks::currentMenuIndex == static_cast<uint32_t>(MENU_INDEX_REPLAY_SAVE)
-        || *CC_MENU_STATE_COUNTER_ADDR > s_retryMenuStateCounter) {
+        || cccaster::game_interface::GameMem().MenuStateCounter() > s_retryMenuStateCounter) {
         AsmHacks::menuConfirmState = 2;
         return true;
     }

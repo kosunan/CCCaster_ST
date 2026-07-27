@@ -70,17 +70,18 @@ namespace cccaster::game_interface {
         // --- ラウンド状態判定ヘルパー ---
 
         /**
-         * @brief CC_INTRO_STATE_ADDR からイントロ状態を取得
-         * @return uint8_t イントロ状態値 (0=イントロ前, 1=イントロ中, 2=イントロ完了)
+         * @brief イントロ状態を取得
+         * @return uint8_t 2=イントロ演出中 / 1=pre-game / 0=対戦進行中
+         * @note 数値が大きいほど手前。直感と逆なので注意。
          */
         static uint8_t GetIntroState();
 
         /**
          * @brief ラウンドがアクティブ（プレイ可能）状態かを判定
-         * @return true: イントロ完了（introState==2）かつタイマーが動作中
+         * @return true: InGame かつ introState==0（イントロ演出を抜けている）
          * @details
          *   同期のディレイ/ロールバック方式の切り替え判定に使用。
-         *   イントロ中やKO演出中はfalseを返す。
+         *   イントロ演出中は false を返す。
          */
         static bool IsRoundActive();
     };

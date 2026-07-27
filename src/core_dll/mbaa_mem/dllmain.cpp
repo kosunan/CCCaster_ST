@@ -18,6 +18,7 @@
 #include "core_dll/network/NetplayManager.hpp"
 #include "core_dll/hook/TimeHooks.hpp"
 #include "core_dll/mbaa_mem/MbaaPatcher.hpp"
+#include "core_dll/mbaa_mem/RealGameMemory.hpp"
 #include "core_dll/hook/DxHook.hpp"
 #include "core_dll/engine/SceneRunner.hpp"
 #include "core_dll/engine/MatchContext.hpp"
@@ -198,7 +199,15 @@ DWORD WINAPI InitThread(LPVOID lpParam) {
     }
 
     // ================================================================
-    // (2) MBAA 固有パッチ適用（NOP/キーボードクリア/非アクティブ判定無効化）
+    // (2) ゲームメモリ実装の設置
+    //   これ以降 GameMem() が実アドレスを読み書きする。
+    //   未設置のままだと全読み取りが 0 を返すため、他の初期化より先に行う。
+    // ================================================================
+    cccaster::game_interface::InstallRealGameMemory();
+    HookLog("[InitThread] RealGameMemory installed.");
+
+    // ================================================================
+    // (3) MBAA 固有パッチ適用（NOP/キーボードクリア/非アクティブ判定無効化）
     // ================================================================
     HookLog("[InitThread] Applying MBAA startup patches...");
     cccaster::game_memory::MbaaPatcher::ApplyStartupPatches();

@@ -10,6 +10,7 @@
 #include "core_dll/engine/SceneFastBoot.hpp"
 #include "core_dll/engine/FrameControl.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
+#include "core_dll/mbaa_mem/IGameMemory.hpp"
 #include "core_dll/mbaa_mem/MbaaInputDefs.hpp"
 #include "core_dll/common/DebugLog.hpp"
 
@@ -88,7 +89,7 @@ bool SceneFastBoot::ProcessFrame(bool isHost) {
     s_frameCount++;
 
     // ゲームモード読取り
-    uint32_t gameMode = *CC_GAME_MODE_ADDR;
+    uint32_t gameMode = cccaster::game_interface::GameMem().GameMode();
 
     // キャラセレ到達判定
     if (gameMode == CC_GAME_MODE_CHARA_SELECT) {

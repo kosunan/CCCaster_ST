@@ -12,6 +12,7 @@
 #include "core_dll/sync/MatchInputBuffer.hpp"
 #include "core_dll/sync/NetplaySession.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
+#include "core_dll/mbaa_mem/IGameMemory.hpp"
 #include "core_dll/hook/DirectInputHook.hpp"
 #include <imgui.h>
 #include <Dbt.h>
@@ -107,8 +108,8 @@ int UIManager::HandleWndProcMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM 
 
         // F4: マッピングトグル（キャラセレ画面のみ）
         if (key == VK_F4 && !isAltDown) {
-            if (!IsBadReadPtr(CC_GAME_MODE_ADDR, sizeof(uint32_t))
-                && *CC_GAME_MODE_ADDR != CC_GAME_MODE_CHARA_SELECT) {
+            auto& mem = cccaster::game_interface::GameMem();
+            if (mem.IsAvailable() && mem.GameMode() != CC_GAME_MODE_CHARA_SELECT) {
                 return 1; // キャラセレ以外では無視
             }
             OnMappingInput();

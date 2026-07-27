@@ -1,3 +1,82 @@
+# refactor: ゲームメモリ seam (IGameMemory) を導入 — 同期ロジックをゲーム無しで検証可能に
+
+## 2026-07-27: B-2 seam の導入
+
+### 概要
+同期ロジックが `*CC_XXX_ADDR` を直読みしている状態を解消し、`IGameMemory`
+インターフェース経由に統一した。差し替え可能になったことで、フェーズ判定を
+MBAA を起動せずにテストできる。挙動は変えていない。
+
+### 構成
+| 実装 | 配置 | 内容 |
+|---|---|---|
+| `RealGameMemory` | `core_dll/mbaa_mem/` | 実アドレスへの読み書き。DLL 初期化時に設置 |
+| `NullGameMemory` | `core_dll/mbaa_mem/GameMemory.cpp` | 未設置時の既定。読みは 0、書きは捨てる |
+| `FakeGameMemory` | `src/tests/` | 値を明示指定し、書き込まれた入力を全フレーム記録 |
+
+インターフェースは読み6 + 書き1。設計書では読み5としていたが、`UIManager` と
+`GameFrameOrchestrator` にあった `IsBadReadPtr` ガードの挙動を保存するため
+`IsAvailable()` を追加した。
+
+### 移行結果
+ライブ経路の `CC_*_ADDR` 直参照はすべてゼロになった。
+
+| ファイル | 直参照 |
+|---|---|
+| `engine/SceneRunner.cpp` | 0 |
+| `engine/MatchScene.cpp` | 0 |
+| `engine/FrameControl.hpp` | 0 |
+| `engine/GameFrameOrchestrator.cpp` | 0 |
+| `mbaa_mem/PhaseMonitor.cpp` | 0 |
+| `ui/UIManager.cpp` | 0 |
+
+`SceneFastBoot` には `CC_FORCE_GOTO_ADDR`（コード書換）、`CC_SFX_ARRAY_ADDR`、
+`CC_GAME_STATE_ADDR` が残るが、いずれも FastBoot 固有で性質が異なるため
+意図的に seam の外に置いている。テストでは FastBoot 自体をスキップする。
+
+`FrameControl` の入力書込みプリミティブ（`GetInputBasePtr` / `WriteP1Input` /
+`WriteP2Input` / `LogNullInputBase`）は `RealGameMemory` に移設した。処理内容は同じ。
+
+### 併せて修正した文書の誤り
+`GamePhaseDetector.hpp` の `GetIntroState()` doc が「0=イントロ前 / 2=イントロ完了」と
+実装と正反対になっていたのを修正。`IsRoundActive()` の説明も
+「introState==2 かつタイマー動作中」→「InGame かつ introState==0」に訂正した。
+この誤りは `test_phase_monitor.cpp` で固定したため、再発すればテストが赤くなる。
+
+### 検証
+単体テスト4スイート132チェック通過。`test_phase_monitor` は `RealGameMemory` を
+リンクしていないため、直読みが残っていればクラッシュして露見する構成。
+
+E2E（2窓70秒）を B-1 時点と比較したところ、ログの出現数と最終状態が完全に一致した。
+
+| 項目 | B-1 | B-2 |
+|---|---|---|
+| `ConfirmRemote MATCH` | 12910 | 12910 |
+| `RECV pkt` | 1334 | 1334 |
+| `SceneRunner` 定期ログ | 65 | 65 |
+| `ConfirmRemote MENU` | 10 | 10 |
+| 最終状態 | `phase=2 fip=3840 WT=3885 intro=0 synced=1 alive=1` | 同一 |
+| NULL / FAILED / Disconnected | 0 | 0 |
+
+`[InitThread] RealGameMemory installed.` が両プロセスのログ7行目に出ており、
+設置が他の初期化より先に行われていることも確認した。
+
+### 変更ファイル
+- [NEW] `mbaa_mem/IGameMemory.hpp` — インターフェースと設置口
+- [NEW] `mbaa_mem/GameMemory.cpp` — 設置口の実装 + NullGameMemory
+- [NEW] `mbaa_mem/RealGameMemory.hpp/.cpp` — 実メモリ実装
+- [NEW] `src/tests/fake_game_memory.hpp` — FakeGameMemory + ScopedGameMemory
+- [NEW] `src/tests/test_phase_monitor.cpp` — seam 経由の PhaseMonitor テスト（30チェック）
+- [MODIFY] `engine/FrameControl.hpp` — `WriteInput` を seam に委譲、プリミティブを撤去
+- [MODIFY] `engine/SceneRunner.cpp` / `MatchScene.cpp` / `SceneFastBoot.cpp` — seam 経由に
+- [MODIFY] `engine/GameFrameOrchestrator.cpp` / `ui/UIManager.cpp` — `IsBadReadPtr` → `IsAvailable()`
+- [MODIFY] `mbaa_mem/PhaseMonitor.cpp` — seam 経由に
+- [MODIFY] `mbaa_mem/GamePhaseDetector.hpp` — doc の誤りを訂正
+- [MODIFY] `mbaa_mem/dllmain.cpp` — 初期化の最初期に `InstallRealGameMemory()`
+- [MODIFY] `src/core_dll/CMakeLists.txt` / `src/tests/CMakeLists.txt` — ソース追加
+
+---
+
 # chore: 編集時に単体テストを自動実行する PostToolUse フックを追加
 
 ## 2026-07-27: 検証ループの自動化

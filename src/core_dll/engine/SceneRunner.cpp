@@ -28,6 +28,7 @@
 #include "core_dll/sync/NetplaySession.hpp"
 #include "core_dll/mbaa_mem/GamePhaseDetector.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
+#include "core_dll/mbaa_mem/IGameMemory.hpp"
 #include "core_dll/hook/TimeHooks.hpp"
 #include "shared_contracts/IpcData.hpp"
 #include <atomic>
@@ -188,9 +189,10 @@ void SceneRunner::Step() {
     // (G) 統合フロー確認ログ（60フレームごと）
     if (ctx.framesInPhase % 60 == 0 && phase >= GamePhase::CharaSelect) {
         auto& syncState = cccaster::core::netplay::NetplaySession::GetState();
-        uint32_t wt = *CC_WORLD_TIMER_ADDR;
-        uint32_t rt = *CC_REAL_TIMER_ADDR;
-        uint8_t intro = *CC_INTRO_STATE_ADDR;
+        auto& mem = cccaster::game_interface::GameMem();
+        uint32_t wt = mem.WorldTimer();
+        uint32_t rt = mem.RealTimer();
+        uint8_t intro = mem.IntroState();
         DebugLog("[SceneRunner] phase=%d fip=%u WT=%u RT=%u intro=%u synced=%d alive=%d",
                  static_cast<int>(phase), ctx.framesInPhase,
                  wt, rt, intro,
@@ -200,10 +202,10 @@ void SceneRunner::Step() {
 
     // (F2) introState 変化検出（InGame 中のみ）
     if (phase == GamePhase::InGame) {
-        uint8_t curIntro = *CC_INTRO_STATE_ADDR;
+        uint8_t curIntro = cccaster::game_interface::GameMem().IntroState();
         if (curIntro != s_prevIntroState) {
-            uint32_t wt = *CC_WORLD_TIMER_ADDR;
-            uint32_t rt = *CC_REAL_TIMER_ADDR;
+            uint32_t wt = cccaster::game_interface::GameMem().WorldTimer();
+            uint32_t rt = cccaster::game_interface::GameMem().RealTimer();
             DebugLog("[IntroTrack] intro %u->%u fip=%u WT=%u RT=%u",
                      s_prevIntroState, curIntro, ctx.framesInPhase, wt, rt);
             s_prevIntroState = curIntro;

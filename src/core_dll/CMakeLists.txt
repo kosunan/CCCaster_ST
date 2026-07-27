@@ -10,6 +10,8 @@ add_library(cccaster_hook SHARED
     mbaa_mem/dllmain.cpp
     mbaa_mem/MbaaPatcher.cpp
     mbaa_mem/PhaseMonitor.cpp
+    mbaa_mem/GameMemory.cpp
+    mbaa_mem/RealGameMemory.cpp
     mbaa_mem/FastBootRunner.cpp
 
     # === hook/ — 外部 API フック ===

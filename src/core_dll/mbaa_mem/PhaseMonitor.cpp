@@ -14,16 +14,15 @@
 
 #include "core_dll/mbaa_mem/GamePhaseDetector.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
+#include "core_dll/mbaa_mem/IGameMemory.hpp"
 
 namespace cccaster::game_interface {
 
     // ================================================================
-    // GetRawGameMode — CC_GAME_MODE_ADDR の生読み取り
+    // GetRawGameMode — ゲームモードID の読み取り
     // ================================================================
-    // 直接ポインタキャストで読み取る。
-    // DLLインジェクション環境では同一アドレス空間なので安全。
     uint32_t PhaseMonitor::GetRawGameMode() {
-        return *CC_GAME_MODE_ADDR;
+        return GameMem().GameMode();
     }
 
     // ================================================================
@@ -85,13 +84,13 @@ namespace cccaster::game_interface {
     }
 
     // ================================================================
-    // GetIntroState — CC_INTRO_STATE_ADDR の生読み取り
+    // GetIntroState — イントロ状態の読み取り
     // ================================================================
     // @return 0: 対戦進行中（ロールバック有効）
     //         1: 準備中（キャラ出現前）
     //         2: イントロ演出中（カメラワーク + キャラ名表示）
     uint8_t PhaseMonitor::GetIntroState() {
-        return *CC_INTRO_STATE_ADDR;
+        return GameMem().IntroState();
     }
 
     // ================================================================

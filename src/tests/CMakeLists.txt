@@ -50,8 +50,18 @@ add_executable(test_netplay_clock
 )
 target_include_directories(test_netplay_clock PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
+# ── PhaseMonitor（seam 経由でゲーム無しに検証）────────
+# RealGameMemory はリンクしない。実アドレスを触るコードが混ざっていれば
+# リンクエラーかクラッシュで露見する。
+add_executable(test_phase_monitor
+    test_phase_monitor.cpp
+    ${CMAKE_SOURCE_DIR}/src/core_dll/mbaa_mem/PhaseMonitor.cpp
+    ${CMAKE_SOURCE_DIR}/src/core_dll/mbaa_mem/GameMemory.cpp
+)
+target_include_directories(test_phase_monitor PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
 if(WIN32)
-    foreach(t test_game_input test_input_buffers test_netplay_clock)
+    foreach(t test_game_input test_input_buffers test_netplay_clock test_phase_monitor)
         target_link_options(${t} PRIVATE -static -static-libgcc -static-libstdc++)
     endforeach()
 endif()
@@ -60,3 +70,4 @@ endif()
 add_test(NAME game_input    COMMAND test_game_input)
 add_test(NAME input_buffers COMMAND test_input_buffers)
 add_test(NAME netplay_clock COMMAND test_netplay_clock)
+add_test(NAME phase_monitor COMMAND test_phase_monitor)

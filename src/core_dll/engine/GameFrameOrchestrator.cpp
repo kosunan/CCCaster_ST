@@ -18,6 +18,7 @@
 #include "core_dll/sync/NetplaySession.hpp"
 #include "core_dll/timing/SpeedFlags.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
+#include "core_dll/mbaa_mem/IGameMemory.hpp"
 #include <imgui.h>
 #include <imgui_impl_dx9.h>
 #include <imgui_impl_win32.h>
@@ -169,8 +170,8 @@ void GameFrameOrchestrator::OnEndScene(LPDIRECT3DDEVICE9 pDevice) {
 
         // GameMode → UiPhase 変換 → UIManager::Render
         auto uiPhase = cccaster::domain::ui::UiPhase::None;
-        if (!IsBadReadPtr(CC_GAME_MODE_ADDR, sizeof(uint32_t))) {
-            uint32_t gameMode = *CC_GAME_MODE_ADDR;
+        if (cccaster::game_interface::GameMem().IsAvailable()) {
+            uint32_t gameMode = cccaster::game_interface::GameMem().GameMode();
             switch (gameMode) {
                 case CC_GAME_MODE_CHARA_SELECT:
                     uiPhase = cccaster::domain::ui::UiPhase::CharaSelect;
