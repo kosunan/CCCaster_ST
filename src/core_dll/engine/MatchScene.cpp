@@ -50,62 +50,73 @@ void MatchScene::OnCharaSelect(session::MatchContext& ctx) {
 // Loading — FrameInputBuffer 読取 → WriteInput (CharaSelectと同一処理)
 // ============================================================================
 void MatchScene::ResetLoading() {
-    // 状態なし
+    // 次のラウンド開始同期に向けてバリアを白紙に戻す。
+    // 片方だけ残っていると、前の対戦の通知で次のバリアが素通りする。
+    auto& ms = cccaster::core::netplay::NetplaySession::GetMutableState();
+    ms.localPhaseReady.store(false, std::memory_order_relaxed);
+    ms.peerPhaseReady.store(false, std::memory_order_relaxed);
 }
 
 void MatchScene::OnLoading(session::MatchContext& ctx) {
-    // IntroBarrier 事前通知: Loading 中に localPhaseReady=true を設定し
-    // GAME_TICK に乗せて peer に通知。InGame 到達時にはバリア待機ゼロを実現。
-    auto& ms = cccaster::core::netplay::NetplaySession::GetMutableState();
-    if (!ms.localPhaseReady.load(std::memory_order_relaxed)) {
-        ms.localPhaseReady.store(true, std::memory_order_release);
-        DebugLog("[IntroBarrier] Pre-signaling during Loading phase.");
-    }
+    // ここで localPhaseReady を立ててはいけない。
+    //   以前は「InGame 到達時のバリア待機をゼロにする」目的で Loading 突入時に
+    //   事前通知していたが、localPhaseReady は HandleRoundStartSync 側で
+    //   「intro=2 に到達した」の意味で待たれている。ロード時間が左右で違うと、
+    //   まだ Loading 中の相手からの通知でバリアが解除され、先行側がそのまま
+    //   進んでしまう（ロード 60F/240F で 180F ずれることを harness で確認）。
     // [撤去] CB読取→WriteInput は再構築フェーズで実装
 }
 
 // ============================================================================
 // InGame — ラウンド開始同期 + FrameInputBuffer読取
 // ============================================================================
-static bool s_syncInitiated = false;
+static bool s_syncInitiated  = false;
+static bool s_reachedIntro2  = false;  ///< このラウンドで intro=2 を観測したか
 
 static bool HandleRoundStartSync(session::MatchContext& ctx) {
     if (ctx.roundStartSynced) return false;
 
-    uint8_t introState = cccaster::game_interface::GameMem().IntroState();
-    if (introState != 2) {
+    auto& ms = cccaster::core::netplay::NetplaySession::GetMutableState();
+
+    // ステップ1: intro=2 への「到達」をラッチする
+    //   瞬間値で待ってはいけない。GC::SetModePause() は実際にはゲームを止めない
+    //   （SetNormalSpeed と同じ）ため、相手を待っている間に自分の intro は
+    //   2→1→0 と進んでしまう。瞬間値で判定すると、先に到達した側が
+    //   次のラウンドまで条件を満たせなくなる。
+    if (!s_reachedIntro2 && cccaster::game_interface::GameMem().IntroState() == 2) {
+        s_reachedIntro2 = true;
+    }
+    if (!s_reachedIntro2) {
         return true;  // まだ intro=2 に到達していない → 待機
     }
 
-    // ステップ1: intro=2 到達を即座に通知（isSynced 待ち中もパケットに乗る）
-    auto& ms = cccaster::core::netplay::NetplaySession::GetMutableState();
+    // ステップ2: 到達を peer に通知（isSynced 待ち中もパケットに乗る）
     if (!s_syncInitiated) {
         ms.localPhaseReady.store(true, std::memory_order_release);
         GC::SetModePause();
         s_syncInitiated = true;
-        DebugLog("[InGame] introState=2 reached. localPhaseReady=true. Checking NetplaySession...");
+        DebugLog("[IntroBarrier] Local reached intro=2. Waiting for peer...");
     }
 
-    // ステップ2: NetplaySession 同期待ち
+    // ステップ3: NetplaySession 同期待ち
     auto& syncState = cccaster::core::netplay::NetplaySession::GetState();
     if (!syncState.isSynced.load(std::memory_order_acquire)) {
         return true;
     }
 
-    // ステップ3: IntroBarrier — peer も intro=2 に到達するまで待機
-    //   SetModePause 中なのでフレーム進行は停止。return でゲームスレッドを
-    //   EndScene に戻し、通信スレッドの GAME_TICK 送受信を妨げない。
+    // ステップ4: IntroBarrier — peer も intro=2 に到達するまで待機
+    //   return でゲームスレッドを EndScene に戻し、
+    //   通信スレッドの GAME_TICK 送受信を妨げない。
     if (!ms.peerPhaseReady.load(std::memory_order_acquire)) {
         return true;  // peer 未到達 → 次フレームで再チェック
     }
 
-    // ステップ4: 双方揃い → 通常速度でフレーム進行開始
-    // フェーズ開始時の基準となるワールドタイム（WT）を記録する
+    // ステップ5: 双方到達 → ラウンド開始基準を確定
     ctx.phaseBaseWorldTimer = cccaster::game_interface::GameMem().WorldTimer();
 
     // [撤去] CB依存の phaseBaseFrame 算出
     ms.phaseBaseFrame.store(0, std::memory_order_release);
-    DebugLog("[IntroBarrier] Both peers at intro=2! phaseBaseFrame=0 (WT=%u BaseWT=%u) Go!",
+    DebugLog("[IntroBarrier] Both peers reached intro=2! phaseBaseFrame=0 (WT=%u BaseWT=%u) Go!",
              cccaster::game_interface::GameMem().WorldTimer(), ctx.phaseBaseWorldTimer);
 
     GC::SetModeNormalSpeed();
@@ -118,9 +129,14 @@ static bool HandleRoundStartSync(session::MatchContext& ctx) {
 
 void MatchScene::ResetInGame() {
     s_syncInitiated = false;
-    // IntroBarrier: peerPhaseReady のみリセット（peer の次の intro=2 到達を待つため）
-    // localPhaseReady は true のまま維持 → GAME_TICK で常に flags=0x01 を送信
+    s_reachedIntro2 = false;
+
+    // 双方リセットする。localPhaseReady を残すと、前の対戦での到達通知が
+    // そのまま次のバリアを解除してしまう。
+    // 通知はレベル駆動（到達している間ずっと送り続ける）なので、
+    // 片側が先にリセットしても相手の次のパケットで復帰する。
     auto& syncState = cccaster::core::netplay::NetplaySession::GetMutableState();
+    syncState.localPhaseReady.store(false, std::memory_order_relaxed);
     syncState.peerPhaseReady.store(false, std::memory_order_relaxed);
 }
 
