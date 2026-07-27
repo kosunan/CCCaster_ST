@@ -1,3 +1,54 @@
+# refactor: MatchInputBuffer を安全化 — デシンクが黙って通る経路を塞いだ (2a)
+
+## 2026-07-27: 入力パイプライン再構築 2a
+
+### 概要
+入力パイプラインを結線する前に、土台となる `MatchInputBuffer` を安全化した。
+L1 で `[HAZARD]` として記録していた危険な挙動を、検出可能な形に置き換えている。
+旧実装をそのまま戻すのではなく組み直す方針に沿った最初の段階。
+
+### 解消した [HAZARD]
+
+| 旧挙動 | 現在の要求 |
+|---|---|
+| 確定済みスロットへの異なる再確定を見逃す | `ConfirmConflicts()` で計数し、ミスマッチとしても記録 |
+| リング周回(600F)で別フレームのデータを黙って返す | `FindSlot` / `TryReadForGame` がフレーム番号を検証して拒否 |
+| `ConfirmRemote` が `slot.frame` を更新しない | 常に `frame` と `valid` を立てる |
+| ミスマッチ「なし」をフレーム0で表す | `HasMismatch()` / `ConsumeMismatch(uint32_t&)` |
+| 相手確定「なし」をフレーム0で表す | `HasConfirmedRemote()` |
+| フレーム0が永久に読み出せない | `valid` フラグで未書込みと区別するので読める |
+
+冗長入力は同じフレームを何度も確定するため、値の食い違いは通信破綻かデシンクを
+意味する。旧実装は黙って上書きしていた。最初の確定値を正とし、
+`ConfirmConflicts()` で観測できるようにした。
+
+### API の変更
+| 旧 | 新 |
+|---|---|
+| `WriteSlot(frame, rollbackable, local, remote, confirmed)` | `WriteLocal(frame, local, predictedRemote, rollbackable)` |
+| `GetSlot(frame)` → 参照 | `FindSlot(frame)` → ポインタ（周回時 nullptr） |
+| `ReadFrameForGame(...)` | `TryReadForGame(...)` |
+| `ConsumeMismatch()` → uint32_t | `ConsumeMismatch(uint32_t&)` → bool |
+| `InitializeConfirmedRemoteFrame` / `ToRelativeFrame` | 削除（呼び出し元なし） |
+
+`SyncCodec` と `NetplaySession` の冗長入力取得を `FindSlot` に移行した。
+周回して別フレームになっている場合は 0 を送る（誤った過去入力を配らない）。
+
+### MenuInputBuffer について
+安全化していない。フレーム空間の一本化(2b)で撤去する予定のため、
+現状の挙動を `[LEGACY]` 印で記録するにとどめた。
+
+### 検証
+`ctest` 4スイート、`input_buffers` は 43 → **69チェック**に増加。全緑。
+DLL / EXE / harness ともビルド通過。
+
+### 変更ファイル
+- [MODIFY] `sync/MatchInputBuffer.hpp` — 全面書き換え
+- [MODIFY] `network/SyncCodec.cpp` / `sync/NetplaySession.cpp` — `FindSlot` へ移行
+- [MODIFY] `src/tests/test_input_buffers.cpp` — `[HAZARD]` を正しい挙動の検証に置換
+
+---
+
 # fix: IntroBarrier がロード時間差で無効化される問題を修正 — 事前通知の削除と到達のラッチ化
 
 ## 2026-07-27: 証言②「ロード時間のばらつきでずれる」の修正

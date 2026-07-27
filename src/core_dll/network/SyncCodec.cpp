@@ -213,7 +213,9 @@ std::vector<uint8_t> SyncCodec::BuildPacket(
             uint32_t historicFrame = frame - i;
             uint32_t histInput = 0;
             if (bufferTargetFlag == FLAG_BUFFER_MATCH) {
-                histInput = cccaster::core::sync::MatchInputBuffer::GetInstance().GetSlot(historicFrame).localInput;
+                // 周回で別フレームになっていれば 0 のまま送る（誤った過去入力を配らない）
+                if (const auto* s = cccaster::core::sync::MatchInputBuffer::GetInstance().FindSlot(historicFrame))
+                    histInput = s->localInput;
             } else if (bufferTargetFlag == FLAG_BUFFER_MENU) {
                 histInput = cccaster::core::sync::MenuInputBuffer::GetInstance().GetSlot(historicFrame).localInput;
             } else {
