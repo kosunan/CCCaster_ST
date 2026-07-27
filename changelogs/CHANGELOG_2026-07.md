@@ -1,3 +1,44 @@
+# test: 依存ゼロの単体テスト基盤を新設 — 入力バッファと NetplayClock の挙動を固定
+
+## 2026-07-27: L1 テスト基盤の構築
+
+### 概要
+入力パイプライン再構築の前段として、ゲームを起動せずに実行できる単体テスト基盤を
+新設した。`ctest` を有効化し、依存ゼロで検証できる2モジュールの現在の挙動を
+特性化テストとして固定。全75チェックが通過。
+
+### 変更理由
+凍結の直接原因は個別バグではなく「仮説を検証する手段が実ゲーム2窓の35秒目視しか
+なかったこと」。修正の正否を確認できないまま次を書く状態を先に解消する。
+
+### テスト方針
+- 外部フレームワークを導入しない（mingw32 環境で依存を増やさない）。
+  `test_support.hpp` に最小のアサートマクロを置き、外部シンボルは `stub_*.cpp` で置換
+- ケース名が `[HAZARD]` で始まるものは**現在の危険な挙動をそのまま固定**したもの。
+  緑であることは「正しい」ではなく「変わっていない」を意味する
+
+### 固定した挙動のうち危険なもの
+- `MatchInputBuffer`: 確定済みスロットへの再確定はミスマッチとして検出されない
+  （冗長入力は毎パケット再送されるため、デシンクが黙って通過しうる）
+- `MatchInputBuffer`: `RING_SIZE`(600F) 周回時にフレーム番号を検証せず別フレームを返す
+- `MatchInputBuffer`: `ConfirmRemote` が `slot.frame` を更新しない
+- `MatchInputBuffer` / `NetplayClock`: 「なし」をセンチネル 0 で表すため
+  フレーム0のミスマッチ・開始時刻0が「未設定」と区別できない
+- `NetplayClock`: RTT 同値ではθを新しいサンプルに乗り換えない（strict less-than）
+- `NetplayClock`: `SetPeerStartTime` のθ変換は呼出し時点で固定され、後から再計算されない
+- `NetplayClock`: `Reset()` が `_baselineTheta` を消さない
+
+### 変更ファイル
+- [NEW] `src/tests/test_support.hpp` — 依存ゼロの最小テストハーネス
+- [NEW] `src/tests/test_input_buffers.cpp` — MatchInputBuffer / MenuInputBuffer（43チェック）
+- [NEW] `src/tests/test_netplay_clock.cpp` — θ推定・α補正・開始時刻合意（32チェック）
+- [NEW] `src/tests/stub_wasapi_clock.cpp` — WasapiClock::GetTimeUs() の置換スタブ
+- [MODIFY] `src/tests/CMakeLists.txt` — 2ターゲット追加 + `add_test` 登録
+- [MODIFY] `CMakeLists.txt` — `enable_testing()` 追加
+- [MODIFY] `AGENTS.md` — テスト実行方法と `[HAZARD]` の扱いを追記
+
+---
+
 # docs: AI向け指示ファイルを落とし穴ベースに再構成 — AGENTS.md 圧縮とガイド統廃合
 
 ## 2026-07-27: 指示ファイルの再構成

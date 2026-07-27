@@ -81,6 +81,8 @@ endif()
 # ==========================================
 # Submodules
 # ==========================================
+enable_testing()
+
 add_subdirectory(src/launcher)
 add_subdirectory(src/core_dll)
 add_subdirectory(src/cli_launcher)

@@ -26,7 +26,11 @@ MBAACC (Ver.1.07 Rev.1.4.0) 用のロールバック通信ツール。DLL をゲ
 
 **`CC_SKIP_FRAMES_ADDR` (0x55D25C) は使用禁止** — 描画スキップはゲームメモリではなく API hook 側で行う。定義自体がコメントアウトしてある。
 
-**`CC_INTRO_STATE_ADDR` は数値が大きいほど手前** — 2=キャラ紹介中 / 1=pre-game / 0=in-game。ラウンド開始同期は `intro == 2` で待ち合わせる。
+**`CC_INTRO_STATE_ADDR` の意味がヘッダと実装で正反対** — `GamePhaseDetector.hpp` の doc コメントは「0=イントロ前 / 2=イントロ完了」と書いてあるが**これは誤り**。正しくは `PhaseMonitor.cpp` の実装コメントと `MbaaAddresses.hpp` 側で、**2=イントロ演出中 / 1=pre-game / 0=対戦進行中**（数値が大きいほど手前）。ヘッダを信じると同期条件が丸ごと反転する。
+
+**1つの概念に3つの名前** — ファイル `GamePhaseDetector.hpp` / クラス `PhaseMonitor` / 実装 `PhaseMonitor.cpp`（先頭コメントは `GameMonitor.cpp`）。grep のとりこぼしに注意。
+
+**`SceneInputFilter::Apply()` は中身のない no-op** — TODO コメントだけで入力を素通しする。呼び出し側のコメントは「フィルタを適用して書き込む」と書いてあり、実装済みに見える。
 
 **ゲームスレッドでブロックしてはいけない** — `SceneRunner::Step()` は `DxHook::Hooked_Present` から毎フレーム呼ばれる。ここで相手入力を待ってループすると、描画停止だけでなくキープアライブが不正な状態のまま送られて相手に無視され、`Peer Disconnected` に至る（2026-03-11 に実際に発生）。待ち合わせは必ず「return して次フレームで再チェック」で書く。
 
@@ -59,6 +63,10 @@ cmake --build build -j12
 ```
 
 クリーンビルドは asio / MinHook / ImGui を FetchContent で取得するためネット接続が必要。手順の詳細は `.agents/workflows/build.md`。
+
+単体テストは `src/tests/` に置き、`ctest --test-dir build --output-on-failure` で実行する（ゲーム不要・数十ms）。対象が要求する外部シンボルは `stub_*.cpp` で置換する方式。
+
+`[HAZARD]` で始まるテストケースは**現在の危険な挙動をそのまま固定したもの**で、正しさの保証ではない。失敗したらテストを直すのではなく、その挙動を変えたのが意図的かを判断すること。
 
 E2E は `_TEST_MBAACC/dual_test.bat`（実ゲーム2窓・遅延50-90ms・ロス20% 注入）。手順は `.agents/workflows/test.md`。ログは各 `MBAACC_N/cccaster/cccaster_hook_log.txt`。
 
