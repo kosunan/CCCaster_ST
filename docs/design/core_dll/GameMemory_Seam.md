@@ -292,7 +292,73 @@ harness は MBAA を起動しないため、フック・DirectInput・描画・�
 
 ---
 
-## 8. 段取り
+## 8. フレーム番号をゲーム進行に結び直す（未着手）
+
+### 問題
+ネットプレイのフレーム番号が `writeHead + 1` の自由走行カウンタで、ゲームの
+進行と無関係。背圧で書込みを止めた（starve）フレームではゲームだけが進むため、
+対応が1ずつ崩れる。実測で `WT - netFrame` の増分が starve 回数と一致する。
+結果、同じ netFrame でも両者のゲームが違う地点にいて rng が即座に分岐する。
+
+### 履歴調査の結果（2026-07-27）
+**「f5241e3 に WT基準の相対フレーム同期があり CB撤去で失われた」は誤り。**
+全524コミットを横断検索した結果:
+
+| 対象 | 実際 |
+|---|---|
+| WorldTimer からフレーム番号を導出する演算 | **全履歴に存在しない** |
+| `ToRelativeFrame()` | 定義のみ。呼び出し 0 件 |
+| `peerPhaseBaseFrame` | store のみ。**読む箇所が存在しない**（基準点の合意が未実装） |
+| `phaseBaseWorldTimer` | 代入とログ出力のみ |
+| f5241e3 が入れたもの | 上記の足場だけ |
+
+`2d255b1`（CB撤去）が消したのは `writeHead + 1` 由来の `phaseBaseFrame` であって
+WT 由来のものではない。コミットメッセージと CHANGELOG_2026-03 の
+「WT基準の相対フレーム同期実装」「絶対WTから相対WTフレームへ変更」は、
+**実装が伴っていない記述**だった。
+
+### ただし本物の実装は別に存在した
+`505ea07`（2026-03-03）「SleepFrame にワールドタイマー完全一致同期」が
+`GameControl::SleepFrame()` でゲーム速度を操作し `worldTimer == netFrame` を
+強制していた。
+
+```cpp
+if (worldTimer < netFrame) { TickBypass = true; return; }   // 遅い → 1F 加速
+if (worldTimer > netFrame) { /* netFrame が追いつくまで Sleep(1) */ }
+// 一致 → 通常進行
+```
+
+差分ではなく**等式で結ぶ**ため starve でずれる余地がない。
+翌日 `5e6f6de` で `gap = currentFrame - worldTimer` の緩い追従に置換され、
+`4eea9bb` / `96bb87c` のメトロノーム刷新で完全に消滅した。
+
+### 設計文書の該当箇所
+| 文書 | 内容 |
+|---|---|
+| `Netplay_Session_Lifecycle.md:235-236` | 両者の `WORLD_TIMER` 0フレーム目が合致しないと開幕から Desync。旧仕様は `startWorldTime` を基準にフレーム番号の絶対評価をリセットしていた |
+| 同 `:201` | 旧 `TransitionIndex`: 到達保証パケットで交換し、揃うまで `WORLD_TIMER` を停止 |
+| `legacy_netplay_sync_workflow.md:30` | 旧 `IndexedFrame`(64bit) = フェーズ index + フェーズ内 frame。画面遷移で index++ / frame=0 |
+
+旧CCCaster のソース自体はリポジトリに無い（伝聞記述のみ）。
+
+### 採る案: WT を単一の権威にする
+1. フレーム番号を `WorldTimer - 基準WT + 原点` にする。`ToRelativeFrame()` を使う
+2. **starve でも必ず書く。** WT は止まらないので、書かないと欠番ができる。
+   背圧は「書かない」ではなく `TryReadForGame`（ゲームへの反映）側で掛ける
+3. 基準点の合意を実装する。`peerPhaseBaseFrame` を**実際に読む**コードを足す。
+   IntroBarrier 解除が自然な合意点
+4. CharaSelect / Loading 用の基準点をどうするか要判断
+   （旧 `IndexedFrame` の index 復活か、セッション開始の1点のみか）
+
+`505ea07` 方式（ゲーム速度を操作して等式を強制）も候補だが、メトロノーム駆動に
+置き換わった現構造への逆行が大きいため採らない。
+
+検証は harness で可能（`FakeGame` が `_worldTimer` を持つ）。
+合格条件は `WT - netFrame` が常に定数であること。
+
+---
+
+## 9. 段取り
 
 | # | 内容 | 検証方法 |
 |---|---|---|
