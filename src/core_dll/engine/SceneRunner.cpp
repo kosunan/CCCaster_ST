@@ -32,6 +32,7 @@
 #include "core_dll/sync/MatchInputBuffer.hpp"
 #include "core_dll/hook/DirectInputHook.hpp"
 #include "core_dll/engine/SceneInputFilter.hpp"
+#include "core_dll/common/ScriptedInput.hpp"
 #include "core_dll/hook/TimeHooks.hpp"
 #include "shared_contracts/IpcData.hpp"
 #include <atomic>
@@ -180,9 +181,6 @@ void SceneRunner::Step() {
         auto& buf = cccaster::core::sync::MatchInputBuffer::GetInstance();
 
         cccaster::game_interface::DirectInputHook::Poll();
-        const uint32_t localInput = ctx.isHost
-            ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
-            : cccaster::game_interface::DirectInputHook::GetPlayer2Input();
 
         // 予測は「相手の最後の確定入力を繰り返す」。ロールバック導入までは
         // 予測が外れても巻き戻せないため、確定するまでゲームには渡さない。
@@ -202,6 +200,14 @@ void SceneRunner::Step() {
         const int32_t maxLead = static_cast<int32_t>(ctx.delay) + static_cast<int32_t>(ctx.maxRollback);
 
         if (lead <= maxLead) {
+            // 自動テスト時はフレーム番号だけから決まる入力列を使う。
+            // 人の操作では両者の入力を再現できず決定性を判定できないため。
+            const uint32_t localInput = cccaster::testing::IsScriptedInputEnabled()
+                ? cccaster::testing::ScriptedInput(head + 1, ctx.isHost)
+                : (ctx.isHost
+                    ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
+                    : cccaster::game_interface::DirectInputHook::GetPlayer2Input());
+
             // フィルタは送信前に適用する。フィルタ済みの値が回線を通るので、
             // 相手のフェーズ認識とずれても両者が受け取る値は必ず一致する。
             const uint32_t filtered = scene::SceneInputFilter::Apply(phase, localInput);
@@ -247,8 +253,17 @@ void SceneRunner::Step() {
             // ここではフィルタを掛けない。掛けるとローカルのフェーズが引数に
             // なり、ロード時間差でフェーズがずれたときに両者の結果が食い違う。
             using cccaster::game_interface::GameInput;
-            GC::WriteInput(GameInput::Unpack(p1), GameInput::Unpack(p2));
+            const GameInput g1 = GameInput::Unpack(p1);
+            const GameInput g2 = GameInput::Unpack(p2);
+            GC::WriteInput(g1, g2);
             s_haveDelivered = true;
+
+            // 自動テスト時のみ、配信したフレームを記録する。
+            // 両プロセスのログを突き合わせて決定性を判定するため。
+            if (cccaster::testing::IsScriptedInputEnabled()) {
+                DebugLog("[REC] %u %u %u %u %u", buf.GetReadPos(),
+                         g1.direction, g1.buttons, g2.direction, g2.buttons);
+            }
         } else {
             // 未確定 → 何も書かない。ゲームメモリには直前フレームの値が
             // そのまま残るため「保持」と同じ挙動になる。古い入力を新しい
