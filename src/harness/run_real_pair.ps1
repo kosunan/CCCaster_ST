@@ -16,7 +16,10 @@ param(
     [int]    $SimLoss      = 0,       # パケットロス率 %
     [int]    $Port         = 7500,
     [int]    $WaitSeconds  = 75,
-    [switch] $MemTrace                # ゲームメモリを毎フレーム記録して突き合わせる
+    # 時間圧縮。4 なら4倍速。区切りの確認は必ず 1（等倍）で行うこと
+    [int]    $TimeScale    = 1,
+    # ゲームメモリを毎フレーム記録して突き合わせる
+    [switch] $MemTrace
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -51,6 +54,8 @@ foreach ($i in 1,2) {
 
 # ── [3] 起動（入力は自動生成）──
 $env:CCCASTER_SCRIPT_INPUT = '1'
+$env:CCCASTER_TIME_SCALE = "$TimeScale"
+if ($TimeScale -gt 1) { Write-Output "    [注意] 時間圧縮 x$TimeScale — タイミング余裕の検証にはならない" }
 if ($MemTrace) { $env:CCCASTER_MEM_TRACE = '1' } else { Remove-Item Env:\CCCASTER_MEM_TRACE -ErrorAction SilentlyContinue }
 Write-Output "[3] 起動 (SCRIPT_INPUT=1, MEM_TRACE=$([bool]$MemTrace) — 手動操作は不要)" 
 

@@ -6,6 +6,7 @@
 // ============================================================================
 
 #include "core_dll/timing/Metronome.hpp"
+#include "core_dll/common/TimeScale.hpp"
 #include "core_dll/timing/WasapiClock.hpp"
 #include "core_dll/common/DebugLog.hpp"
 #include <windows.h>
@@ -23,7 +24,8 @@ int64_t Metronome::GetCurrentIntervalUs() const {
                      + _alpha2Us.load(std::memory_order_acquire);
     if (interval < MIN_TICK_US) interval = MIN_TICK_US;
     if (interval > MAX_TICK_US) interval = MAX_TICK_US;
-    return interval;
+    // クランプは論理単位で行い、最後に時間圧縮をかける（既定は等倍）
+    return cccaster::testing::ScaleTickUs(interval);
 }
 
 // ============================================================================

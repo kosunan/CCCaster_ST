@@ -13,7 +13,8 @@ param(
     [int]    $Rounds              = 2,
     [int]    $HostPort            = 7600,
     [int]    $ClientPort          = 7601,
-    [int]    $TimeoutSeconds      = 90
+    [int]    $TimeoutSeconds      = 90,
+    [int]    $TimeScale = 1           # 時間圧縮。4 なら4倍速（区切りの確認は必ず 1 で）
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -26,6 +27,9 @@ if (-not (Test-Path $exe)) {
     exit 1
 }
 New-Item -ItemType Directory -Force $outDir | Out-Null
+
+$env:CCCASTER_TIME_SCALE = "$TimeScale"
+if ($TimeScale -gt 1) { Write-Output "[pair] 時間圧縮 x$TimeScale（タイミング余裕の検証にはならない）" }
 
 Get-Process -Name 'harness' | Stop-Process -Force
 Start-Sleep -Milliseconds 300

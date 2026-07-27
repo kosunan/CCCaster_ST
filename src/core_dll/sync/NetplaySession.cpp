@@ -8,6 +8,7 @@
 // ============================================================================
 
 #include "core_dll/sync/NetplaySession.hpp"
+#include "core_dll/common/TimeScale.hpp"
 #include "core_dll/timing/WasapiClock.hpp"
 #include "core_dll/network/NetplayManager.hpp"
 #include "core_dll/sync/MatchInputBuffer.hpp"
@@ -276,7 +277,7 @@ void NetplaySession::ThreadMain() {
         }
         } // switch
 
-        nextTickUs += Metronome::BASE_TICK_US;
+        nextTickUs += cccaster::testing::ScaleTickUs(Metronome::BASE_TICK_US);
     }
 
     cccaster::domain::session::DebugLog("[NetplaySession] Thread exiting.");

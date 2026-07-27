@@ -29,6 +29,7 @@
 #include "core_dll/network/NetplayManager.hpp"
 #include "core_dll/hook/DirectInputHook.hpp"
 #include "core_dll/common/ScriptedInput.hpp"
+#include "core_dll/common/TimeScale.hpp"
 #include "core_dll/sync/NetplaySession.hpp"
 #include "core_dll/sync/MatchInputBuffer.hpp"
 
@@ -41,7 +42,8 @@
 
 namespace {
 
-constexpr int64_t kFrameUs = 16666;   // 60fps
+/// 外側のフレーム周期。時間圧縮が効く（既定は等倍の 16666μs = 60fps）
+int64_t FrameUs() { return cccaster::testing::ScaleTickUs(16666); }
 
 int64_t NowUs() {
     static LARGE_INTEGER freq{};
@@ -60,10 +62,10 @@ void PaceToFrame(int64_t& dueUs) {
         if (ms > 0) Sleep(ms);
         while (NowUs() < dueUs) { /* 残りはスピン */ }
     }
-    dueUs += kFrameUs;
+    dueUs += FrameUs();
     // 大きく遅れたら追いつこうとせず基準を引き直す
     const int64_t after = NowUs();
-    if (dueUs < after) dueUs = after + kFrameUs;
+    if (dueUs < after) dueUs = after + FrameUs();
 }
 
 struct Options {
@@ -164,7 +166,7 @@ int main(int argc, char** argv) {
     std::printf("[harness] stage=%s\n", game.StageName());
 
     timeBeginPeriod(1);              // Sleep の分解能を 1ms に上げる
-    int64_t dueUs = NowUs() + kFrameUs;
+    int64_t dueUs = NowUs() + FrameUs();
 
     uint32_t frame = 0;
     for (; frame < opt.maxFrames && !game.IsFinished(); ++frame) {
