@@ -1,3 +1,96 @@
+# feat: ヘッドレスハーネスを新設 — MBAA 無しで netplay 同期を通しで実行できるようにした
+
+## 2026-07-27: B-3 ハーネスの構築
+
+### 概要
+`harness.exe` を新設。`FakeGame`（スクリプトされた MBAA）を `IGameMemory` として
+設置し、`SceneRunner::Init/Step` を自前ループで回す。2プロセスを loopback UDP で
+繋ぐと、MBAA を一切起動せずに netplay の全ライフサイクルが動く。
+
+### 結果
+2プロセス実行で以下がすべて成立した（約21秒、GUI なし）。
+
+```
+[SyncCodec] Peer READY received.
+[NetplaySession] Mode -> WaitStart (peer READY received)
+[Metronome] Started.
+[NetplaySession] Mode -> Counting. startTime=... θ=1us startFrame=200
+[SceneRunner] Sync completed! θ=1us
+[SceneRunner] Phase change: 0 -> 2   (CharaSelect)
+[SceneRunner] Phase change: 2 -> 3   (Loading)
+[IntroBarrier] Pre-signaling during Loading phase.
+[SceneRunner] Phase change: 3 -> 4   (InGame)
+[IntroBarrier] Both peers at intro=2! phaseBaseFrame=0 Go!
+[SceneRunner] Phase change: 4 -> 5   (Rematch)
+finished at frame=1262
+```
+
+`IntroBarrier` が両プロセスで揃って発火することを、実ゲーム無しで初めて観測した。
+
+### リンク境界
+| 実コード（検証対象） | スタブ（`harness_stubs.cpp`） |
+|---|---|
+| SceneRunner / MatchScene / SceneInputFilter | HookLog |
+| NetplaySession / NetplayClock / SyncCodec | DirectInputHook（入力注入口も兼ねる） |
+| NetplayManager / PacketRouter / UdpSocket / NetworkSimulator | StateUiLogic（ImGui を引くため） |
+| Metronome / WasapiClock | TimeHooks（MinHook を引くため） |
+| PhaseMonitor / GameMemory | SceneFastBoot（後述） |
+
+通信は本物の UDP。パケット組立・θ推定・メトロノーム・IntroBarrier はすべて実コード。
+
+### 構築中に判明した2点
+
+**1. FastBoot は seam の外なのでハーネスで落ちる**
+初回実行は Segfault した。原因は B-2 で意図的に seam の外に残した
+`CC_GAME_STATE_ADDR` の読み書きと `CC_SFX_ARRAY_ADDR` への 1500 バイト `memset`。
+設計どおり `SceneFastBoot` をスタブに置換して解決した。
+seam を通していない箇所だけが落ちたため、境界の所在が実行時に確認できた形になった。
+
+**2. 同期前後でフレームのペースを握る主体が入れ替わる**
+同期成立前は `Metronome` が停止しており `SceneRunner::Step()` は待たない。
+実ゲームでは `Present` が約60fpsの外側ペースを作るが、ハーネスにはそれが無く、
+ハンドシェイクの `START_MARGIN_US`(0.5秒) が経過する前に全1262フレームを
+走り切って一度も接続しなかった（`synced=0`、ログ58行）。
+`timeBeginPeriod(1)` + QPC のフレームリミッタを入れて解決。
+
+### ハーネス初日の成果: 証言②「ロード時間のばらつきでずれる」を再現した
+
+`--HostLoadingFrames 60 --ClientLoadingFrames 240` で左右のロード時間を変えたところ、
+IntroBarrier が機能していないことが確認できた。
+
+| | ロード | InGame 到達 | IntroBarrier 解除 |
+|---|---|---|---|
+| HOST | 60F | frame 300 | WT=302 |
+| CLIENT | 240F | frame 480 | WT=482 |
+
+HOST は CLIENT の到達を待たず 180 フレーム先行した。以降ずれたまま復帰せず、
+Rematch 到達も HOST=1142 / CLIENT=1322 と 180 フレーム離れたままだった。
+
+**原因**: `MatchScene::OnLoading` の事前通知。Loading 突入時点で
+`localPhaseReady = true` を立てるため、CLIENT はまだ intro=2 に到達していないのに
+「準備完了」を送信する。HOST 側の `peerPhaseReady` が真になり、バリアを素通りする。
+
+コメントには「InGame 到達時にはバリア待機ゼロを実現」と意図が書かれているが、
+ロード時間が左右で異なる場合はバリアそのものが無効化される。
+`localPhaseReady` が「Loading に入った」と「intro=2 に到達した」の
+2つの意味を兼ねていることが本質。
+
+### 現時点の限界
+記録された入力は **0件**。入力パイプラインが撤去済みで、ゲームに書き込む処理が
+存在しないため。したがって決定性テスト(B-4)の「入力列の突き合わせ」は、
+入力パイプラインを再構築するまで比較対象が空のままになる。
+一方、上記のようにフェーズ遷移とバリアの検証は入力パイプライン無しで行える。
+
+### 変更ファイル
+- [NEW] `src/harness/FakeGame.hpp/.cpp` — スクリプトされた MBAA + 書込み記録
+- [NEW] `src/harness/harness_main.cpp` — 引数処理・設置・フレームループ
+- [NEW] `src/harness/harness_stubs.cpp` — HookLog / DirectInputHook / StateUiLogic / TimeHooks / SceneFastBoot
+- [NEW] `src/harness/run_pair.ps1` — 2プロセス起動と記録の突き合わせ用ランナー
+- [NEW] `src/harness/CMakeLists.txt`
+- [MODIFY] `CMakeLists.txt` — `add_subdirectory(src/harness)`
+
+---
+
 # refactor: ゲームメモリ seam (IGameMemory) を導入 — 同期ロジックをゲーム無しで検証可能に
 
 ## 2026-07-27: B-2 seam の導入

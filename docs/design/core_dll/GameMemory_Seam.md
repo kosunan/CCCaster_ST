@@ -221,7 +221,48 @@ MENU と MATCH は**独立したフレーム空間**（それぞれ独立にリ�
 
 ---
 
-## 6. 段取り
+## 6. 必須修正: IntroBarrier が事前通知で無効化される
+
+ハーネス(B-3)で `--HostLoadingFrames 60 --ClientLoadingFrames 240` を実行し、
+証言②「対戦開始のロードにばらつきがあり制御できなくてずれる」を再現した。
+
+| | ロード | InGame 到達 | IntroBarrier 解除 |
+|---|---|---|---|
+| HOST | 60F | frame 300 | WT=302 |
+| CLIENT | 240F | frame 480 | WT=482 |
+
+HOST は CLIENT の到達を待たず 180 フレーム先行し、そのままずれ続けた。
+
+### 原因
+
+`MatchScene::OnLoading` が Loading 突入時点で `localPhaseReady = true` を立てる。
+
+```cpp
+// IntroBarrier 事前通知: Loading 中に localPhaseReady=true を設定し
+// GAME_TICK に乗せて peer に通知。InGame 到達時にはバリア待機ゼロを実現。
+```
+
+一方 `HandleRoundStartSync` は `peerPhaseReady` を「相手が intro=2 に到達した」
+という意味で待っている。ロード時間が左右で違うと、まだ Loading 中の相手からの
+事前通知でバリアが解除される。
+
+### 本質
+
+`localPhaseReady` が「Loading に入った」と「intro=2 に到達した」の2つの意味を
+兼ねている。これは §5 の `_latestPeerFrame` が MENU と MATCH の2つのフレーム空間を
+兼ねている問題と同型で、**1つの変数に2つの意味を持たせたことによる破綻**。
+
+### 対処方針
+
+- 「到達」の通知を意味ごとに分ける（Loading 到達と intro=2 到達を別フラグにする）
+- あわせて §5 の transitionId（世代番号）を導入し、どの遷移に対する通知かを区別する
+  — 証言③「ワンスアゲインでずれる」はバリアが世代を持たないことが疑われるため
+
+修正後は同じハーネス実行で HOST/CLIENT の IntroBarrier 解除が揃うことを確認する。
+
+---
+
+## 7. 段取り
 
 | # | 内容 | 検証方法 |
 |---|---|---|
