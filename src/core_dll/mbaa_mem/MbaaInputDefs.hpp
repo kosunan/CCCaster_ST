@@ -25,14 +25,10 @@
 #define CC_P2_OFFSET_BUTTONS        ( 0x38 )                    // Offset to write P2 buttons input
 
 
-// ============================================================================
-// 方向キービットマスク（テンキー表記、neutral = 0）
-// ============================================================================
-
-#define BIT_UP                      ( 0x01 )
-#define BIT_DOWN                    ( 0x02 )
-#define BIT_LEFT                    ( 0x04 )
-#define BIT_RIGHT                   ( 0x08 )
+// 方向キーは GameInput.hpp の Dir:: を使う（テンキー表記, ニュートラル=0）。
+// 以前ここにあった BIT_UP/DOWN/LEFT/RIGHT のビットマスク定義は、
+// 実際の書込み規約（テンキー表記）と食い違ったまま Rematch から参照され、
+// 「下」が CC_PLAYER_FACING、「上」が CC_BUTTON_START になる原因だったため削除した。
 
 
 // ============================================================================
@@ -53,15 +49,6 @@
 #define CC_PLAYER_FACING            ( 0x0002 )
 
 
-// ============================================================================
-// 入力合成マクロ
-// ============================================================================
-
-// 入力合成マクロ: 方向(下位) + ボタン(上位) → 32bit
-#define COMBINE_INPUT(direction, buttons) \
-    ( static_cast<uint32_t>(direction) | ( static_cast<uint32_t>(buttons) << 8 ) )
-
-// ボタン連打マクロ（奇数フレームのみ入力）
-#define RETURN_MASH_INPUT(direction, buttons) \
-    do { static int _mashFrame = 0; return (_mashFrame++ % 2) \
-         ? COMBINE_INPUT(direction, buttons) : 0; } while(0)
+// 32bit への詰め替えは GameInput::Pack() / Unpack() のみを使う。
+// 以前ここにあった COMBINE_INPUT (direction | buttons << 8) は使用箇所ゼロで、
+// 3つ目の非互換な符号化として残っていたため削除した。

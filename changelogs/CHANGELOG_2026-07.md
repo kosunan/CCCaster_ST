@@ -1,3 +1,52 @@
+# fix: 入力を GameInput 型に統一 — Rematch 自動ナビが方向をボタンとして書く不具合を解消
+
+## 2026-07-27: B-1 入力の型付け
+
+### 概要
+入力を生の `uint32_t` で持ち回るのをやめ、`GameInput { direction, buttons }` 型に統一。
+符号化の混在によって Rematch の自動ナビが機能していなかった問題を、
+型で表現できないようにすることで解消した。seam 導入（B-2）の前提となる変更。
+
+### 直した不具合
+`MatchScene::HandleAutoNavigation()` は「下」を `0x0002`、「上」を `0x0001` として返し、
+呼び出し側がシフトせず `GC::WriteInput()` に渡していた。
+`FrameControl::WriteInput` は `direction << 16 | buttons` を期待するため:
+
+| 意図 | 実際に書かれていた値 |
+|---|---|
+| 下 (direction 2) | direction=0, buttons=`0x0002` = `CC_PLAYER_FACING` |
+| 上 (direction 8) | direction=0, buttons=`0x0001` = `CC_BUTTON_START` |
+| 決定 | `0x0410` — 正しく動作していた |
+
+カーソルが動かず、その場の項目を確定していた。双方が別項目を選ぶため画面がずれる。
+`SceneFastBoot` は同じ規約を正しく実装しており（`dirBits << 16`）、
+どちらが規約かの判断材料になった。
+
+### 混在していた3つの符号化
+| # | 符号化 | 状態 |
+|---|---|---|
+| 1 | `direction << 16 \| buttons`（テンキー表記） | 実際の規約。`GameInput::Pack()` に一本化 |
+| 2 | `BIT_UP=0x01 / BIT_DOWN=0x02` のビットマスク | 削除（Rematch がこの前提で書かれていた） |
+| 3 | `COMBINE_INPUT` = `direction \| buttons << 8` | 削除（使用箇所ゼロ） |
+
+### 変更ファイル
+- [NEW] `mbaa_mem/GameInput.hpp` — `GameInput` 型 + `Dir::` テンキー定数 + `Pack`/`Unpack`
+- [NEW] `src/tests/test_game_input.cpp` — 符号化と Rematch ナビの回帰テスト（23チェック）
+- [MODIFY] `engine/FrameControl.hpp` — `WriteInput` / `ClearInput` を `GameInput` 経由に
+- [MODIFY] `engine/MatchScene.cpp` — `HandleAutoNavigation` の戻り値を `GameInput` に。
+  `ResolveMenuSelection` は `.buttons` を参照。`HandleMenuGate` の未使用引数を削除
+- [MODIFY] `engine/SceneFastBoot.cpp` — 4箇所の `WriteInput` を型経由に
+- [MODIFY] `mbaa_mem/MbaaInputDefs.hpp` — `BIT_*` / `COMBINE_INPUT` / `RETURN_MASH_INPUT` 削除
+- [MODIFY] `src/tests/CMakeLists.txt` — `test_game_input` 追加
+- [NEW] `docs/design/core_dll/GameMemory_Seam.md` — seam 設計書（B-1〜B-4 の段取り）
+
+### 検証状況
+`ctest` 3スイート98チェック通過、DLL/EXE ともビルド成功。
+ただし**実ゲームでの確認は未実施**。Rematch の修正が実際に効くことは
+ハーネス（B-3）が立つまで確認できない。現時点の主張は「型として正しくなった」まで。
+
+---
+
 # test: 依存ゼロの単体テスト基盤を新設 — 入力バッファと NetplayClock の挙動を固定
 
 ## 2026-07-27: L1 テスト基盤の構築

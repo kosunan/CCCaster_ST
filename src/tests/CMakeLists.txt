@@ -30,6 +30,12 @@ if(WIN32)
     target_link_options(test_overlay PRIVATE -static -static-libgcc -static-libstdc++)
 endif()
 
+# ── 入力の符号化（依存ゼロ・ヘッダオンリー）──────────
+add_executable(test_game_input
+    test_game_input.cpp
+)
+target_include_directories(test_game_input PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
 # ── 入力バッファ（依存ゼロ・ヘッダオンリー）──────────
 add_executable(test_input_buffers
     test_input_buffers.cpp
@@ -45,11 +51,12 @@ add_executable(test_netplay_clock
 target_include_directories(test_netplay_clock PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 if(WIN32)
-    foreach(t test_input_buffers test_netplay_clock)
+    foreach(t test_game_input test_input_buffers test_netplay_clock)
         target_link_options(${t} PRIVATE -static -static-libgcc -static-libstdc++)
     endforeach()
 endif()
 
 # ── ctest 登録 ──────────────────────────────────────
+add_test(NAME game_input    COMMAND test_game_input)
 add_test(NAME input_buffers COMMAND test_input_buffers)
 add_test(NAME netplay_clock COMMAND test_netplay_clock)

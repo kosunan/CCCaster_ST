@@ -31,6 +31,7 @@
 
 #include "core_dll/timing/SpeedFlags.hpp"
 #include "core_dll/mbaa_mem/MbaaInputDefs.hpp"
+#include "core_dll/mbaa_mem/GameInput.hpp"
 #include <cstdint>
 #include <windows.h>
 
@@ -99,21 +100,22 @@ public:
     /**
      * @brief P1/P2 の入力をゲームメモリに書き込む
      */
-    static void WriteInput(uint32_t p1Input, uint32_t p2Input) {
+    static void WriteInput(cccaster::game_interface::GameInput p1,
+                           cccaster::game_interface::GameInput p2) {
         char* base = GetInputBasePtr();
         if (!base) {
             LogNullInputBase();
             return;
         }
-        WriteP1Input(base, p1Input);
-        WriteP2Input(base, p2Input);
+        WriteP1Input(base, p1);
+        WriteP2Input(base, p2);
     }
 
     /**
-     * @brief 入力をクリアする（P1=0, P2=0）
+     * @brief 入力をクリアする（P1/P2 ともにニュートラル）
      */
     static void ClearInput() {
-        WriteInput(0, 0);
+        WriteInput({}, {});
     }
 
 
@@ -135,14 +137,14 @@ private:
         return *reinterpret_cast<char**>(CC_PTR_TO_WRITE_INPUT_ADDR);
     }
 
-    static void WriteP1Input(char* base, uint32_t input) {
-        *reinterpret_cast<uint32_t*>(base + CC_P1_OFFSET_DIRECTION) = (input >> 16) & 0xFFFF;
-        *reinterpret_cast<uint16_t*>(base + CC_P1_OFFSET_BUTTONS)   = static_cast<uint16_t>(input & 0xFFFF);
+    static void WriteP1Input(char* base, cccaster::game_interface::GameInput input) {
+        *reinterpret_cast<uint32_t*>(base + CC_P1_OFFSET_DIRECTION) = input.direction;
+        *reinterpret_cast<uint16_t*>(base + CC_P1_OFFSET_BUTTONS)   = input.buttons;
     }
 
-    static void WriteP2Input(char* base, uint32_t input) {
-        *reinterpret_cast<uint32_t*>(base + CC_P2_OFFSET_DIRECTION) = (input >> 16) & 0xFFFF;
-        *reinterpret_cast<uint16_t*>(base + CC_P2_OFFSET_BUTTONS)   = static_cast<uint16_t>(input & 0xFFFF);
+    static void WriteP2Input(char* base, cccaster::game_interface::GameInput input) {
+        *reinterpret_cast<uint32_t*>(base + CC_P2_OFFSET_DIRECTION) = input.direction;
+        *reinterpret_cast<uint16_t*>(base + CC_P2_OFFSET_BUTTONS)   = input.buttons;
     }
 
     static void LogNullInputBase() {

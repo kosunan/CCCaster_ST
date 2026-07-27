@@ -19,6 +19,8 @@ namespace cccaster::domain::scene {
 
 using GC = session::FrameControl;
 using session::DebugLog;
+using cccaster::game_interface::GameInput;
+namespace Dir = cccaster::game_interface::Dir;
 
 // ================================================================
 // Static 変数
@@ -126,13 +128,12 @@ bool SceneFastBoot::ProcessFrame(bool isHost) {
         // ナビ回数: Versus=1, Training=5
         int targetNav = (s_targetMode == cccaster::public_api::IpcGameMode::Training) ? 5 : 1;
 
-        uint16_t dirBits = 0;
-        uint16_t btnBits = 0;
+        GameInput input{};
 
         if (s_menuNavCount < targetNav) {
             // 方向キー下を交互に入力
             if (s_toggle) {
-                dirBits = 0x0002; // 下
+                input.direction = Dir::Down;
             }
             if (!s_toggle) {
                 s_menuNavCount++;
@@ -140,21 +141,19 @@ bool SceneFastBoot::ProcessFrame(bool isHost) {
         } else {
             // 決定ボタンを交互に入力
             if (s_toggle) {
-                btnBits = CC_BUTTON_CONFIRM;
+                input.buttons = CC_BUTTON_CONFIRM;
             }
         }
 
-        // P1 入力として書込み (direction << 16 | buttons)
-        uint32_t input = (static_cast<uint32_t>(dirBits) << 16) | btnBits;
         if (isHost) {
-            GC::WriteInput(input, 0);
+            GC::WriteInput(input, {});
         } else {
-            GC::WriteInput(0, input);
+            GC::WriteInput({}, input);
         }
 
         if (s_toggle && s_frameCount % 10 == 0) {
             DebugLog("[FastBoot] MainMenu nav=%d/%d input=0x%08X",
-                     s_menuNavCount, targetNav, input);
+                     s_menuNavCount, targetNav, input.Pack());
         }
 
         s_toggle = !s_toggle;
@@ -192,13 +191,13 @@ bool SceneFastBoot::ProcessFrame(bool isHost) {
     //   決定ボタンを偽造して進める
     // ================================================================
     {
-        uint16_t btnBits = s_toggle ? CC_BUTTON_CONFIRM : 0;
-        uint32_t input = btnBits;
+        GameInput input{};
+        if (s_toggle) input.buttons = CC_BUTTON_CONFIRM;
 
         if (isHost) {
-            GC::WriteInput(input, 0);
+            GC::WriteInput(input, {});
         } else {
-            GC::WriteInput(0, input);
+            GC::WriteInput({}, input);
         }
 
         s_toggle = !s_toggle;

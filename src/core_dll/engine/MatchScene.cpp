@@ -28,6 +28,8 @@ namespace cccaster::domain::scene {
 using GC = cccaster::domain::session::FrameControl;
 using cccaster::domain::session::DebugLog;
 using cccaster::game_interface::GamePhase;
+using cccaster::game_interface::GameInput;
+namespace Dir = cccaster::game_interface::Dir;
 
 // [撤去] ReadBufferAndWrite はリセットにより削除。
 //   CB読取→SceneInputFilter→WriteInput パイプラインは再構築フェーズで実装する。
@@ -175,8 +177,8 @@ void MatchScene::SetRemoteRetryMenuIndex(int8_t menuIndex) {
 }
 
 /// 自動ナビゲーション — カーソル移動 + 確定操作
-static uint16_t HandleAutoNavigation() {
-    if (s_targetMenuState == -1 || s_targetMenuIndex == MENU_INDEX_NONE) return 0;
+static GameInput HandleAutoNavigation() {
+    if (s_targetMenuState == -1 || s_targetMenuIndex == MENU_INDEX_NONE) return {};
 
     int currentState = static_cast<int>(AsmHacks::menuConfirmState);
 
@@ -184,34 +186,34 @@ static uint16_t HandleAutoNavigation() {
         s_targetMenuState = -1;
         s_targetMenuIndex = MENU_INDEX_NONE;
         DebugLog("[Rematch] AutoNav complete.");
-        return 0;
+        return {};
     }
 
     int currentIndex = static_cast<int>(AsmHacks::currentMenuIndex);
     int targetIndex  = static_cast<int>(s_targetMenuIndex);
 
     if (currentIndex < targetIndex) {
-        return 0x0002; // 下
+        return { Dir::Down, 0 };
     } else if (currentIndex > targetIndex) {
-        return 0x0001; // 上
+        return { Dir::Up, 0 };
     } else {
-        return CC_BUTTON_A | CC_BUTTON_CONFIRM;
+        return { Dir::Neutral, CC_BUTTON_A | CC_BUTTON_CONFIRM };
     }
 }
 
 /// 双方の選択からメニュー決定
-static bool ResolveMenuSelection(uint16_t& input) {
+static bool ResolveMenuSelection(GameInput& input) {
     int8_t remoteIndex = s_remoteRetryMenuIndex.load(std::memory_order_relaxed);
 
     // ローカル選択検出
     if (s_localRetryMenuIndex == MENU_INDEX_NONE) {
-        if (input & (CC_BUTTON_A | CC_BUTTON_CONFIRM)) {
+        if (input.buttons & (CC_BUTTON_A | CC_BUTTON_CONFIRM)) {
             s_localRetryMenuIndex = static_cast<int8_t>(AsmHacks::currentMenuIndex);
             // SharedSyncState に書込み → GAME_TICK パケットで相手に送信される
             cccaster::core::netplay::NetplaySession::GetMutableState()
                 .localRetryMenuIndex.store(s_localRetryMenuIndex, std::memory_order_release);
             DebugLog("[Rematch] Local selected: menuIndex=%d", s_localRetryMenuIndex);
-            input &= ~(CC_BUTTON_A | CC_BUTTON_CONFIRM); // 即確定を防止
+            input.buttons &= ~(CC_BUTTON_A | CC_BUTTON_CONFIRM); // 即確定を防止
         }
     }
 
@@ -229,8 +231,8 @@ static bool ResolveMenuSelection(uint16_t& input) {
     return false;
 }
 
-/// メニューゲート制御
-static bool HandleMenuGate(uint16_t& input) {
+/// メニューゲート制御（入力は参照しない — メニュー階層カウンタのみで判定する）
+static bool HandleMenuGate() {
     // メニュー選択肢制限 (シーン別フィルタとして後日実装)
     if (AsmHacks::currentMenuIndex > static_cast<uint32_t>(kMaxRetryMenuIndex)) {
         // TODO: SceneInputFilter 経由に移行
@@ -249,13 +251,12 @@ static bool HandleMenuGate(uint16_t& input) {
 void MatchScene::OnRematch(session::MatchContext& ctx) {
     // ステップ 1: 自動ナビ中
     if (s_targetMenuState != -1 && s_targetMenuIndex != MENU_INDEX_NONE) {
-        uint16_t navInput = HandleAutoNavigation();
-        if (navInput != 0) {
-            uint32_t input32 = static_cast<uint32_t>(navInput);
+        GameInput navInput = HandleAutoNavigation();
+        if (!navInput.IsNeutral()) {
             if (ctx.isHost) {
-                GC::WriteInput(input32, 0);
+                GC::WriteInput(navInput, {});
             } else {
-                GC::WriteInput(0, input32);
+                GC::WriteInput({}, navInput);
             }
         }
         return;
@@ -263,13 +264,12 @@ void MatchScene::OnRematch(session::MatchContext& ctx) {
 
     // ステップ 2: 入力取得 (DirectInputHook から)
     cccaster::game_interface::DirectInputHook::Poll();
-    uint32_t rawInput = ctx.isHost
+    GameInput input = GameInput::Unpack(ctx.isHost
         ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
-        : cccaster::game_interface::DirectInputHook::GetPlayer2Input();
-    uint16_t input = static_cast<uint16_t>(rawInput & 0xFFFF);
+        : cccaster::game_interface::DirectInputHook::GetPlayer2Input());
 
     // ステップ 3: メニューゲート
-    if (HandleMenuGate(input)) {
+    if (HandleMenuGate()) {
         return;
     }
 
