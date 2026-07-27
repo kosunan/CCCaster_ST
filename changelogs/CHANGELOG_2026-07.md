@@ -1,3 +1,47 @@
+# docs: InGame 画面停止の原因を特定 — peerFrame のフェーズ跨ぎ汚染を記録
+
+## 2026-07-27: dual_test.bat 実行ログの解析
+
+### 概要
+`dual_test.bat` を実行して得た症状「対戦開始で画面が止まり、音楽だけ鳴り、
+裏で高速動作する」の原因をログから特定し、設計書に必須修正項目として記録した。
+コード変更は伴わない。
+
+### 実行されたバイナリについて
+`dual_test.bat` はデプロイを行わないため、実行された DLL は 2026-03-11 04:21 の
+ビルド（CB撤去前）だった。したがって本ログは B-1 の検証結果ではなく、
+凍結時点の症状の観測データである。
+
+### 特定した因果連鎖
+1. CharaSelect 中に MENU 用フレームカウンタが 12551 まで進む
+2. `SyncCodec::_latestPeerFrame` は受信 baseFrame の単調最大値で、
+   フェーズ遷移ではリセットされない（`Reset()` は `Initialize()` からのみ）
+3. InGame 突入で MatchInputBuffer は 0 にリセット、MATCH パケットの baseFrame も 0 から
+4. `GetLatestPeerFrame()` は 12551 を返し続ける
+5. `gap = 12551 - 0` → `skipWait=true` でメトロノーム待機スキップ（高速化）
+6. `SetRenderSkipByGap(12551)` → `OnPresentSkip()` が `Present()` をスキップ（画面停止）
+7. 音声は D3D と無関係なので鳴り続ける
+
+証拠: `peerF=12551` が InGame 最初のログ行から最後まで一定。
+ログ末尾 `whMatch=12360` は解除直前の状態。
+
+### 「最終ラウンドが終わらない」について
+InGame 中の入力は全フレーム 0（非ゼロ入力2130件はすべて CharaSelect 中の操作）。
+両者棒立ちのためラウンド1・2とも 5513 フレームちょうどでタイムオーバーし、
+決着がつかず永久にループする。ヘッドレステストの必然でありバグではない。
+
+### 現状の影響
+CB撤去により gap 計算が消え `SetRenderSkipByGap(0)` 固定になっているため、
+現在のツリーではこの症状は再現しない。ただし原因は `SyncCodec` に残存しており、
+入力パイプライン再構築で gap 制御を戻した時点で再発する。
+
+### 変更ファイル
+- [MODIFY] `docs/design/core_dll/GameMemory_Seam.md` — §5 に必須修正項目として追記
+- [MODIFY] `AGENTS.md` — `dual_test.bat` がデプロイしない罠を追記
+- [ADD] `build_logs/2026-07-27_dual_test/` — 実行ログ2本と 3/11 版 DLL を保全（gitignore対象）
+
+---
+
 # fix: 入力を GameInput 型に統一 — Rematch 自動ナビが方向をボタンとして書く不具合を解消
 
 ## 2026-07-27: B-1 入力の型付け

@@ -175,7 +175,53 @@ harness.exe (Host)  ←── loopback UDP ──→  harness.exe (Client)
 
 ---
 
-## 5. 段取り
+## 5. パイプライン再構築時の必須修正: peerFrame のフェーズ跨ぎ汚染
+
+2026-07-27 の `dual_test.bat` 実行（3月11日ビルド）で、報告された
+「対戦開始で画面が止まり、音楽だけ鳴り、裏で高速動作する」症状の原因を特定した。
+
+### 因果連鎖（ログで確認済み）
+
+1. CharaSelect 中、MENU 用フレームカウンタが 12551 まで進む
+2. `SyncCodec::_latestPeerFrame` は受信 `baseFrame` の**単調最大値**。
+   `Reset()` は `Initialize()` からしか呼ばれず、フェーズ遷移では戻らない
+3. InGame 突入で `MatchInputBuffer` は 0 にリセットされ、
+   MATCH パケットの `baseFrame` も 0 から再スタートする（ログ: `baseFr=0`, `baseFr=7`）
+4. だが `GetLatestPeerFrame()` は 12551 を返し続ける
+5. `SceneRunner`: `gap = peerFrame - localWriteHead` = `12551 - 0` = 12551
+6. `skipWait = (gap >= 2)` → メトロノーム待機をスキップ → 無制限に回る
+7. `SetRenderSkipByGap(12551)` → `RenderSkip = ON`
+   → `GameFrameOrchestrator::OnPresentSkip()` が `Present()` ごとスキップ → 画面停止
+8. 音声は D3D と無関係なので鳴り続ける
+9. `whMatch` が 12551 に追いつくまで継続（ログ末尾は `whMatch=12360` で解除直前）
+
+証拠: `peerF=12551` が InGame 最初のログ行から最後の行まで一定。
+
+### 現状
+
+CB撤去により `SceneRunner` の gap 計算が消え `SetRenderSkipByGap(0)` 固定になっているため、
+**この症状は現在のツリーでは出ない**。しかし原因は `SyncCodec` に残っており、
+入力パイプラインを再構築して gap 制御を戻した瞬間に再発する。
+
+### 本質
+
+MENU と MATCH は**独立したフレーム空間**（それぞれ独立にリセットされる）なのに、
+`_latestPeerFrame` という単一の単調カウンタで最大値を取っている。
+これは §4 で挙げた「パケットが受信側の内部データ構造を指名している
+（`FLAG_BUFFER_MENU` / `FLAG_BUFFER_MATCH`）」問題と同じ根を持つ。
+
+### 対処方針
+
+フェーズ跨ぎで単調増加する値を作らない。以下のいずれかを B-4 までに決める。
+
+- フレーム番号をフェーズごとにリセットせず、セッション通しの単一の番号にする（推奨）
+- または `latestPeerFrame` をバッファ種別ごとに分け、フェーズ遷移でリセットする
+
+決定性テスト（B-4）は、フェーズ遷移直後の gap が 0 付近であることを検証項目に含める。
+
+---
+
+## 6. 段取り
 
 | # | 内容 | 検証方法 |
 |---|---|---|

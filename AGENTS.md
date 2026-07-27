@@ -70,6 +70,8 @@ cmake --build build -j12
 
 E2E は `_TEST_MBAACC/dual_test.bat`（実ゲーム2窓・遅延50-90ms・ロス20% 注入）。手順は `.agents/workflows/test.md`。ログは各 `MBAACC_N/cccaster/cccaster_hook_log.txt`。
 
+**`dual_test.bat` はデプロイしない** — ビルドしただけで実行すると古い DLL がテストされ、しかも何の警告も出ない。`build.bat` を使うか、実行前に `build/bin/` の DLL と `MBAACC_1` / `MBAACC_2` 側のハッシュを比べること。
+
 ---
 
 ## コミット
