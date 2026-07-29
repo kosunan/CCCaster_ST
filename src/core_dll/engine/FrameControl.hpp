@@ -57,28 +57,10 @@ public:
     }
 
     /**
-     * @brief 高速スキップ_ロールアップ
-     * @details RenderSkip=ON, TickBypass=ON（HighSpeedSkip と同一動作）
-     * @param frames 現在未使用（将来的にロールアップ深度制御用を想定）
-     */
-    static void SetModeRollupSkip(uint32_t /*frames*/) {
-        cccaster::core::SpeedFlags::SetHighSpeed();
-    }
-
-    /**
      * @brief 通常速度
      * @details RenderSkip=OFF, TickBypass=OFF
      */
     static void SetModeNormalSpeed() {
-        cccaster::core::SpeedFlags::SetNormalSpeed();
-    }
-
-    /**
-     * @brief 一時停止（通常速度と同一）
-     * @details Metronome がフレーム進行を制御するため、
-     *          フレームが進まない状態では自然に待機状態になる。
-     */
-    static void SetModePause() {
         cccaster::core::SpeedFlags::SetNormalSpeed();
     }
 
@@ -103,13 +85,6 @@ public:
     static void WriteInput(cccaster::game_interface::GameInput p1,
                            cccaster::game_interface::GameInput p2) {
         cccaster::game_interface::GameMem().WriteInput(p1, p2);
-    }
-
-    /**
-     * @brief 入力をクリアする（P1/P2 ともにニュートラル）
-     */
-    static void ClearInput() {
-        WriteInput({}, {});
     }
 
 

@@ -5,17 +5,6 @@
 //   Init()  : InitThread から呼ばれ、状態変数を初期化して即リターン。
 //   Step()  : ゲームスレッド (DxHook::Hooked_Present) から毎フレーム呼ばれ、
 //             1フレーム分の処理を実行する。
-//
-// 【Step() 処理フロー】
-//   (A) Phase検出 (GamePhaseDetector)
-//   (B) 画面遷移検出 → OnPhaseChanged
-//   (C) FastBoot処理 (phase < CharaSelect)
-//   (D) メトロノーム精密待機 (Metronome)
-//   (E) Scene別ディスパッチ (MatchScene::OnXxx)
-//   (F) introState 変化検出
-//   (G) 統合フロー確認ログ (60Fごと)
-//   (H) 同期状態チェック + Peer切断検出
-//   (I) 中断チェック (F12)
 // ============================================================================
 
 #include <windows.h>
@@ -181,8 +170,6 @@ void SceneRunner::Step() {
     {
         auto& buf = cccaster::core::sync::MatchInputBuffer::GetInstance();
 
-        cccaster::game_interface::DirectInputHook::Poll();
-
         // 予測は「相手の最後の確定入力を繰り返す」。ロールバック導入までは
         // 予測が外れても巻き戻せないため、確定するまでゲームには渡さない。
         uint32_t predicted = 0;
@@ -250,7 +237,10 @@ void SceneRunner::Step() {
         auto& buf = cccaster::core::sync::MatchInputBuffer::GetInstance();
 
         uint32_t p1 = 0, p2 = 0;
-        if (buf.TryReadForGame(ctx.isHost, p1, p2)) {
+        // Rematch の自動ナビが入力を握っている間は書かない。
+        // 書くと同一フレームで後勝ちになり自動ナビが効かなくなる。
+        if (!scene::MatchScene::IsDrivingInput() &&
+            buf.TryReadForGame(ctx.isHost, p1, p2)) {
             // ここではフィルタを掛けない。掛けるとローカルのフェーズが引数に
             // なり、ロード時間差でフェーズがずれたときに両者の結果が食い違う。
             using cccaster::game_interface::GameInput;

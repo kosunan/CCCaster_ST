@@ -135,6 +135,9 @@ void SyncCodec::ProcessReceivedPacket(const std::vector<uint8_t>& data,
     }
 
     // (5) 該当バッファへの相手入力確定書込み（フレーム>0 なら Counting 中）
+    // inputs[] は 10 要素固定。壊れた/悪意あるパケットで溢れさせない。
+    if (gtp.inputCount > 10) gtp.inputCount = 10;
+
     if (gtp.baseFrame > 0 && gtp.inputCount > 0) {
         // パケットロス耐性向上のため、通信パケットは過去複数の入力(最大10)を保持している。
         // これを古いフレームから順に(または受信したすべてを)適用・確定する。

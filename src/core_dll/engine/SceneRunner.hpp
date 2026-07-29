@@ -4,8 +4,8 @@
 //
 // 【設計】
 //   Init()  : InitThread から1回だけ呼ばれ、状態変数を初期化する。
-//   Step()  : ゲームスレッド (DxHook::Hooked_EndScene) から毎フレーム呼ばれ、
-//             1フレーム分のロジック処理を実行する。
+//   Step()  : ゲームスレッドから毎フレーム呼ばれ、1フレーム分の処理を実行する。
+//             呼び出し元は GameFrameOrchestrator::Register() を参照。
 //   IsReady(): Init() 完了後に true を返す。EndScene から Step() を呼ぶ前に確認。
 //
 // 【旧設計との違い】

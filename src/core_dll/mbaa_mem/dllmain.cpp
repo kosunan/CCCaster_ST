@@ -245,7 +245,7 @@ DWORD WINAPI InitThread(LPVOID lpParam) {
     // (6) SceneRunner 初期化
     //
     // ★ Init() は状態変数を初期化するだけで即リターン。
-    //   実際のフレーム処理 (Step()) は DxHook::Hooked_EndScene から
+    //   実際のフレーム処理 (Step()) は GameFrameOrchestrator の Present コールバックから
     //   ゲームスレッド上で呼ばれる。
     // ================================================================
     HookLog("[InitThread] Initializing SceneRunner...");

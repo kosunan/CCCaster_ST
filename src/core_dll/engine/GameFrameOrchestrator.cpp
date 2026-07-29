@@ -72,13 +72,14 @@ void GameFrameOrchestrator::Shutdown() {
 //   1. SceneRunner::Step() — ゲームセッションロジック
 //   2. DirectInputHook::Poll() — ジョイスティック状態取得
 void GameFrameOrchestrator::OnPresent(LPDIRECT3DDEVICE9 pDevice) {
+    // 入力のポーリングはフレームに1回だけ。Poll() は毎回 prevState を更新するため、
+    // 2回呼ぶと差分が消えてエッジ検出（マッピングUI）が動かなくなる。
+    cccaster::game_interface::DirectInputHook::Poll();
+
     // SceneRunner: ゲームスレッド上で1F分のロジック処理
     if (SceneRunner::IsReady()) {
         SceneRunner::Step();
     }
-
-    // ジョイスティック状態を毎フレームポーリング
-    cccaster::game_interface::DirectInputHook::Poll();
 
     // ── ImGui 最終描画（全ゲーム描画の後、Present直前） ──
     // EndScene で準備したImGuiドローデータを、バックバッファの最上位レイヤーとして描画。

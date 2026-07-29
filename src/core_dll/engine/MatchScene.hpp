@@ -30,6 +30,10 @@ public:
     static void OnInGame(session::MatchContext& ctx);
     static void OnRematch(session::MatchContext& ctx);
 
+    /// 自動ナビ中は SceneRunner 側の確定入力書込みを止める。
+    /// 同一フレームで二重に書くと後勝ちで自動ナビが消えるため。
+    static bool IsDrivingInput();
+
     // ─── リセット ────────────────────────────────────
     static void ResetCharaSelect();
     static void ResetLoading();

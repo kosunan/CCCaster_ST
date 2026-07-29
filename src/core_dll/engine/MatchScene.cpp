@@ -1,16 +1,8 @@
 // ============================================================================
 // MatchScene.cpp — 画面別業務ロジック（統合版 実装）
 //
-// 【設計】
-//   各画面の業務処理を1ファイルに集約。
-//   共通の FrameInputBuffer → SceneInputFilter → WriteInput フローは
-//   ReadBufferAndWrite() で共用する。
-//
-// 【削除された処理】
-//   - パケット作成/送信 (NetplaySession に完全委譲)
-//   - RollbackEngine 管理 (FrameInputBuffer が自動処理)
-//   - GAME_INPUT パケット構築
-//   - 11F 入力履歴バッファ
+// 各画面の業務処理を1ファイルに集約する。
+// 入力の読み書きは SceneRunner::Step() が行い、ここでは扱わない。
 // ============================================================================
 
 #include "core_dll/engine/MatchScene.hpp"
@@ -32,22 +24,15 @@ using cccaster::game_interface::GamePhase;
 using cccaster::game_interface::GameInput;
 namespace Dir = cccaster::game_interface::Dir;
 
-// [撤去] ReadBufferAndWrite はリセットにより削除。
-//   CB読取→SceneInputFilter→WriteInput パイプラインは再構築フェーズで実装する。
+// ============================================================================
+// CharaSelect
+// ============================================================================
+void MatchScene::ResetCharaSelect() {}
+
+void MatchScene::OnCharaSelect(session::MatchContext& ctx) {}
 
 // ============================================================================
-// CharaSelect — FrameInputBuffer 読取 → WriteInput
-// ============================================================================
-void MatchScene::ResetCharaSelect() {
-    // 状態なし — FrameInputBuffer が全管理
-}
-
-void MatchScene::OnCharaSelect(session::MatchContext& ctx) {
-    // [撤去] CB読取→WriteInput は再構築フェーズで実装
-}
-
-// ============================================================================
-// Loading — FrameInputBuffer 読取 → WriteInput (CharaSelectと同一処理)
+// Loading
 // ============================================================================
 void MatchScene::ResetLoading() {
     // 次のラウンド開始同期に向けてバリアを白紙に戻す。
@@ -68,7 +53,7 @@ void MatchScene::OnLoading(session::MatchContext& ctx) {
 }
 
 // ============================================================================
-// InGame — ラウンド開始同期 + FrameInputBuffer読取
+// InGame — ラウンド開始同期
 // ============================================================================
 static bool s_syncInitiated  = false;
 static bool s_reachedIntro2  = false;  ///< このラウンドで intro=2 を観測したか
@@ -93,7 +78,7 @@ static bool HandleRoundStartSync(session::MatchContext& ctx) {
     // ステップ2: 到達を peer に通知（isSynced 待ち中もパケットに乗る）
     if (!s_syncInitiated) {
         ms.localPhaseReady.store(true, std::memory_order_release);
-        GC::SetModePause();
+        GC::SetModeNormalSpeed();
         s_syncInitiated = true;
         DebugLog("[IntroBarrier] Local reached intro=2. Waiting for peer...");
     }
@@ -142,13 +127,11 @@ void MatchScene::ResetInGame() {
 
 void MatchScene::OnInGame(session::MatchContext& ctx) {
     // ラウンド開始同期 + IntroBarrier（intro=2 で双方ブロック）
-    if (HandleRoundStartSync(ctx)) return;
-
-    // [撤去] CB読取→WriteInput は再構築フェーズで実装
+    HandleRoundStartSync(ctx);
 }
 
 // ============================================================================
-// Rematch — メニュー選択同期 + 自動ナビ + FrameInputBuffer読取
+// Rematch — メニュー選択同期 + 自動ナビ
 // ============================================================================
 // TODO: AsmHacks モジュールを v10 に統合後、正式な配置に変更
 namespace AsmHacks {
@@ -265,6 +248,10 @@ static bool HandleMenuGate() {
     return false;
 }
 
+bool MatchScene::IsDrivingInput() {
+    return s_targetMenuState != -1 && s_targetMenuIndex != MENU_INDEX_NONE;
+}
+
 void MatchScene::OnRematch(session::MatchContext& ctx) {
     // ステップ 1: 自動ナビ中
     if (s_targetMenuState != -1 && s_targetMenuIndex != MENU_INDEX_NONE) {
@@ -280,7 +267,6 @@ void MatchScene::OnRematch(session::MatchContext& ctx) {
     }
 
     // ステップ 2: 入力取得 (DirectInputHook から)
-    cccaster::game_interface::DirectInputHook::Poll();
     GameInput input = GameInput::Unpack(ctx.isHost
         ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
         : cccaster::game_interface::DirectInputHook::GetPlayer2Input());

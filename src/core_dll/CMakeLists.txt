@@ -13,7 +13,6 @@ add_library(cccaster_hook SHARED
     mbaa_mem/GameMemory.cpp
     mbaa_mem/MbaaMemTrace.cpp
     mbaa_mem/RealGameMemory.cpp
-    mbaa_mem/FastBootRunner.cpp
 
     # === hook/ — 外部 API フック ===
     hook/DxHook.cpp
@@ -43,9 +42,11 @@ add_library(cccaster_hook SHARED
     sync/NetplaySession.cpp
     sync/NetplayClock.cpp
 
-    # === rollback/ — ロールバック ===
-    rollback/RollbackEngine.cpp
-    rollback/StateBuffer.cpp
+    # === rollback/ — ビルド対象から外している ===
+    #   入力を 16bit で扱う設計で、現行の GameInput(direction<<16|buttons) と
+    #   非互換。繋ぐと方向入力が丸ごと落ちる。ロールバック再開時は
+    #   GameInput の上に作り直す。MBAA のステート保存アドレス
+    #   (DumpEntryList.hpp) は参照価値があるのでファイルは残す。
 
     # === ui/ — 表示 ===
     ui/OverlayRenderer.cpp
