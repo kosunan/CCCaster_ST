@@ -31,6 +31,27 @@ message("Building CCCaster_v10 in ${CMAKE_BUILD_TYPE} mode")
 # ==========================================
 include(FetchContent)
 
+# ==========================================
+# ターゲット環境の検証
+# ==========================================
+# 注入先の MBAA.exe は 32bit。64bit の DLL を作っても注入は「無言で」失敗し、
+# エラーも警告も出ないまま何時間も溶ける。ビルド時に落とす。
+if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
+    message(FATAL_ERROR
+        "32bit ツールチェインが必要です（現在: ${CMAKE_SIZEOF_VOID_P}バイトポインタ）。\n"
+        "  MSYS2:  PATH に C:\\msys64\\mingw32\\bin を先頭で通してから cmake を実行\n"
+        "64bit でも DLL は生成できますが、32bit の MBAA.exe には注入できません。")
+endif()
+
+# 対象 Windows バージョンを明示する。
+# これまでツールチェイン既定値に任せていたため、MSYS2(GCC15, 既定 Win10) では通り、
+# 古い mingw-w64(既定 WinXP SP2) では inet_pton / inet_ntop が未宣言でビルドが落ちた。
+# どのツールチェインでも同じ API 集合が見えるように固定する。
+if(WIN32)
+    add_compile_definitions(_WIN32_WINNT=0x0601 WINVER=0x0601)   # Windows 7
+endif()
+
+
 # Fetch ASIO (Used by App Layer)
 FetchContent_Declare(
     asio
