@@ -14,7 +14,9 @@
 #define NOMINMAX
 #include <windows.h>
 #include <cstdio>
+#include <cstring>
 #include <string>
+#include "core_dll/common/LogSink.hpp"
 #include "core_dll/network/NetplayManager.hpp"
 #include "core_dll/hook/TimeHooks.hpp"
 #include "core_dll/mbaa_mem/MbaaPatcher.hpp"
@@ -80,26 +82,35 @@ static void ApplyMultiInstanceBypass() {
 }
 
 // ============================================================================
-// HookLog — 初期化フェーズ専用ログ（DxHook 未初期化時に使用）
+// HookLog — DLL 全体のログ入口
+//
+// 実体は core_dll/common/LogSink（開きっぱなし + 排他 + バッファリング）。
+// ここは「Win32 でしか解けない出力先パス」を LogSink に渡す薄い橋渡しだけを
+// 持つ。1 行ごとの fopen/fclose はやめたので、毎フレーム呼ばれても
+// ゲームスレッドは I/O の完了を待たない。
+//
+// 呼び出し側のシグネチャは従来どおり。DebugLog(...) 経由の既存呼び出しは
+// 一切書き換えていない。
 // ============================================================================
 void HookLog(const char* msg) {
     // DLL 自身のパスを基準にログファイルパスを構築する。
     // カレントディレクトリに依存せず、常に DLL と同じフォルダ
     // （_TEST_MBAACC\cccaster\）に cccaster_hook_log.txt を出力する。
-    char dllPath[MAX_PATH] = {};
-    if (g_hModule) {
-        GetModuleFileNameA(g_hModule, dllPath, MAX_PATH);
-        // ファイル名部分を切り落としてディレクトリパスを得る
-        char* lastSlash = strrchr(dllPath, '\\');
-        if (lastSlash) *(lastSlash + 1) = '\0';
-    }
-    std::string logPath = std::string(dllPath) + "cccaster_hook_log.txt";
+    // 解決は初回 1 回だけ（従来は毎行 GetModuleFileNameA を呼んでいた）。
+    static const bool pathInitialized = [] {
+        char dllPath[MAX_PATH] = {};
+        if (g_hModule) {
+            GetModuleFileNameA(g_hModule, dllPath, MAX_PATH);
+            // ファイル名部分を切り落としてディレクトリパスを得る
+            char* lastSlash = strrchr(dllPath, '\\');
+            if (lastSlash) *(lastSlash + 1) = '\0';
+        }
+        cccaster::core::log::SetLogPath(std::string(dllPath) + "cccaster_hook_log.txt");
+        return true;
+    }();
+    (void)pathInitialized;
 
-    FILE* fp = fopen(logPath.c_str(), "a");
-    if (fp) {
-        fprintf(fp, "%s\n", msg);
-        fclose(fp);
-    }
+    cccaster::core::log::WriteLine(msg);
 }
 
 // ============================================================================
@@ -110,6 +121,12 @@ void HookLog(const char* msg) {
 // ============================================================================
 DWORD WINAPI InitThread(LPVOID lpParam) {
     (void)lpParam;
+
+    // ログ書き出しスレッドはここで起動する。
+    // DllMain の中で起こすとローダーロックを踏むため、必ず DllMain の外で。
+    // これ以降、HookLog は積むだけで返る（I/O 完了を待たない）。
+    cccaster::core::log::StartWriter();
+
     HookLog("=====================================");
     HookLog("[InitThread] Starting hook initialization...");
 
@@ -290,6 +307,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         } else {
             HookLog("[DllMain] Process is terminating. Skipping Shutdown() to avoid deadlock.");
         }
+        // ログは最後に閉じる（上の Shutdown 群のログを取りこぼさないため）。
+        // プロセス終了時は他スレッドが排他を握ったまま消えている可能性がある
+        // ので、ロック取得を諦める非ブロッキング版で呼ぶ。
+        cccaster::core::log::Shutdown(/*blocking=*/lpReserved == nullptr);
         break;
 
     case DLL_THREAD_ATTACH:
