@@ -17,6 +17,8 @@
 #include <cstring>
 #include <string>
 #include "core_dll/common/LogSink.hpp"
+#include "core_dll/common/DataPaths.hpp"
+#include "cli_launcher/ConfigManager.hpp"
 #include "core_dll/network/NetplayManager.hpp"
 #include "core_dll/hook/TimeHooks.hpp"
 #include "core_dll/mbaa_mem/MbaaPatcher.hpp"
@@ -105,6 +107,8 @@ void HookLog(const char* msg) {
             char* lastSlash = strrchr(dllPath, '\\');
             if (lastSlash) *(lastSlash + 1) = '\0';
         }
+        // ログと設定ファイルで基準を分けると必ず食い違うので、同じ場所に寄せる
+        cccaster::core::paths::SetDataRoot(dllPath);
         cccaster::core::log::SetLogPath(std::string(dllPath) + "cccaster_hook_log.txt");
         return true;
     }();
@@ -129,6 +133,20 @@ DWORD WINAPI InitThread(LPVOID lpParam) {
 
     HookLog("=====================================");
     HookLog("[InitThread] Starting hook initialization...");
+
+    // ── 設定ファイルの読み込み ──────────────────────────────
+    // ConfigManager::configData は static メンバ、つまり**プロセスごとに1つ**。
+    // ランチャー EXE が読んだ内容は、注入先のゲームプロセス（＝この DLL）には
+    // 一切来ない。にもかかわらず DLL 側で Load を呼んでいなかったため、
+    // GetString("Settings","P1Device") は常に "" を返し、
+    // BuildPlayerInput() が joyId=-1 で無言の 0 を返し、
+    // その 0 が毎フレームゲームメモリに書き込まれていた。
+    // ＝**コントローラ設定が何であれ入力が一切効かない**状態だった。
+    {
+        const std::string iniPath = cccaster::core::paths::Resolve("cccaster_v10.ini");
+        cccaster::main_app::ConfigManager::Load(iniPath);
+        HookLog(("[InitThread] Config loaded: " + iniPath).c_str());
+    }
 
     // 高速化: 500ms → 100ms (エントリポイント同期済みのため、解凍完了済み)
     Sleep(100);

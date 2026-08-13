@@ -55,6 +55,13 @@ void DirectInputHook::Poll()            {}
 uint32_t DirectInputHook::GetPlayer1Input() { return g_p1; }
 uint32_t DirectInputHook::GetPlayer2Input() { return g_p2; }
 
+// harness は ini もデバイスも持たないので、スロットの読み替えは起きない。
+// 実 DLL 側のフォールバック（割当スロットが空ならもう一方を使う）は、
+// ここでは「注入された値をそのまま返す」で十分。
+uint32_t DirectInputHook::GetLocalPlayerInput(bool isHost, bool /*soloLocal*/) {
+    return isHost ? g_p1 : g_p2;
+}
+
 std::vector<JoyDeviceInfo> DirectInputHook::GetConnectedDevices() { return {}; }
 int  DirectInputHook::GetActiveDeviceDirection(int& outJoyId) { outJoyId = -1; return 0; }
 std::string DirectInputHook::GetAnyInputEdge(int) { return {}; }

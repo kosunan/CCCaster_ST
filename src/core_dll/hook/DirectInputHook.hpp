@@ -31,6 +31,14 @@ public:
     static uint32_t GetPlayer1Input();
     static uint32_t GetPlayer2Input();
 
+    /// この機体で操作している人の入力を取る。
+    /// @param isHost    ホスト機なら true（P1Device / P2Device のどちらを優先するか）
+    /// @param soloLocal ローカルプレイヤーが1人だけか（ネットプレイなら true）。
+    ///                  true のとき、優先スロットが未割当ならもう一方に読み替える。
+    /// 対戦中はこちらを使うこと。GetPlayerNInput() を直接呼ぶと、
+    /// 割り当て先スロットの取り違えで無反応になる（詳細は .cpp のコメント）。
+    static uint32_t GetLocalPlayerInput(bool isHost, bool soloLocal);
+
     // Mapping flow APIs
     static std::vector<JoyDeviceInfo> GetConnectedDevices();
     

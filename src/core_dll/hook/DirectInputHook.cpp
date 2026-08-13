@@ -1,5 +1,7 @@
 #include "core_dll/hook/DirectInputHook.hpp"
 #include "cli_launcher/ConfigManager.hpp"
+#include "core_dll/common/DataPaths.hpp"
+#include "core_dll/common/DebugLog.hpp"
 #include <windows.h>
 #include <dinput.h>
 #include <cstdint>
@@ -281,7 +283,9 @@ static std::string GetDeviceFileName(int joyId) {
     for (char& c : sanitizedName) {
         if (c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' || c == '\"' || c == '<' || c == '>' || c == '|') c = '_';
     }
-    return "cccaster\\" + sanitizedName + ".ini";
+    // 相対パス（"cccaster\\xxx.ini"）はゲームのカレントディレクトリ基準になり、
+    // 書き手と読み手が別の場所を指しうる。DLL 基準の絶対パスに解決する。
+    return cccaster::core::paths::Resolve(sanitizedName + ".ini");
 }
 
 static cccaster::main_app::Config s_p1Config;
@@ -394,6 +398,68 @@ uint32_t DirectInputHook::GetPlayer2Input() {
     std::string devName = ConfigManager::GetString("Settings", "P2Device", "");
     int joyId = GetJoyIdFromDeviceName(devName);
     return BuildPlayerInput(joyId, s_p2Config);
+}
+
+// ============================================================================
+// GetLocalPlayerInput — この機体で操作している人の入力を取る
+// ============================================================================
+//
+// 【なぜ P1/P2 を直接呼ばないか】
+//   `P1Device` / `P2Device` の意味が UI と読み手で食い違っていた。
+//     UI（Controller_Ui_*）  … 画面左が P1、右が P2 という**ローカルの座席**
+//     読み手（SceneRunner）  … isHost ? P1 : P2 ＝ **ホスト機/クライアント機**
+//   クライアント機の人は自分を「1P」と認識して左（P1）に割り当てるが、
+//   読み手は P2Device を見るため永久に無反応になる。実際に
+//   `_TEST_MBAACC` の ini は両機とも「読むほうのキーが空」になっていた。
+//
+// 【解決】
+//   ネットプレイでは**この機体のローカルプレイヤーは1人しかいない**。
+//   ならば「どちらのスロットに入っていても、それがローカルデバイス」で正しい。
+//   本来のスロットが空のときだけ、もう一方にフォールバックする。
+//   オフライン（Training 等）は2人がローカルなので、この読み替えはしない。
+//
+//   UI 側の意味づけを変える案もあるが、既存の ini を壊すうえ、
+//   「どちらに割り当てても動く」ほうが利用者にとって事故が起きない。
+//
+uint32_t DirectInputHook::GetLocalPlayerInput(bool isHost, bool soloLocal) {
+    if (g_testModeEnabled) return isHost ? g_testInputP1 : g_testInputP2;
+
+    const char* primaryKey = isHost ? "P1Device" : "P2Device";
+    const char* otherKey   = isHost ? "P2Device" : "P1Device";
+
+    std::string devName = ConfigManager::GetString("Settings", primaryKey, "");
+    const cccaster::main_app::Config* cfg = isHost ? &s_p1Config : &s_p2Config;
+
+    if (devName.empty() && soloLocal) {
+        const std::string alt = ConfigManager::GetString("Settings", otherKey, "");
+        if (!alt.empty()) {
+            static bool s_warned = false;
+            if (!s_warned) {
+                s_warned = true;
+                cccaster::domain::session::DebugLog(
+                    "[DirectInputHook] %s が空のため %s のデバイス '%s' を"
+                    "ローカル入力として使う（ネットプレイのローカルは1人）",
+                    primaryKey, otherKey, alt.c_str());
+            }
+            devName = alt;
+            cfg     = isHost ? &s_p2Config : &s_p1Config;
+        }
+    }
+
+    const int joyId = GetJoyIdFromDeviceName(devName);
+
+    // 解決に失敗した状態は「入力が一切効かない」と等価だが、これまで
+    // ログにも UI にも出ていなかった。同じ状態が続く間は1回だけ出す。
+    static int s_lastReportedJoyId = -12345;
+    if (joyId == -1 && s_lastReportedJoyId != joyId) {
+        cccaster::domain::session::DebugLog(
+            "[DirectInputHook] ローカルデバイスを解決できない（%s='%s'）。"
+            "入力は常にニュートラルになる。接続デバイス数=%d",
+            primaryKey, devName.c_str(), static_cast<int>(g_Controllers.size()));
+    }
+    s_lastReportedJoyId = joyId;
+
+    return BuildPlayerInput(joyId, *cfg);
 }
 
 std::vector<JoyDeviceInfo> DirectInputHook::GetConnectedDevices() {

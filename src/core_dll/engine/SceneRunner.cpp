@@ -188,9 +188,8 @@ void SceneRunner::Step() {
             // 人の操作では両者の入力を再現できず決定性を判定できないため。
             const uint32_t localInput = cccaster::testing::IsScriptedInputEnabled()
                 ? cccaster::testing::ScriptedInput(head + 1, ctx.isHost)
-                : (ctx.isHost
-                    ? cccaster::game_interface::DirectInputHook::GetPlayer1Input()
-                    : cccaster::game_interface::DirectInputHook::GetPlayer2Input());
+                : cccaster::game_interface::DirectInputHook::GetLocalPlayerInput(
+                      ctx.isHost, /*soloLocal=*/ ctx.appMode == 0);
 
             // フィルタは送信前に適用する。フィルタ済みの値が回線を通るので、
             // 相手のフェーズ認識とずれても両者が受け取る値は必ず一致する。

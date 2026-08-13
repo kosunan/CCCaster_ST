@@ -9,6 +9,7 @@ add_library(cccaster_hook SHARED
     # === common/ — 全層から使う土台 ===
     common/LogSink.cpp
     common/Platform.cpp
+    common/DataPaths.cpp
 
     # === mbaa_mem/ — MBAA メモリ操作・検出 ===
     mbaa_mem/dllmain.cpp
