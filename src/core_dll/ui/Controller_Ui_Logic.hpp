@@ -25,6 +25,15 @@ public:
     // --- 毎フレーム呼ばれるロジック更新 ---
     static void Update();
 
+    /// UI を開いた最初のフレームで呼ぶ（2回目以降は何もしない）。
+    /// 保存済みのデバイス割当を config から復元する。これを呼ばないと
+    /// 「開いて閉じただけで前回の割当が消える」状態に戻る。
+    static void BeginUiSession();
+
+    /// UI を閉じるときに呼ぶ。途中まで割り当てたバインドを保存してから
+    /// セッションを終了する。ResetBindingState() より**前**に呼ぶこと。
+    static void EndUiSession();
+
     // --- 状態リセット ---
     static void ResetBindingState();
 
@@ -49,10 +58,12 @@ private:
     static void ProcessDeviceSelectionInput();
     static void ProcessBindingInput(int joyId, int playerIndex, int& pos, std::string* binds);
     static void SaveBinds(int joyId, const std::string& prefix, std::string* binds);
+    static void RestoreDeviceAllocations();
 
     // --- 状態変数 ---
     static int s_p1JoyId;
     static int s_p2JoyId;
+    static bool s_uiSessionActive;   ///< UI が開いている間 true（復元を1回だけにする）
     static int s_p1Position;
     static int s_p2Position;
     static std::string s_p1Binds[NUM_GAME_INPUTS];

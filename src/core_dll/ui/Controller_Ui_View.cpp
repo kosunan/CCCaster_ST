@@ -67,6 +67,20 @@ static void DrawBindList(int pos, const std::string* binds,
     }
 
     if (doneSelected) ImGui::SetWindowFontScale(1.0f);
+
+    // F4 が「保存して閉じる」であることを明示する。
+    // 従来は途中で閉じると割当が黙って捨てられていたため、保存する仕様に
+    // 変えた以上、それが画面から読み取れないと今度は「消したいのに残る」で
+    // 混乱する。挙動を1行で示しておく。
+    ImVec4 hintCol = ImVec4(0.45f, 0.45f, 0.45f, 1.0f);
+    const char* hint = "[F4] keeps what you assigned";
+    if (!rightAlign) {
+        ImGui::TextColored(hintCol, "  %s", hint);
+    } else {
+        float hw = ImGui::CalcTextSize(hint).x;
+        ImGui::SetCursorPosX(ImGui::GetColumnWidth() - hw - 18.0f);
+        ImGui::TextColored(hintCol, "%s", hint);
+    }
 }
 
 // ============================================================================
@@ -229,6 +243,11 @@ static void DrawP2BindingWindow(float screenWidth) {
 // ============================================================================
 
 void ControllerUiView::Draw() {
+    // 開いた最初のフレームで保存済みのデバイス割当を復元する。
+    // これが無いと、画面を開いた時点で「未割当」に見え、閉じたときに
+    // その未割当が保存されて前回の設定が消える。
+    L::BeginUiSession();
+
     // ロジック更新（入力処理・状態変更）
     L::Update();
 
@@ -258,7 +277,7 @@ void ControllerUiView::Draw() {
         ImGui::Spacing();
 
         // 操作ガイド
-        const char* helperText = "[F4] Close Menu  |  [Enter/Button] Start Mapping";
+        const char* helperText = "[F4] Save and Close  |  [Enter/Button] Start Mapping";
         float helperWidth = ImGui::CalcTextSize(helperText).x;
         ImGui::SetCursorPosX((ImGui::GetWindowWidth() - helperWidth) * 0.5f);
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", helperText);
@@ -278,6 +297,10 @@ void ControllerUiView::Draw() {
 }
 
 void ControllerUiView::OnClose() {
+    // 順序が重要: EndUiSession() が途中のバインドを保存してから
+    // ResetBindingState() が binds[] を捨てる。逆にすると保存対象が消える
+    // （これが「F4 で閉じると割当が黙って捨てられる」バグの原因だった）。
+    L::EndUiSession();
     L::ResetBindingState();
     L::SaveDeviceAllocations();
 }
