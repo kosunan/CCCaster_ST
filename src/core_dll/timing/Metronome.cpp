@@ -9,7 +9,7 @@
 #include "core_dll/common/TimeScale.hpp"
 #include "core_dll/timing/WasapiClock.hpp"
 #include "core_dll/common/DebugLog.hpp"
-#include <windows.h>
+#include "core_dll/common/Platform.hpp"
 
 namespace cccaster {
 namespace core {
@@ -60,9 +60,10 @@ void Metronome::SleepUntil(int64_t targetUs) {
         int64_t remain = targetUs - timer::WasapiClock::GetTimeUs();
         if (remain <= 0) break;
         if (remain > 2000) {
-            Sleep(1);
+            // 実機では TimeHooks により 0ms 化される（AUDIT_2026-08-13 A-4）
+            cccaster::platform::SleepMs(1);
         } else {
-            YieldProcessor();
+            cccaster::platform::CpuRelax();
         }
     }
 }

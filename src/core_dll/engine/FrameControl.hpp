@@ -32,8 +32,9 @@
 #include "core_dll/timing/SpeedFlags.hpp"
 #include "core_dll/mbaa_mem/GameInput.hpp"
 #include "core_dll/mbaa_mem/IGameMemory.hpp"
+// windows.h は include しない。OS 依存処理は Platform 経由で呼ぶ。
+#include "core_dll/common/Platform.hpp"
 #include <cstdint>
-#include <windows.h>
 
 namespace cccaster::domain::session {
 
@@ -92,9 +93,14 @@ public:
 
     /**
      * @brief ゲームプロセス（MBAA全体）の終了を要求
+     *
+     * 実装は Platform.cpp 側。ここでヘッダに windows.h を持ち込むと、
+     * この定義1つのために FrameControl.hpp を include する全ファイルが
+     * Windows 専用になるため（harness は MatchScene / SceneRunner 経由で
+     * このヘッダを読む）。
      */
     static void ExitGame() {
-        TerminateProcess(GetCurrentProcess(), 1);
+        cccaster::platform::TerminateSelf();
     }
 
 };

@@ -6,6 +6,8 @@
 #
 # 実行: ctest --test-dir build --output-on-failure
 
+# ── test_overlay は ImGui（win32/dx9 バックエンド）に依存するため Windows 専用 ──
+if(WIN32)
 add_executable(test_overlay
     test_overlay.cpp
     stub_controller_mapper.cpp
@@ -26,8 +28,7 @@ target_include_directories(test_overlay PRIVATE
 # テスト用マクロ定義（friend アクセス有効化）
 target_compile_definitions(test_overlay PRIVATE NETPLAY_OVERLAY_TEST)
 
-if(WIN32)
-    target_link_options(test_overlay PRIVATE -static -static-libgcc -static-libstdc++)
+target_link_options(test_overlay PRIVATE -static -static-libgcc -static-libstdc++)
 endif()
 
 # ── 入力の符号化（依存ゼロ・ヘッダオンリー）──────────

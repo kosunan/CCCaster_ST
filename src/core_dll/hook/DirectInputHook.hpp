@@ -1,5 +1,11 @@
 #pragma once
-#include <windows.h>
+// 実装は Windows 専用（DirectInput）。ただし harness は本ヘッダを include した上で
+// 中身をスタブに差し替えるため、宣言だけは Linux でも読めるようにしておく。
+#ifdef _WIN32
+  #include <windows.h>
+#else
+  using HWND = void*;   // Initialize() のシグネチャを両OSで一致させるためだけの別名
+#endif
 #include <cstdint>
 #include <vector>
 #include <string>

@@ -15,7 +15,8 @@
  *   旧 MbaaAddresses.hpp から定数定義部分を抽出。
  */
 
-#include <windows.h>
+// windows.h は不要（Win32 の型を一切使っていない）。
+// harness を Linux でもビルドするため、OS 依存の include をヘッダから排除する。
 #include <cstdint>
 
 

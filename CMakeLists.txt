@@ -40,6 +40,7 @@ if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
     message(FATAL_ERROR
         "32bit ツールチェインが必要です（現在: ${CMAKE_SIZEOF_VOID_P}バイトポインタ）。\n"
         "  MSYS2:  PATH に C:\\msys64\\mingw32\\bin を先頭で通してから cmake を実行\n"
+        "  Linux:  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-mingw32.cmake\n"
         "64bit でも DLL は生成できますが、32bit の MBAA.exe には注入できません。")
 endif()
 
@@ -51,7 +52,6 @@ if(WIN32)
     add_compile_definitions(_WIN32_WINNT=0x0601 WINVER=0x0601)   # Windows 7
 endif()
 
-
 # Fetch ASIO (Used by App Layer)
 FetchContent_Declare(
     asio
@@ -59,6 +59,11 @@ FetchContent_Declare(
     GIT_TAG        asio-1-30-2
 )
 FetchContent_MakeAvailable(asio)
+
+# MinHook / ImGui は DLL 層だけが使い、どちらも Windows 専用
+# （MinHook は x86 命令長デコーダ、ImGui バックエンドは win32/dx9）。
+# 非 Windows では取得も定義もしない。
+if(WIN32)
 
 # Fetch MinHook (Used by DLL Layer)
 FetchContent_Declare(
@@ -95,17 +100,24 @@ add_library(imgui STATIC
     ${imgui_SOURCE_DIR}/backends/imgui_impl_dx9.cpp
 )
 target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
-if(WIN32)
-    target_link_options(imgui PRIVATE -static -static-libgcc -static-libstdc++)
-endif()
+target_link_options(imgui PRIVATE -static -static-libgcc -static-libstdc++)
+
+endif() # WIN32 — MinHook / ImGui
 
 # ==========================================
 # Submodules
 # ==========================================
 enable_testing()
 
-add_subdirectory(src/launcher)
-add_subdirectory(src/core_dll)
-add_subdirectory(src/cli_launcher)
+if(WIN32)
+    # 実機用の成果物。DLL 注入と D3D9/DirectInput/MinHook を含むため Windows 専用。
+    add_subdirectory(src/launcher)
+    add_subdirectory(src/core_dll)
+    add_subdirectory(src/cli_launcher)
+else()
+    message(STATUS "非 Windows 環境: harness と単体テストのみビルドする")
+endif()
+
+# 両OS共通。harness はゲーム無しで同期ロジックを通しで走らせる実行ファイル。
 add_subdirectory(src/harness)
 add_subdirectory(src/tests)

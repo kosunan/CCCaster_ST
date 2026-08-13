@@ -14,7 +14,7 @@
 #include "core_dll/sync/MatchInputBuffer.hpp"
 #include "core_dll/common/DebugLog.hpp"
 #include "core_dll/ui/State_Ui_Logic.hpp"
-#include <windows.h>
+#include "core_dll/common/Platform.hpp"
 
 namespace cccaster {
 namespace core {
@@ -149,9 +149,13 @@ void NetplaySession::SleepUntil(int64_t targetUs) {
         int64_t remain = targetUs - timer::WasapiClock::GetTimeUs();
         if (remain <= 0) break;
         if (remain > 2000) {
-            Sleep(1);
+            // 注意: 実機では TimeHooks の SleepBypass によりこの Sleep は 0ms に
+            // 化け、実質ビジースピンになる（AUDIT_2026-08-13 A-4）。挙動を変えず
+            // 窓口だけ Platform に寄せてあるので、CPU を返す修正は
+            // RealSleepMs() への差し替え1行で済む。
+            cccaster::platform::SleepMs(1);
         } else {
-            YieldProcessor();
+            cccaster::platform::CpuRelax();
         }
     }
 }

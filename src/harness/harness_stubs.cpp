@@ -25,7 +25,9 @@
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
 #include "core_dll/mbaa_mem/MbaaMemTrace.hpp"
 
+#ifdef _WIN32
 #include <windows.h>
+#endif
 #include <cstdio>
 #include <string>
 
@@ -139,6 +141,11 @@ void MbaaMemTrace::Sample(uint32_t) {}
 
 // ── TimeHooks ──────────────────────────────────────────────
 // ハーネスは時間を加速しない。実 QPC をそのまま返す。
+//
+// Linux では TimeHooks クラスそのものが存在しない（Windows の MinHook 前提のため
+// TimeHooks.hpp 全体が _WIN32 で囲まれている）。同期ロジック側は Platform 経由で
+// 時刻・待機を取るようになっているので、Linux ではこのスタブ自体が不要。
+#ifdef _WIN32
 namespace cccaster::core::hooks {
 
 bool     TimeHooks::s_initialized = false;
@@ -158,3 +165,4 @@ DWORD TimeHooks::RealTimeGetTime()       { return timeGetTime(); }
 void  TimeHooks::RealSleep(DWORD ms)     { Sleep(ms); }
 
 } // namespace cccaster::core::hooks
+#endif // _WIN32

@@ -32,6 +32,7 @@ add_executable(harness
     ${CORE}/timing/WasapiClock.cpp
     ${CORE}/mbaa_mem/PhaseMonitor.cpp
     ${CORE}/mbaa_mem/GameMemory.cpp
+    ${CORE}/common/Platform.cpp
 )
 
 target_include_directories(harness PRIVATE
@@ -39,9 +40,13 @@ target_include_directories(harness PRIVATE
     ${asio_SOURCE_DIR}/asio/include   # UdpSocket が asio を使う
 )
 
-# ws2_32/mswsock: UDP / ole32: WASAPI クロック（オーディオデバイスが無ければ QPC に落ちる）
-target_link_libraries(harness PRIVATE ws2_32 mswsock ole32 winmm)
-
+# harness は Windows / Linux の両方でビルドする。
+# 実機用 DLL と違い 32bit 制約もないので、開発機のネイティブ環境でそのまま動く。
 if(WIN32)
+    # ws2_32/mswsock: UDP / ole32: WASAPI クロック（オーディオデバイスが無ければ単調時計に落ちる）
+    target_link_libraries(harness PRIVATE ws2_32 mswsock ole32 winmm)
     target_link_options(harness PRIVATE -static -static-libgcc -static-libstdc++)
+else()
+    find_package(Threads REQUIRED)
+    target_link_libraries(harness PRIVATE Threads::Threads)
 endif()

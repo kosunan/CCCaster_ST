@@ -1,4 +1,8 @@
 #pragma once
+// このクラスは Windows 専用（MinHook で kernel32 のタイマー API をフックする）。
+// Linux ビルドでは中身ごと存在しない。実時間の取得・待機が欲しいだけの箇所は
+// `core_dll/common/Platform.hpp` を使うこと。
+#ifdef _WIN32
 
 #include <windows.h>
 #include <cstdint>
@@ -42,3 +46,5 @@ public:
 };
 
 } // namespace cccaster::core::hooks
+
+#endif // _WIN32

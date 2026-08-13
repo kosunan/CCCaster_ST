@@ -176,6 +176,24 @@ public:
         return success;
     }
 };
+#else
+/**
+ * @brief 非 Windows 版 IpcManager — 全メソッドが no-op。
+ *
+ * IPC の相手は CLI ランチャー（Windows 専用 EXE）であり、Linux でこれが動くことは
+ * 現時点で無い。harness は SceneRunner をそのままリンクするため、
+ * 呼び出し側に `#ifdef` を撒くのではなく、ここで受け止めて何もしない。
+ *
+ * 「共有メモリが無いので書けなかった」と「書いたが誰も読んでいない」は
+ * 呼び出し側にとって区別する必要がないため、戻り値は false で統一する。
+ * Linux 側で本当に IPC が必要になったら shm_open/mmap でここを実装する。
+ */
+class IpcManager {
+public:
+    static void* CreateAndWrite(const SharedState&)                 { return nullptr; }
+    static bool  UpdateOrReadState(void (*)(SharedState&))          { return false; }
+    static bool  OpenAndRead(SharedState&)                          { return false; }
+};
 #endif
 
 } // namespace cccaster::public_api

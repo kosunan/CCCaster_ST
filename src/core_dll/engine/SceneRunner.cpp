@@ -7,7 +7,7 @@
 //             1フレーム分の処理を実行する。
 // ============================================================================
 
-#include <windows.h>
+#include "core_dll/common/Platform.hpp"
 #include "core_dll/engine/SceneRunner.hpp"
 #include "core_dll/engine/MatchContext.hpp"
 #include "core_dll/common/DebugLog.hpp"
@@ -23,7 +23,6 @@
 #include "core_dll/engine/SceneInputFilter.hpp"
 #include "core_dll/common/ScriptedInput.hpp"
 #include "core_dll/mbaa_mem/MbaaMemTrace.hpp"
-#include "core_dll/hook/TimeHooks.hpp"
 #include "shared_contracts/IpcData.hpp"
 #include <atomic>
 
@@ -38,12 +37,9 @@ static std::atomic<uint64_t> s_lastPacketReceiveTimeMs{0};
 static SceneRunner::SendFunc s_send = nullptr;
 
 /// @brief 現在の時間をミリ秒で取得するヘルパー
+/// フック後の QPC は 1000 倍速なので、必ず Platform 経由の実時間を使う。
 static uint64_t GetCurrentTimeMs() {
-    static LARGE_INTEGER s_freq = {0};
-    if (s_freq.QuadPart == 0) QueryPerformanceFrequency(&s_freq);
-    LARGE_INTEGER nowQpc;
-    cccaster::core::hooks::TimeHooks::RealQueryPerformanceCounter(&nowQpc);
-    return (nowQpc.QuadPart * 1000) / s_freq.QuadPart;
+    return static_cast<uint64_t>(cccaster::platform::RealMonotonicUs() / 1000);
 }
 
 // ================================================================
@@ -329,9 +325,9 @@ void SceneRunner::Step() {
     cccaster::game_memory::MbaaMemTrace::Sample(
         cccaster::core::sync::MatchInputBuffer::GetInstance().GetWriteHead());
 
-    // (H) 中断チェック
-    if (GetAsyncKeyState(VK_F12) & 0x8000) {
-        DebugLog("[SceneRunner] Aborted by F12.");
+    // (H) 中断チェック（Windows: F12 / Linux: SIGINT・SIGTERM）
+    if (cccaster::platform::IsAbortRequested()) {
+        DebugLog("[SceneRunner] Aborted by user.");
         cccaster::public_api::IpcManager::UpdateOrReadState([](cccaster::public_api::SharedState& s) {
             s.lastErrorCode = static_cast<uint32_t>(cccaster::public_api::SessionErrorType::AbortedByUser);
         });

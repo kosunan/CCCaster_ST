@@ -14,16 +14,30 @@
 //   使用して実時間を取得する。
 // ============================================================================
 
+// 【Linux ビルドについて】
+//   WASAPI は Windows のオーディオ API なので、Linux では初期化そのものを行わず
+//   `_available = false` のまま単調時計にフォールバックする。フォールバック経路は
+//   もともと「オーディオデバイスが無いヘッドレス環境」のために用意されていたもので、
+//   Linux 用に新設したものではない。
+//   ドリフト特性は Windows(WASAPI) と Linux(CLOCK_MONOTONIC) で当然異なるため、
+//   **Linux の harness はクロック品質の検証には使えない**。同期ロジックの
+//   決定性検証にのみ使うこと。
+
 #include "core_dll/timing/WasapiClock.hpp"
-#include "core_dll/hook/TimeHooks.hpp"
+#include "core_dll/common/Platform.hpp"
+
+#ifdef _WIN32
 #include <windows.h>
 #include <initguid.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
+#endif
 
 namespace cccaster {
 namespace core {
 namespace timer {
+
+#ifdef _WIN32
 
 // ─── MinGW-w64 用 GUID 手動定義 ────────────────────────
 static constexpr CLSID CLSID_MMDeviceEnumerator_Local = {
@@ -42,12 +56,6 @@ static constexpr IID IID_IAudioClock_Local = {
     0xCD63314F, 0x3FBA, 0x4a1b,
     { 0x81, 0x21, 0xC9, 0x2A, 0x46, 0xAD, 0xCA, 0x28 }
 };
-
-// ─── シングルトン ──────────────────────────────────────
-WasapiClock& WasapiClock::GetInstance() {
-    static WasapiClock instance;
-    return instance;
-}
 
 // ─── コンストラクタ: WASAPI 初期化 ─────────────────────
 WasapiClock::WasapiClock() {
@@ -124,18 +132,30 @@ int64_t WasapiClock::GetWasapiTimeUs() const {
     return static_cast<int64_t>((pos * 1000000LL) / _frequency);
 }
 
-// ─── QPC フォールバック ───────────────────────────────
-int64_t WasapiClock::GetQpcTimeUs() {
-    static LARGE_INTEGER frequency = {0};
-    if (frequency.QuadPart == 0) {
-        QueryPerformanceFrequency(&frequency);
-    }
-    LARGE_INTEGER time;
-    cccaster::core::hooks::TimeHooks::RealQueryPerformanceCounter(&time);
-    return (time.QuadPart * 1000000LL) / frequency.QuadPart;
+#else  // !_WIN32 ────────────────────────────────────────────
+
+// Linux: WASAPI は存在しない。_available は false のまま、
+// GetTimeUs() は必ずフォールバック（単調時計）を通る。
+WasapiClock::WasapiClock()  {}
+WasapiClock::~WasapiClock() {}
+int64_t WasapiClock::GetWasapiTimeUs() const { return 0; }
+
+#endif // _WIN32
+
+// ─── シングルトン ──────────────────────────────────────
+WasapiClock& WasapiClock::GetInstance() {
+    static WasapiClock instance;
+    return instance;
 }
 
-// ─── 統合 API: WASAPI 優先、QPC フォールバック ────────
+// ─── フォールバック: 実時間の単調時計 ─────────────────
+// Windows ではフック前の QPC、Linux では CLOCK_MONOTONIC。
+// どちらも Platform 側に閉じ込めてある。
+int64_t WasapiClock::GetQpcTimeUs() {
+    return cccaster::platform::RealMonotonicUs();
+}
+
+// ─── 統合 API: WASAPI 優先、単調時計フォールバック ────
 int64_t WasapiClock::GetTimeUs() {
     auto& inst = GetInstance();
     if (inst._available) {

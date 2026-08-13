@@ -33,7 +33,7 @@
 #include "core_dll/sync/NetplaySession.hpp"
 #include "core_dll/sync/MatchInputBuffer.hpp"
 
-#include <windows.h>
+#include "core_dll/common/Platform.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -45,21 +45,15 @@ namespace {
 /// 外側のフレーム周期。時間圧縮が効く（既定は等倍の 16666μs = 60fps）
 int64_t FrameUs() { return cccaster::testing::ScaleTickUs(16666); }
 
-int64_t NowUs() {
-    static LARGE_INTEGER freq{};
-    if (freq.QuadPart == 0) QueryPerformanceFrequency(&freq);
-    LARGE_INTEGER c;
-    QueryPerformanceCounter(&c);
-    return (c.QuadPart * 1000000) / freq.QuadPart;
-}
+int64_t NowUs() { return cccaster::platform::RealMonotonicUs(); }
 
 /// 次フレームの期限まで待つ。Step() 内のメトロノーム待機で既に時間を
 /// 使い切っていれば何もしない。
 void PaceToFrame(int64_t& dueUs) {
     const int64_t now = NowUs();
     if (now < dueUs) {
-        const DWORD ms = static_cast<DWORD>((dueUs - now) / 1000);
-        if (ms > 0) Sleep(ms);
+        const uint32_t ms = static_cast<uint32_t>((dueUs - now) / 1000);
+        if (ms > 0) cccaster::platform::SleepMs(ms);
         while (NowUs() < dueUs) { /* 残りはスピン */ }
     }
     dueUs += FrameUs();
@@ -135,6 +129,9 @@ int main(int argc, char** argv) {
     Options opt;
     if (!ParseArgs(argc, argv, opt)) return 2;
 
+    // Ctrl+C / kill で SceneRunner の中断経路（(H)）を踏ませる。Windows では no-op。
+    cccaster::platform::InstallAbortHandler();
+
     std::printf("[harness] role=%s peer=%s:%u local=%u delay=%d rollback=%d loading=%uF rounds=%d\n",
                 opt.isHost ? "HOST" : "CLIENT", opt.peerIp.c_str(), opt.peerPort,
                 opt.localPort, opt.delay, opt.maxRollback,
@@ -165,7 +162,7 @@ int main(int argc, char** argv) {
     auto lastStage = game.CurrentStage();
     std::printf("[harness] stage=%s\n", game.StageName());
 
-    timeBeginPeriod(1);              // Sleep の分解能を 1ms に上げる
+    cccaster::platform::BeginHighResolutionTimers();  // Windows: Sleep の分解能を 1ms に
     int64_t dueUs = NowUs() + FrameUs();
 
     uint32_t frame = 0;
@@ -191,7 +188,7 @@ int main(int argc, char** argv) {
 
         PaceToFrame(dueUs);
     }
-    timeEndPeriod(1);
+    cccaster::platform::EndHighResolutionTimers();
 
     std::printf("[harness] finished at frame=%u stage=%s writes=%zu\n",
                 game.Frame(), game.StageName(), game.Written().size());

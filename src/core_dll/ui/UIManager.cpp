@@ -14,7 +14,7 @@
 #include "core_dll/mbaa_mem/IGameMemory.hpp"
 #include "core_dll/hook/DirectInputHook.hpp"
 #include <imgui.h>
-#include <Dbt.h>
+#include <dbt.h>   // mingw-w64 のヘッダ名は小文字。case-sensitive FS でのクロスビルド用
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
