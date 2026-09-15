@@ -332,7 +332,7 @@ void Draw(Session& session) {
     backdrop->AddText(logoFont, 48, ImVec2(29,17), IM_COL32(77,45,122,255), "CCCaster");
     backdrop->AddText(logoFont, 48, ImVec2(26,14), ImGui::GetColorU32(paper), "CCCaster");
     backdrop->AddText(ImVec2(28,62), IM_COL32(224,209,243,255), "MELTY BLOOD Actress Again Current Code");
-    backdrop->AddText(ImVec2(size.x * .35f,28), IM_COL32(202,180,218,255), "V10  /  MBAACC Ver.1.07 Rev.1.4.0");
+    backdrop->AddText(ImVec2(size.x * .35f,28), IM_COL32(202,180,218,255), "MBAACC Ver.1.07 Rev.1.4.0");
     ImGui::SetCursorPos(ImVec2(16, 106));
     ImGui::BeginChild("navigation", ImVec2(202, -28), false);
     if (ModeButton("##play", "01", Text("VERSUS", "対戦"), Text("Host / Join with code", "募集・コードで参加"), page == 0, reveal[0])) page = 0;
