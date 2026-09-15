@@ -86,7 +86,7 @@ def main():
     parser.add_argument('--root', type=Path, required=True,
                         help='MBAACC_1 と MBAACC_2 を含む専用テストディレクトリ')
     parser.add_argument('--port', type=int, default=18940)
-    parser.add_argument('--caster-dir', default='cccaster')
+    parser.add_argument('--caster-dir', default='cccaster_st')
     parser.add_argument('--ready-hold-seconds', type=float, default=2,
                         help='キャラセレ到達後の保持秒数（画面確認用）')
     parser.add_argument('--idle-cpu-seconds', type=int, default=0,

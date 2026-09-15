@@ -26,7 +26,7 @@ def main():
     if isinstance(running,str): running=[running]
     if any(p and Path(p).resolve()==game/'MBAA.exe' for p in running):
         parser.error('試験コピーのゲームが既に起動中。既存プロセスを保全して中止')
-    caster = game/'cccaster'
+    caster = game/'cccaster_st'
     out = ROOT/'test/logs'/time.strftime('replay_native_%Y%m%d_%H%M%S')
     out.mkdir()
     import vgamepad as vg

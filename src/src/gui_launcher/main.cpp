@@ -192,7 +192,7 @@ struct Session {
         auto dir = exePath.parent_path();
         if (!std::filesystem::exists(dir / ".." / "MBAA.exe") ||
             !std::filesystem::exists(dir / "libcccaster_steam_hook.dll")) {
-            status = {"Game files not found. Place this launcher and libcccaster_steam_hook.dll in the game's cccaster folder.", "ゲームファイルが見つかりません。ゲーム内の cccaster フォルダーにランチャーと libcccaster_steam_hook.dll を配置してください。"};
+            status = {"Game files not found. Place this launcher and libcccaster_steam_hook.dll in the game's cccaster_st folder.", "ゲームファイルが見つかりません。ゲーム内の cccaster_st フォルダーにランチャーと libcccaster_steam_hook.dll を配置してください。"};
             return;
         }
         auto eventName = L"Local\\CCCasterGuiCancel_" + std::to_wstring(GetCurrentProcessId());
@@ -399,8 +399,8 @@ void Draw(Session& session) {
             };
             if (ImGui::BeginTabItem(Text("GET STARTED###guideStart", "はじめに###guideStart"))) {
                 section(Text("01   Place the launcher", "01   ファイルを配置"),
-                    Text("Place the cccaster folder beside MBAA.exe. Keep CCCaster_Steam_GUI.exe, libcccaster_steam_hook.dll and cccaster_steam.ini together inside it.",
-                         "MBAA.exe と同じ場所に cccaster フォルダーを配置します。中に CCCaster_Steam_GUI.exe、libcccaster_steam_hook.dll、cccaster_steam.ini を揃えてください。"));
+                    Text("Place the cccaster_st folder beside MBAA.exe. Keep CCCaster_Steam_GUI.exe, libcccaster_steam_hook.dll and cccaster_steam.ini together inside it.",
+                         "MBAA.exe と同じ場所に cccaster_st フォルダーを配置します。中に CCCaster_Steam_GUI.exe、libcccaster_steam_hook.dll、cccaster_steam.ini を揃えてください。"));
                 section(Text("02   Try TRAINING first", "02   まずはトレーニングへ"),
                     Text("Choose TRAINING on the left and start the game. You can check your controls without an opponent or a connection code.",
                          "左の「トレーニング」から起動。対戦相手や接続コードなしで、操作を確認できます。"));

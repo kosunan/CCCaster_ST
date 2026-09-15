@@ -11,7 +11,7 @@ try {
     $taskProcesses=@(Get-CimInstance Win32_Process)
     foreach($taskSide in 1,2) {
         $taskGame=Join-Path $taskTest "MBAACC_$taskSide\MBAA.exe"
-        $taskDir=Join-Path $taskTest "MBAACC_$taskSide\cccaster"
+        $taskDir=Join-Path $taskTest "MBAACC_$taskSide\cccaster_st"
         $taskLauncher=Join-Path $taskDir 'CCCaster_Steam.exe'
         foreach($taskRequired in @($taskGame,$taskLauncher,(Join-Path $taskDir 'libcccaster_steam_hook.dll'))) {
             if(!(Test-Path -LiteralPath $taskRequired -PathType Leaf)){throw "必要なファイルがありません: $taskRequired"}
@@ -56,7 +56,7 @@ try {
     Write-Host 'F4で各窓の入力設定を行えます。対戦終了はゲームのウィンドウを閉じてください。'
     Write-Host 'このバッチ画面を閉じても、ゲームは継続します。時間制限はありません。'
     Write-Host "起動ログ: $taskLogs"
-    Write-Host 'ゲームログ: 各MBAACCフォルダー内のcccaster\cccaster_hook_log.txt'
+    Write-Host 'ゲームログ: 各MBAACCフォルダー内のcccaster_st\cccaster_hook_log.txt'
     exit 0
 } catch {
     Write-Host "起動できませんでした: $($_.Exception.Message)" -ForegroundColor Red

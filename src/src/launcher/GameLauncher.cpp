@@ -30,7 +30,7 @@ cccaster::game_build::Edition InspectGameFile(const std::string &path, GameFileL
     const auto status = std::filesystem::status(path, error);
     if (status.type() == std::filesystem::file_type::not_found) {
         std::cerr << "[GameBuild] MBAA.exe was not found at the path above.\n"
-                     "[GameBuild] Place cccaster directly inside the game folder, next to MBAA.exe.\n";
+                     "[GameBuild] Place cccaster_st directly inside the game folder, next to MBAA.exe.\n";
         return Edition::Unknown;
     }
     if (error || !std::filesystem::is_regular_file(status)) {

@@ -66,7 +66,7 @@ static bool ApplyMultiInstanceBypass() {
 void HookLog(const char *msg) {
     // DLL 自身のパスを基準にログファイルパスを構築する。
     // カレントディレクトリに依存せず、常に DLL と同じフォルダ
-    // （_TEST_MBAACC\cccaster\）に cccaster_hook_log.txt を出力する。
+    // （_TEST_MBAACC\cccaster_st\）に cccaster_hook_log.txt を出力する。
     // 解決は初回 1 回だけ（従来は毎行 GetModuleFileNameA を呼んでいた）。
     static const bool pathInitialized = [] {
         char dllPath[MAX_PATH] = {};

@@ -208,8 +208,8 @@ def main():
         parser.error('自動選択はnew、観測30秒以上が必要')
     game_dir = (ROOT / 'test/runtime/LegacyBenchmark' / args.variant / 'MBAACC_1').resolve()
     game = game_dir / 'MBAA.exe'
-    exe = game_dir / ('cccaster.v3.1.exe' if args.variant == 'old' else 'cccaster/CCCaster_Steam.exe')
-    dll = game_dir / 'cccaster' / ('hook.dll' if args.variant == 'old' else 'libcccaster_steam_hook.dll')
+    exe = game_dir / ('cccaster.v3.1.exe' if args.variant == 'old' else 'cccaster_st/CCCaster_Steam.exe')
+    dll = game_dir / ('cccaster' if args.variant == 'old' else 'cccaster_st') / ('hook.dll' if args.variant == 'old' else 'libcccaster_steam_hook.dll')
     if not all(p.is_file() for p in [game, exe, dll]):
         raise RuntimeError('独立コピーの成果物不足')
     existing = set()
@@ -227,7 +227,7 @@ def main():
                 close(handle)
         existing.add(pid)
     args.out.mkdir(parents=True, exist_ok=False)
-    runtime_dir = 'cccaster' if args.variant == 'old' else 'cccaster'
+    runtime_dir = 'cccaster' if args.variant == 'old' else 'cccaster_st'
     log_paths = [game_dir/f'{runtime_dir}/cccaster_hook_log.txt', game_dir/'cccaster.log',
                  game_dir/f'{runtime_dir}/dll.log', game_dir/f'{runtime_dir}/debug.log']
     for log in log_paths:

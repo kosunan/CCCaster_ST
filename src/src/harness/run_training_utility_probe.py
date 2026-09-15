@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[3]
 def main():
     import vgamepad as vg
     game_dir = ROOT / 'test/runtime/MBAACC_1'
-    caster = game_dir / 'cccaster'
+    caster = game_dir / 'cccaster_st'
     out = ROOT / 'test/logs' / time.strftime('training_utility_%Y%m%d_%H%M%S')
     out.mkdir(parents=True)
     existing = subprocess.check_output(['powershell', '-NoProfile', '-Command',

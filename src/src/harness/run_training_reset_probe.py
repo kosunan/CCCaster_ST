@@ -29,7 +29,7 @@ def main():
     source = ROOT / 'test/runtime/MBAACC_1'
     # 共有リンクは作らず、元の設定・バイナリ・ログには触れない。
     shutil.copytree(source, game, ignore=shutil.ignore_patterns('cccaster_hook_log.txt', 'broadcast'))
-    caster = game / 'cccaster'
+    caster = game / 'cccaster_st'
     for name in ('CCCaster_Steam.exe', 'libcccaster_steam_hook.dll'):
         shutil.copy2(ROOT / 'build/bin' / name, caster / name)
     if baseline:
