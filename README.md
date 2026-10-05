@@ -1,36 +1,30 @@
-# CCCaster_v10
+# CCCaster Steam 1.4.0
 
-CCCaster_v10 は、旧来の解析難易度が高く密結合だったツール構造（旧CCCaster）を見直し、「開発・拡張が容易な近代化された構造」へと再設計した次世代の格闘ゲーム用通信同期（ロールバック）ツールです。
+カニファン版 **CCCaster_verB v1.4（862f759）** のネットコードを **MBAACC Steam 2017-01-05 / 32bit** へ移植したプロジェクトです。
 
-本プロジェクトは **「対戦にかかわる処理はすべてゲーム内（インゲーム）で行う」** および **「妥協なきパフォーマンスチューニングの徹底」** を基本設計理念としています。
+共通の通信・入力・ロールバック・GUI・観戦・再戦・TrainingはvB 1.4を基準にし、ゲームアドレス、フック、保存領域、リプレイ構造はSteam版を解析して実装しています。実ロード先＋RVAで解決し、ASLRを維持します。カニファン版とのクロスプレイには対応しません。
 
-## 主な機能とモジュール構成
+## 起動
 
-1. **`Network`**: UDP通信、冗長化パケット（Redundancy）、セッション管理
-2. **`Sync (Rollback Engine)`**: GGPO由来のState保存・巻き戻し・再計算、高精度フレームタイマー
-3. **`GameInterface`**: API（DirectX, Input）フック、シーン監視、メモリアドレスの直接操作
-4. **`App / UI`**: アプリケーションライフサイクル、コマンドラインUI、およびDirectXオーバーレイ描画
+- GUI：`test/runtime/MBAACC_1/cccaster_st/CCCaster_Steam_GUI.exe`
+- 対戦2窓＋観戦1窓：[3窓起動.bat](test/runtime/3窓起動.bat)。同一PC内の直接接続、ラグなし・手操作が既定です。
+- 模擬ラグ：`3窓起動.bat -Lag`。遅延値は `-LagMinMs 90 -LagMaxMs 120` のように指定できます。
 
-## 開発に参加する方へ
+設定は各`cccaster_st`内の`cccaster_steam.ini`と機器別INIです。F4で機器を選びます。キャラ選択のCtrl+0〜8でDを設定し、対戦中は固定。Rは通常7Fを基準に自動管理し、一時スパイクの予測上限は20Fです。
 
-大規模な変更を加える前には、本プロジェクトの設計理念および実装ルールに必ず従ってください。  
-開発への参加方法、ブランチ・コミットのルールについては [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。  
-また、ソースコード中の専門用語に関しては [GLOSSARY.md](GLOSSARY.md) で定義されています。
+TrainingはFN1で保存・押下中停止、FN2で読込。DUMMY再生・録画の再開位置と現在の操作設定を扱う1.4の処理をSteamの録画構造へ接続しています。
 
-## プロジェクト構造
+## ビルドと配置
 
-* `src/`: ソースコード（`core_dll`, `cli_launcher`, `launcher` に分離）
-* `docs/`: 過去の要件定義・設計資料（現行仕様との乖離あり。[AGENTS.md](AGENTS.md) 参照）
-* `tests/`: ユニットテストおよびベンチマークコード
-* `changelogs/`: バージョンおよび月別の変更履歴
+`build.bat`が32bit ReleaseビルドとC++テストを実行し、`deploy.bat`が3コピーへCLI・GUI・DLL・ライセンス・追加ステージ画像を配置します。ゲームEXEとINIは上書きしません。
 
-## ビルド方法
-
-ビルドは CMake と C++20 を使用して行います。
-詳細なビルド手順は `.agents/workflows/build.md`、または `docs/` 配下のアーキテクチャ資料を参照してください。
-
-```bash
-# 依存ライブラリの自動取得とビルド
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j12
+```text
+src/       CMake入口・assets・src/実装/tests/harness・開発用設定
+build/     32bit成果物・依存ソース・生成物
+test/      source/参照資料・runtime/独立ゲーム・logs/記録・scripts/解析
+docs/      現行仕様・解析根拠・changelogs
+release/   配布用置場
+archive/   移植前の未コミット変更を含む保全
 ```
+
+確認済みの条件と未確認範囲は[現状](docs/CURRENT_STATE.md)、[未検証範囲](docs/OPEN_ISSUES.md)、[1.4移植記録](docs/design/2026-10-05_vb14_steam_migration.md)を参照してください。

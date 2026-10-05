@@ -1,0 +1,22 @@
+# Steam保存表の復元先を事前検証する
+
+2026-09-11。担当8。変更対象は `PointerSnapshot.hpp` と専用単体テスト。
+
+従来のLoadはrootから順番に書き戻し、その場で親ポインターを読み、子へ書き込んでいた。後方の子が無効な場合、先行rootだけが既に復元され、アクセス違反も起こり得た。
+
+新Loadは保存blobに含まれる親の32bitポインターから全階層の書込み先を解決する。現在の親ポインターを読み直さない。親または子がnullならその子孫もskipする。32bit子ポインターへのoffset加算と保存範囲末端のoverflowは常時拒否する。64bitハーネスのrootアドレスはuintptr_tのまま保持する。
+
+`Configure(nodes, true)`でメモリー検証を有効にする。WindowsではVirtualQueryを用い、全範囲がMEM_COMMITかつreadable、復元ではwritableであることを確認する。PAGE_GUARDとPAGE_NOACCESSも拒否する。複数のメモリー領域に跨る保存範囲は最後まで確認する。検証済み領域は同一の事前解決中に再利用し、次のSave/Load/ValidateLoadへ持ち越さない。
+
+全復元先の検証が成功してからゲーム状態への書込みを開始する。Saveも全読取り範囲を先に検証してから出力する。`ValidateLoad(std::span<const char>)`はゲーム状態を書き換えず検証だけを行うため、呼出側が別のリプレイカーソルなどを先に復元する場合の事前確認に利用できる。Load自身も再検証する。
+
+既定Configureは従来ハーネスの挙動を維持するためメモリー検証無効。Steamの呼出側でtrueを指定する。Windows以外で検証を有効にする場合は第3引数へRangeValidatorを指定する。OS検証のない環境でtrueだけを指定した場合は安全側に拒否する。
+
+検証結果:
+
+- 独立32bitテスト44項目成功。`build_logs/rollback_08/result.txt`。
+- 独立64bitテスト35項目成功。`build_logs/rollback_08/result64.txt`。64bit rootの保存復元を含む。
+- 既存test_rollbackを32bitで独立ビルド・実行して成功。`build_logs/rollback_08/rollback_result.txt`。
+- 後方root/子の拒否時に先行rootが不変、現在の親が不正でも保存時の親から復元できること、null階層、32bit overflow、領域境界後のread-only/guard、解放後のcache持越し拒否を確認した。
+
+実ゲームの統合検証は親担当が行う。この変更だけで資源寿命を証明した扱いにはしない。VirtualQueryは同一アドレスに別の資源が再配置された事実を判別できず、検証後の並行解放も防げない。ゲームスレッド上での実行と資源世代境界の所有は引き続き呼出側の責務である。
