@@ -8,6 +8,29 @@ int main() {
     auto record = identity.Sign({{"v",1},{"kind","matching"},{"id",IdentityId(identity)},
         {"code","ABC123"},{"name","Player"},{"comment","Test"},{"spectators",true},
         {"revision",uint64_t(1)},{"action","register"}});
+    CC_CASE("公開一覧は平文を含めず毎回異なる認証付き暗号文を投稿する");
+    const auto& topic = DirectoryTopic();
+    CC_CHECK(topic.size()==32 && topic.find_first_not_of("0123456789abcdef")==std::string::npos);
+    const auto sealed = SealDirectory(topic, record);
+    CC_CHECK(sealed != SealDirectory(topic, record));
+    CC_CHECK(!Json::parse(sealed, nullptr, false).is_object());
+    CC_CHECK(sealed.find("Player")==std::string::npos && sealed.find("ABC123")==std::string::npos);
+    Json opened;
+    CC_CHECK(OpenDirectory(topic, sealed, opened)); CC_CHECK(opened == record);
+    CC_CASE("平文・送信先差替え・nonce暗号文タグの改変を公開履歴として受理しない");
+    CC_CHECK(!OpenDirectory(topic, record.dump(), opened)); CC_CHECK(opened.is_null());
+    CC_CHECK(!OpenDirectory(topic + "0", sealed, opened));
+    const auto bytes = cccaster::p2p::Unbase64(sealed);
+    for (const size_t offset : {size_t(0), size_t(12), bytes.size()-1}) {
+        auto changed = bytes; changed[offset] ^= 1;
+        CC_CHECK(!OpenDirectory(topic, cccaster::p2p::Base64(changed), opened));
+    }
+    CC_CHECK(!OpenDirectory(topic, std::string(4097, 'A'), opened));
+    CC_CASE("共通鍵で暗号化できても他人の登録署名を改変できない");
+    auto altered = record; altered["name"] = "FORGED";
+    CC_CHECK(OpenDirectory(topic, SealDirectory(topic, altered), opened));
+    Directory untrusted;
+    CC_CHECK(!untrusted.Apply(opened)); CC_CHECK(untrusted.People().empty());
     Directory directory;
     CC_CASE("公開登録と取消は同じ署名鍵に束縛する");
     CC_CHECK(Registration(record)); CC_CHECK(directory.Apply(record));

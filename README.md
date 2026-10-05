@@ -1,30 +1,37 @@
-# CCCaster Steam 1.4.0
+# CCCaster Steam 1.4.1
 
-カニファン版 **CCCaster_verB v1.4（862f759）** のネットコードを **MBAACC Steam 2017-01-05 / 32bit** へ移植したプロジェクトです。
+カニファン版 **CCCaster_verB v1.4.1（712c0f6）** のネットコードを **MBAACC Steam 2017-01-05 / 32bit** へ移植したプロジェクトです。
 
-共通の通信・入力・ロールバック・GUI・観戦・再戦・TrainingはvB 1.4を基準にし、ゲームアドレス、フック、保存領域、リプレイ構造はSteam版を解析して実装しています。実ロード先＋RVAで解決し、ASLRを維持します。カニファン版とのクロスプレイには対応しません。
+共通の通信・入力・ロールバック・GUI・観戦・再戦・TrainingはvB 1.4.1を基準にし、ゲームアドレス、フック、保存領域、リプレイ構造はSteam版を解析して実装しています。実ロード先＋RVAで解決し、ASLRを維持します。カニファン版とのクロスプレイには対応しません。
 
 ## 起動
 
-- GUI：`test/runtime/MBAACC_1/cccaster_st/CCCaster_Steam_GUI.exe`
-- 対戦2窓＋観戦1窓：[3窓起動.bat](test/runtime/3窓起動.bat)。同一PC内の直接接続、ラグなし・手操作が既定です。
-- 模擬ラグ：`3窓起動.bat -Lag`。遅延値は `-LagMinMs 90 -LagMaxMs 120` のように指定できます。
+- ゲームフォルダー内の`cccaster_st/CCCaster_Steam_GUI.exe`から起動します。
+- ゲーム本体は含まれません。対応するSteam版を別途用意してください。
 
 設定は各`cccaster_st`内の`cccaster_steam.ini`と機器別INIです。F4で機器を選びます。キャラ選択のCtrl+0〜8でDを設定し、対戦中は固定。Rは通常7Fを基準に自動管理し、一時スパイクの予測上限は20Fです。
 
-TrainingはFN1で保存・押下中停止、FN2で読込。DUMMY再生・録画の再開位置と現在の操作設定を扱う1.4の処理をSteamの録画構造へ接続しています。
+TrainingはFN1で保存・押下中停止、FN2で読込。通常Trainingの左／右＋FN2で、指定側の壁際へ相手、その内側へ自分を配置し、保存状態を保持します。DUMMY再生・録画中は従来の読込・録り直しを優先します。
+
+公開マッチングはSteam専用の暗号化一覧を使用します。終了時に残った募集の取消を回復し、新着順・経過時間・全角10文字までの名前を表示します。公開一覧の形式が変わるため、対戦者は同じ1.4.1を使用してください。
 
 ## ビルドと配置
 
-`build.bat`が32bit ReleaseビルドとC++テストを実行し、`deploy.bat`が3コピーへCLI・GUI・DLL・ライセンス・追加ステージ画像を配置します。ゲームEXEとINIは上書きしません。
+`C:/msys64/mingw32`の32bitツールチェーンとCMakeを使用します。`build.bat`でReleaseビルドとC++テストを実行し、成果物を`build/bin/`へ出力します。CLI・GUI・DLLは同じビルドのものを組み合わせてください。
+
+Git管理対象はvB 1.4.1と同じルート構成です。
 
 ```text
-src/       CMake入口・assets・src/実装/tests/harness・開発用設定
-build/     32bit成果物・依存ソース・生成物
-test/      source/参照資料・runtime/独立ゲーム・logs/記録・scripts/解析
-docs/      現行仕様・解析根拠・changelogs
-release/   配布用置場
-archive/   移植前の未コミット変更を含む保全
+README.md  概要・ビルド・確認状況
+VERSION    製品版番号
+build.bat  32bit Releaseビルド・C++テスト
+src/       CMake入口・assets・実装・tests・harness・開発用設定
 ```
 
-確認済みの条件と未確認範囲は[現状](docs/CURRENT_STATE.md)、[未検証範囲](docs/OPEN_ISSUES.md)、[1.4移植記録](docs/design/2026-10-05_vb14_steam_migration.md)を参照してください。
+開発環境の`docs/`・`test/`・`deploy.bat`・`deploy.ps1`などはローカル専用です。既存の対戦2窓＋観戦1窓バッチは`test/runtime/3窓起動.bat`に保持しています。これらはGitHubからの取得物に含まれません。
+
+## 確認状況
+
+1.4.1移植時に32bit Release、C++56件、Python130件、GUI70項目を確認しました。同一PC・独立3コピー・片道15〜25ms／損失5%・ローカル通知サーバーの条件で、対戦1,562F／観戦1,564Fの確定入力と代表状態に差分・欠落はありませんでした。通常Trainingの左右の壁際配置、保存・停止・読込も確認済みです。
+
+DUMMY／録画の全操作、P2からの壁際指定、全キャラ・全技、保存領域全体、別PC・実回線、長時間運用は未網羅です。今回のコミット時には利用者の指定により追加テストを実行していません。

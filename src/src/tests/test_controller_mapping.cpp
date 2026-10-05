@@ -23,6 +23,10 @@ static cccaster::game_interface::JoyDeviceInfo Device(int id, const char *name, 
 }
 struct Memory : cccaster::game_interface::IGameMemory {
     int value = 0, saves = 0, loads = 0, recordingRestarts = 0;
+    int corners = 0, cornerDirection = 0, cornerPlayer = -1;
+    void PlaceTrainingCorner(int direction, int player) override {
+        ++corners; cornerDirection = direction; cornerPlayer = player;
+    }
     bool saveOK = true, loadOK = true, restartOK = true; uint8_t intro = 0;
     int16_t enemyStatus = 0;
     bool IsTrainingDummy() const override { return cccaster::IsDummyEnemyStatus(enemyStatus); }
@@ -343,5 +347,43 @@ int main() {
 #ifdef _WIN32
     TestUi();
 #endif
+    CC_CASE("horizontal FN2 places the requesting player inside the corner and preserves saved state");
+    for (bool save : {false, true}) for (int player : {0, 1}) for (int direction : {4, 6}) {
+        state.Reset(); mem.enemyStatus=0; sample={}; sample.valid=true;
+        sample.trueFrame=sample.simulationFrame=100;
+        auto cornerStep = [&](int buttons, int dir=0, bool configuring=false) {
+            return state.Step(1,true,configuring,buttons,sample,mem,++time,dir,player);
+        };
+        cornerStep(0);
+        if (save) { mem.value=42; cornerStep(1); cornerStep(0); }
+        const int beforeCorners=mem.corners, beforeLoads=mem.loads;
+        cornerStep(2,direction); CC_CHECK(state.AllowResetInput());
+        CC_CHECK(state.CornerResetActive());
+        cornerStep(2, direction == 4 ? 6 : 4); CC_CHECK(!state.AllowResetInput());
+        sample.paused=true; cornerStep(2); sample.paused=false;
+        sample.valid=false; mem.intro=1; cornerStep(2);
+        sample.valid=true; mem.intro=0;
+        CC_CHECK(cornerStep(2)==TrainingStateEvent::CornerReset);
+        CC_CHECK_EQ(mem.corners,beforeCorners+1); CC_CHECK_EQ(mem.loads,beforeLoads);
+        CC_CHECK_EQ(mem.cornerPlayer,player); CC_CHECK_EQ(mem.cornerDirection,direction==4?-1:1);
+        CC_CHECK_EQ(state.HasState(),save);
+        for (int i=0;i<12;++i) { cornerStep(2); CC_CHECK(!state.AllowResetInput()); }
+        CC_CHECK_EQ(mem.corners,beforeCorners+1);
+        CC_CHECK(state.CornerResetActive());
+        cornerStep(0); cornerStep(2); sample.simulationFrame=0;
+        CC_CHECK(!state.CornerResetActive());
+        CC_CHECK(cornerStep(0)==(save?TrainingStateEvent::Loaded:TrainingStateEvent::None));
+        CC_CHECK_EQ(mem.loads,beforeLoads+(save?1:0));
+        if (save) CC_CHECK_EQ(mem.value,42);
+        // 設定を開いたら配置予約を取り消す。時計の巻戻しだけでは再発火しない。
+        sample.simulationFrame=100; cornerStep(0); cornerStep(2,direction);
+        cornerStep(2,0,true); sample.simulationFrame=0; cornerStep(0);
+        CC_CHECK_EQ(mem.corners,beforeCorners+1);
+        // DUMMY/録画では方向を持っていても既存のロード/録り直しを使用。
+        for (int16_t status : {int16_t(5),int16_t(-1)}) {
+            mem.enemyStatus=status; cornerStep(0); cornerStep(2,direction);
+            CC_CHECK_EQ(mem.corners,beforeCorners+1); CC_CHECK(!state.AllowResetInput());
+        }
+    }
     return cccaster::test::Summarize("controller mapping and training state");
 }
