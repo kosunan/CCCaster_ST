@@ -38,6 +38,14 @@ static void Coverage() {
     roots[3066] = {-1, 0x55df24, 0, 4};
     roots[3072] = {-1, 0x563868, 0, 224}; // Steam演出RNG、479BB0のindex=1と55語
     roots[3073] = {-1, 0x54cfe4, 0, 4}; // RoundCall初期化分岐の入力
+    roots[3074] = {-1, 0x55d1cc, 0, 4}; // vB 1.5: ネイティブ更新番号
+    roots[3075] = {-1, 0x76e008, 0, 1500}; // vB 1.5: 未処理SFX
+    roots[3076] = {-1, 0x564afc, 0, 4};
+    roots[3077] = {-1, 0x564b04, 0, 8};
+    roots[3078] = {-1, 0x564b20, 0, 4};
+    roots[3079] = {-1, 0x558604, 0, 4};
+    roots[3080] = {-1, 0x562a50, 0, 4};
+    roots[3081] = {-1, 0x5595bc, 0, 4};
     std::map<unsigned, std::vector<unsigned char>> coverage;
     for (const auto &[index, root] : roots) coverage[index].resize(root.size);
     const auto fragments = Fragments();
@@ -69,8 +77,8 @@ static void Coverage() {
             const auto &a = fragments[i], &b = fragments[j];
             CC_CHECK(uint64_t(a.steamRva) + a.size <= b.steamRva || uint64_t(b.steamRva) + b.size <= a.steamRva);
         }
-    CC_CHECK_EQ(bytes, 1229542);
-    std::printf("%u fragments / 74 roots / %u root bytes\n", unsigned(fragments.size()), unsigned(bytes));
+    CC_CHECK_EQ(bytes, 1231074);
+    std::printf("%u fragments / 82 roots / %u root bytes\n", unsigned(fragments.size()), unsigned(bytes));
 }
 
 #if defined(_WIN32) && defined(__i386__)
@@ -139,7 +147,7 @@ static void Roundtrip() {
         }
         PointerSnapshot snapshot;
         CC_CHECK(snapshot.Configure(nodes, true));
-        CC_CHECK_EQ(snapshot.Size(), 1241542);
+        CC_CHECK_EQ(snapshot.Size(), 1243074);
         std::vector<char> saved(snapshot.Size()), restored(snapshot.Size());
         CC_CHECK(!snapshot.Save(std::span<char>(saved).first(saved.size() - 1)));
         CC_CHECK(snapshot.Save(saved));

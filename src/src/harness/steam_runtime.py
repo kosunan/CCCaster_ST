@@ -40,10 +40,20 @@ def module_base(pid):
 @lru_cache(maxsize=None)
 def preferred(legacy):
     # BGM: 521730(thread join), 5216A0(playing), 521771(marker)。
-    special = {0x76e844: 0x7d2740, 0x76e838: 0x7d2744,
-               0x76e004: 0x7d47a4, 0x472c6d: 0x4cb533}
+    special = {0x77bfa4: 0x7e9c08, 0x76e844: 0x7d2740, 0x76e838: 0x7d2744,
+               0x76e004: 0x7d47a4, 0x472c6d: 0x4cb533,
+               0x74d7fc: 0x7b4328, 0x55df0f: 0x5c9c97,
+               0x55df18: 0x5c5144, 0x77c1e8: 0x7e9e80,
+               0x74d840: 0x7b4378, 0x74d84c: 0x7b4384,
+               0x74d86c: 0x7b43a4, 0x74d878: 0x7b43b0}
     if legacy in special:
         return special[legacy]
+    # Steam 49FFE0..4A0031: 4個のキャラ資産ヘッダー、各12byte。
+    if 0x557d30 <= legacy < 0x557d30 + 48:
+        return 0x5bef70 + legacy - 0x557d30
+    # 39キャラ(隠しIDを含む)の顔画像index。EXE内の表を個別照合。
+    if 0x5519f8 <= legacy < 0x5519f8 + 101 * 4:
+        return 0x5897e8 + legacy - 0x5519f8
     base = ROOT / 'src/src/core_dll'
     text = (base / 'mbaa_mem/SteamAddressMap.hpp').read_text(encoding='utf-8')
     for source, target in re.findall(r'case (0x[0-9a-f]+): return (0x[0-9a-f]+);', text, re.I):

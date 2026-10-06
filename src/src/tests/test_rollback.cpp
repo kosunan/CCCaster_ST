@@ -119,7 +119,91 @@ struct SnapshotMemory : cccaster::game_interface::IGameMemory {
         return true;
     }
 };
+static int snapshotChains() {
+    using namespace cccaster::sync;
+    // ゲームのポインターは32bit。64bitホストでは実アドレスを切り詰めない。
+    if (sizeof(uintptr_t) != 4) return 0;
+    std::array<char, 65> memory{}, replacement{};
+    const auto address = [&](size_t offset) { return reinterpret_cast<uintptr_t>(memory.data() + offset); };
+    const auto write = [&](size_t offset, uint32_t value) { std::memcpy(memory.data() + offset, &value, 4); };
+    const auto read = [&](size_t offset) { uint32_t value; std::memcpy(&value, memory.data() + offset, 4); return value; };
+    // 非整列、子から孫へ、途中ノードを後から参照する枝、非ゼロoffsetの通常経路。
+    const SnapshotNode nodes[] = {
+        {-1, address(1), 0, 4}, {0, 0, 0, 4}, {1, 0, 0, 4},
+        {0, 0, 8, 4}, {1, 0, 8, 4}, {-1, address(49), 0, 8},
+        {5, 4, 4, 4}, {6, 0, 0, 4}, {7, 0, 0, 4},
+    };
+    PointerSnapshot snapshot;
+    CHECK(snapshot.Configure(nodes));
+    CHECK(snapshot.Size() == 40);
+    std::vector<char> bytes(snapshot.Size());
+    for (unsigned mask = 0; mask < 32; ++mask) {
+        memory.fill(char(0x5a));
+        write(1, mask & 1 ? uint32_t(address(9)) : 0);
+        write(9, mask & 2 ? uint32_t(address(25)) : 0);
+        write(25, 0x12345678);
+        write(17, 0x23456789);
+        write(33, 0x3456789a);
+        write(49, 0x456789ab);
+        write(53, mask & 4 ? uint32_t(address(37)) : 0); // offset4でaddress(41)へ
+        write(41, mask & 8 ? uint32_t(address(45)) : 0);
+        write(45, mask & 16 ? uint32_t(address(57)) : 0);
+        write(57, 0x56789abc);
+        const auto before = memory;
+        CHECK(snapshot.Save(bytes));
+        const uint32_t expected[] = {
+            read(1), mask & 1 ? read(9) : 0, (mask & 3) == 3 ? read(25) : 0,
+            mask & 1 ? read(17) : 0, (mask & 3) == 3 ? read(33) : 0,
+            read(49), read(53), mask & 4 ? read(41) : 0,
+            (mask & 12) == 12 ? read(45) : 0,
+            (mask & 28) == 28 ? read(57) : 0,
+        };
+        CHECK(std::memcmp(bytes.data(), expected, sizeof(expected)) == 0);
+        // 現在のポインターを別領域へ変えても保存時の親を先に復元する。
+        memory.fill(char(0x6b));
+        replacement.fill(char(0x7c));
+        write(1, uint32_t(reinterpret_cast<uintptr_t>(replacement.data() + 1)));
+        write(53, uint32_t(reinterpret_cast<uintptr_t>(replacement.data() + 9)));
+        const auto untouched = replacement;
+        auto restored = memory;
+        const auto expectRestore = [&](size_t offset, size_t size = 4) {
+            std::memcpy(restored.data() + offset, before.data() + offset, size);
+        };
+        expectRestore(1);
+        if (mask & 1) { expectRestore(9); expectRestore(17); }
+        if ((mask & 3) == 3) { expectRestore(25); expectRestore(33); }
+        expectRestore(49, 8);
+        if (mask & 4) expectRestore(41);
+        if ((mask & 12) == 12) expectRestore(45);
+        if ((mask & 28) == 28) expectRestore(57);
+        CHECK(snapshot.Load(bytes));
+        CHECK(memory == restored && replacement == untouched);
+        CHECK(!snapshot.Save(std::span<char>(bytes).first(bytes.size() - 1)));
+        CHECK(!snapshot.Load(std::span<char>(bytes).first(bytes.size() - 1)));
+    }
+    // 同じ実アドレスへ循環する鎖も、表の3ノード分だけ処理する。
+    write(1, uint32_t(address(1)));
+    CHECK(snapshot.Configure(std::span(nodes).first(3)));
+    bytes.resize(snapshot.Size());
+    CHECK(snapshot.Save(bytes));
+    write(1, 0);
+    CHECK(snapshot.Load(bytes));
+    CHECK(read(1) == address(1));
+    // null親の子に非ゼロの保存値があっても、その領域には書き込まない。
+    std::memset(bytes.data(), 0xff, bytes.size());
+    std::memset(bytes.data(), 0, 4);
+    CHECK(snapshot.Load(bytes));
+    CHECK(read(1) == 0);
+    const SnapshotNode invalid[] = {{0, 0, 0, 4}};
+    CHECK(!snapshot.Configure(invalid));
+    CHECK(!snapshot.Save(bytes) && !snapshot.Load(bytes));
+    CHECK(snapshot.Configure(std::span(nodes).first(1)));
+    bytes.resize(snapshot.Size());
+    CHECK(snapshot.Save(bytes) && snapshot.Load(bytes));
+    return 0;
+}
 int main() {
+    CHECK(snapshotChains() == 0);
     CHECK(delayedSimulation(0) == 0);
     CHECK(delayedSimulation(4) == 0);
     CHECK(delayedSimulation(8) == 0);

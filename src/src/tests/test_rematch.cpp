@@ -48,6 +48,24 @@ int main() {
         CC_CHECK_EQ(hits[stage], 0u);
     for (uint32_t stage = 1; stage < 60; ++stage)
         if (available[stage] && cccaster::game_memory::stages::RandomAllowed(stage)) CC_CHECK_EQ(hits[stage], 1u);
+    CC_CASE("ランダム再戦は直前の1件を除き残る46候補を等確率で選ぶ");
+    for (uint32_t previous = 1; previous < 60; ++previous) {
+        if (!hits[previous]) continue;
+        const cccaster::game_memory::stages::RandomPool next(available, previous);
+        CC_CHECK_EQ(next.count, 46u);
+        std::array<uint32_t, 60> nextHits{};
+        for (uint32_t r = next.count; r < next.count * 2; ++r) {
+            uint32_t stage = 0;
+            CC_CHECK(next.Pick(r, stage));
+            CC_CHECK(stage != previous);
+            ++nextHits[stage];
+        }
+        for (uint32_t stage = 0; stage < 60; ++stage)
+            CC_CHECK_EQ(nextHits[stage], stage == previous ? 0u : hits[stage]);
+    }
+    // 元から候補にない番号を除いても、他の候補は減らさない。
+    for (auto previous : {0u, 11u, 59u, UINT32_MAX})
+        CC_CHECK_EQ(cccaster::game_memory::stages::RandomPool(available, previous).count, 47u);
     uint32_t selected = 123;
     CC_CHECK(!pool.Pick(0, selected)); // 剰余の偏りを生む末端は再抽選。
     CC_CHECK_EQ(selected, 123u);
@@ -55,6 +73,9 @@ int main() {
     CC_CHECK(!cccaster::game_memory::stages::RandomPool(available).Pick(UINT32_MAX, selected));
     available[55] = 1;
     CC_CHECK(cccaster::game_memory::stages::RandomPool(available).Pick(0, selected));
+    CC_CHECK_EQ(selected, 55u);
+    // 代替候補がない異常環境でも同じ番号へフォールバックせず、失敗を返す。
+    CC_CHECK(!cccaster::game_memory::stages::RandomPool(available, 55).Pick(0, selected));
     CC_CHECK_EQ(selected, 55u);
 
     CC_CASE("RANDOMのONCEだけ再抽選し、固定指定とキャラセレは従来通り");

@@ -100,6 +100,27 @@ int main() {
     require(!deferred.ObserveCaptured() && deferred.last == 16667);
     deferred.Capture(11000000, 131072, false); // 採取したフレームの世代切替も従来どおり。
     require(!deferred.ObserveCaptured() && deferred.last == 0);
+    // 高遅延でゲームが33.5ms/Fへ減速しても、同じ画像の6ms間隔の再提示とは分離する。
+    // 既存のHUD誤表示（約6000us）を作る提示列と通常更新列を同時に流す。
+    auto &presentation = FrameTiming::Get();
+    auto &simulation = FrameTiming::Simulation();
+    presentation.Reset(); simulation.Reset();
+    for (uint32_t frame = 1; frame <= 5; ++frame) {
+        const int64_t released = 20000000 + frame * 33500;
+        simulation.Capture(released, 131072 + frame, false);
+        simulation.ObserveCaptured();
+        for (int repeat = 0; repeat < 5; ++repeat)
+            presentation.Observe(released + repeat * 6000, 131072 + frame, false);
+        if (frame > 1) require(simulation.last == 33500 && presentation.last == 6000);
+    }
+    // 通信待ちを含む実測の長い区間を、設定周期や平均値で隠さない。
+    simulation.Capture(20225000, 131078, false);
+    simulation.ObserveCaptured();
+    require(simulation.last == 57500 && presentation.last == 6000);
+    simulation.Capture(20241667, 131079, false);
+    simulation.ObserveCaptured();
+    require(simulation.last == 16667); // 通常速度への復帰も直近区間で示す。
+    presentation.Reset(); simulation.Reset();
     cccaster::diagnostics::UpdateCadence cadence;
     cccaster::diagnostics::UpdateCadence::Sample sample;
     cadence.Arm(100); cadence.Capture(1000000); require(cadence.Take(sample));

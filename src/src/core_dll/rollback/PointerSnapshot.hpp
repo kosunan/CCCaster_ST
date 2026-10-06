@@ -32,6 +32,7 @@ class PointerSnapshot {
         nodes_.clear();
         offsets_.clear();
         addresses_.clear();
+        chains_.clear();
         size_ = 0;
         for (size_t i = 0; i < nodes.size(); ++i) {
             const auto &n = nodes[i];
@@ -47,6 +48,20 @@ class PointerSnapshot {
             nodes_.push_back(n);
         }
         addresses_.resize(nodes_.size());
+        chains_.resize(nodes_.size(), false);
+        // 連続した4Bノード3段は、コピーした値がそのまま次のアドレスになる。
+        // ゲームの0x67BDE8 + index*0x33Cの保存表にはこの形が1000組ある。
+        // アドレス値はキャッシュせず、表の形だけを初期化時に判定する。
+        for (size_t i = 0; i + 2 < nodes_.size(); ++i) {
+            const auto &second = nodes_[i + 1];
+            const auto &third = nodes_[i + 2];
+            if (nodes_[i].size == 4 && second.size == 4 && third.size == 4 &&
+                second.parent == int(i) && third.parent == int(i + 1) &&
+                !second.source && !second.offset && !third.source && !third.offset) {
+                chains_[i] = true;
+                i += 2;
+            }
+        }
         return !nodes_.empty();
     }
     size_t Size() const {
@@ -64,6 +79,21 @@ class PointerSnapshot {
     }
 
   private:
+    // memcpyの固定長指定で非整列アドレスも扱う。復元は親を書いてから子へ進む。
+    template <bool Restore> static uint32_t CopyWord(uintptr_t addr, char *bytes) {
+        uint32_t value = 0;
+        if constexpr (Restore) {
+            if (addr) {
+                std::memcpy(&value, bytes, 4);
+                std::memcpy(reinterpret_cast<void *>(addr), &value, 4);
+            }
+        } else {
+            if (addr)
+                std::memcpy(&value, reinterpret_cast<const void *>(addr), 4);
+            std::memcpy(bytes, &value, 4);
+        }
+        return value;
+    }
     bool CheckRange(uintptr_t address, size_t length, bool write) {
         if (length - 1 > (std::numeric_limits<uintptr_t>::max)() - address)
             return false;
@@ -152,6 +182,14 @@ class PointerSnapshot {
         for (size_t i = 0; i < nodes_.size(); ++i) {
             const auto &n = nodes_[i];
             const uintptr_t addr = addresses_[i];
+            // Steamでは全書込み先を先に検証し、その解決結果で3段を一括コピーする。
+            if (chains_[i]) {
+                CopyWord<Restore>(addresses_[i], bytes + offsets_[i]);
+                CopyWord<Restore>(addresses_[i + 1], bytes + offsets_[i + 1]);
+                CopyWord<Restore>(addresses_[i + 2], bytes + offsets_[i + 2]);
+                i += 2;
+                continue;
+            }
             if (addr) {
                 // 現行表の大半を占める4バイト項目は、可変長memcpy呼出しを避ける。
                 if (n.size == 4) {
@@ -177,6 +215,7 @@ class PointerSnapshot {
     std::vector<SnapshotNode> nodes_;
     std::vector<size_t> offsets_;
     std::vector<uintptr_t> addresses_;
+    std::vector<uint8_t> chains_;
     size_t size_ = 0;
     bool validateMemory_ = false;
     RangeValidator validator_ = nullptr;

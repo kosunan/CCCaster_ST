@@ -84,7 +84,7 @@
 #define CC_WIN_COUNT_VS_ADDR ((uint32_t *)cccaster::game_memory::GameRuntime::Config(0x1c))        // Win count: default 2
 #define CC_TIMER_SPEED_ADDR ((uint32_t *)cccaster::game_memory::GameRuntime::Config(0x10))         // Timer speed: default 2
 #define CC_AUTO_REPLAY_SAVE_ADDR ((uint32_t *)cccaster::game_memory::GameRuntime::Config(0x28))    // Auto replay saving: 0 to disable, 1 to enable
-#define CC_STAGE_ANIMATION_OFF_ADDR ((uint32_t *)cccaster::game_memory::GameRuntime::Address(0x554124)) // 1 if stage animations are off
+#define CC_STAGE_ANIMATION_OFF_ADDR ((uint32_t *)cccaster::game_memory::GameRuntime::Config(0x164)) // 1 if stage animations are off
 
 // ============================================================================
 // ゲームメモリアドレス — ラウンド・タイマー

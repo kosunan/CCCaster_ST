@@ -59,6 +59,24 @@ uint8_t RealGameMemory::IntroState() const {
     return *CC_INTRO_STATE_ADDR;
 }
 
+int RealGameMemory::StageAnimation() const {
+    // Steam 488EE7/48918E: native config+0x164 (StageAnimation)。
+    if (!game_build::RuntimeValidated() || !CC_STAGE_ANIMATION_OFF_ADDR) return -1;
+    const auto value = *CC_STAGE_ANIMATION_OFF_ADDR;
+    return value <= 1 ? int(value == 0) : -1;
+}
+bool RealGameMemory::SetStageAnimation(bool enabled) {
+    if (GameMode() != CC_GAME_MODE_CHARA_SELECT || StageAnimation() < 0) return false;
+    *CC_STAGE_ANIMATION_OFF_ADDR = enabled ? 0 : 1;
+    DebugLog("[SelectionOptions] BACKGROUND animation=%s mode=%u", enabled ? "ON" : "OFF", GameMode());
+    return true;
+}
+bool RealGameMemory::SelectionDelayEditable(bool host) const {
+    // 0x4281B7..0x4281C1のカラー確定(mode4)以降は既存合意でも変更不可。
+    return GameMode() == CC_GAME_MODE_CHARA_SELECT &&
+        *(host ? CC_P1_SELECTOR_MODE_ADDR : CC_P2_SELECTOR_MODE_ADDR) < 4;
+}
+
 void RealGameMemory::SetTrainingHold(bool hold) {
     if (hold == trainingHold_) return;
     // 通常pauseはトレーニングメニューを開いてしまうため使用しない。
@@ -422,6 +440,11 @@ bool RealGameMemory::PrepareBattleAudio() {
         const auto p2 = reinterpret_cast<const uint32_t *>(game_memory::GameRuntime::Address(0x74D868));
         DebugLog("[Select] LOADED p1=%u/%u/%u p2=%u/%u/%u stage=%u",
                  p1[1], p1[4], p1[0], p2[1], p2[4], p2[0], *CC_STAGE_SELECTOR_ADDR);
+        // Steam 5077D0が残す実ロード番号・ファイル名、507730の展開完了フラグ。
+        DebugLog("[StageAsset] selected=%u loaded=%u expanded=%u file=%.259s",
+            *CC_STAGE_SELECTOR_ADDR, *reinterpret_cast<const uint32_t *>(game_memory::GameRuntime::Preferred(0x5b4e18,4)),
+            *reinterpret_cast<const uint32_t *>(game_memory::GameRuntime::Preferred(0x7cc644,4)),
+            reinterpret_cast<const char *>(game_memory::GameRuntime::Preferred(0x7b63d0,260)));
     }
     if (std::getenv("CCCASTER_DISABLE_SOUND_PREWARM")) {
         DebugLog("[SoundPrewarm] disabled=1");

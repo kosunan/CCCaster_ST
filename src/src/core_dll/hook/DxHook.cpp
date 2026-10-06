@@ -7,6 +7,8 @@
 #include "core_dll/common/StartupTrace.hpp"
 #include "core_dll/hook/DirectInputHook.hpp"
 #include "core_dll/hook/BorderlessDisplay.hpp"
+#include "core_dll/hook/MonitorPresent.hpp"
+#include "core_dll/timing/IdlePresentation.hpp"
 #include "core_dll/mbaa_mem/StartupAssets.hpp"
 #include "core_dll/mbaa_mem/IGameMemory.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
@@ -441,6 +443,7 @@ bool DxHook::Initialize() {
 void DxHook::Shutdown() {
     if (!isInitialized)
         return;
+    monitor_present::Reset();
     game_release_gate::Remove();
     borderless::ReleaseResources();
 
@@ -512,7 +515,8 @@ HRESULT APIENTRY DxHook::Hooked_EndScene(LPDIRECT3DDEVICE9 pDevice) {
     }
 
     // ── コールバック呼出 ──
-    if (onEndScene) {
+    // HUD自身のEndSceneからゲーム描画用コールバックへ再入しない。
+    if (onEndScene && !render_probe::ignored) {
         const auto previous = render_probe::ignored;
         render_probe::ignored = true;
         onEndScene(pDevice);
@@ -557,6 +561,29 @@ HRESULT APIENTRY DxHook::Hooked_BeginScene(LPDIRECT3DDEVICE9 pDevice) {
     return result;
 }
 
+HRESULT DxHook::AdjacentScenePair(LPDIRECT3DDEVICE9 device) {
+    // 初期化中・シーン外・HUDの再入は通常APIを通す。失敗したBeginを成功扱いしない。
+    if (!firstEndSceneReady || !original_BeginScene || !original_EndScene || render_probe::ignored ||
+        scene_pair_merge::active != device || scene_pair_merge::pending) {
+        device->EndScene();
+        return device->BeginScene();
+    }
+    if (onEndScene) {
+        render_probe::ignored = true;
+        onEndScene(device);
+        render_probe::ignored = false;
+    }
+    if (scene_pair_merge::active == device && !scene_pair_merge::pending) {
+        ++scene_pair_merge::merged;
+        return D3D_OK;
+    }
+    // コールバックがシーン状態を変更した場合も、元のEnd→Beginを完了させる。
+    using Scene = HRESULT(APIENTRY*)(LPDIRECT3DDEVICE9);
+    reinterpret_cast<Scene>(original_EndScene)(device);
+    scene_pair_merge::Reset();
+    return Hooked_BeginScene(device);
+}
+
 // ============================================================================
 // Hooked_Present — Present フック（1F1回）
 // ============================================================================
@@ -593,6 +620,7 @@ HRESULT APIENTRY DxHook::Hooked_Present(LPDIRECT3DDEVICE9 pDevice, const RECT *p
     }();
     static const bool trace = std::getenv("CCCASTER_INPUT_LATENCY_TRACE") != nullptr;
     const auto entered = trace ? cccaster::platform::RealMonotonicUs() : 0;
+    monitor_present::Prepare(pDevice);
     if (legacy && onAfterPresent)
         onAfterPresent(pDevice);
     if (onPresent) {
@@ -602,6 +630,8 @@ HRESULT APIENTRY DxHook::Hooked_Present(LPDIRECT3DDEVICE9 pDevice, const RECT *p
     }
     const bool skipped = onPresentSkip && onPresentSkip(pDevice);
     HRESULT result = D3D_OK;
+    const bool scheduled = monitor_present::Submit(skipped, pSourceRect, pDestRect,
+                                                   hDestWindowOverride, pDirtyRegion, result);
     if (!skipped) {
         if (trace) {
             const auto withheld = cccaster::platform::RealMonotonicUs() - entered;
@@ -610,18 +640,22 @@ HRESULT APIENTRY DxHook::Hooked_Present(LPDIRECT3DDEVICE9 pDevice, const RECT *p
         }
         using Present_t =
             HRESULT(APIENTRY *)(LPDIRECT3DDEVICE9, const RECT *, const RECT *, HWND, const RGNDATA *);
-        if (!borderless::Present(pDevice, result))
+        if (!scheduled && !borderless::Present(pDevice, result))
             result = reinterpret_cast<Present_t>(original_Present)(pDevice, pSourceRect, pDestRect,
                                                                    hDestWindowOverride, pDirtyRegion);
-        if (!cccaster::diagnostics::startup::presentRecorded && SUCCEEDED(result) &&
-            cccaster::game_interface::GameMem().GameMode() == CC_GAME_MODE_CHARA_SELECT) {
+        if (!scheduled && !cccaster::diagnostics::startup::presentRecorded && SUCCEEDED(result) &&
+            (cccaster::game_interface::GameMem().GameMode() == CC_GAME_MODE_CHARA_SELECT ||
+             cccaster::game_interface::GameMem().GameMode() == CC_GAME_MODE_REPLAY)) {
             cccaster::diagnostics::startup::presentRecorded = true;
-            cccaster::diagnostics::startup::Mark("chara_present");
+            cccaster::diagnostics::startup::Mark(
+                cccaster::game_interface::GameMem().GameMode() == CC_GAME_MODE_REPLAY ? "replay_present" : "chara_present");
         }
     }
     // スキップ時も次フレームの準備を行う。省くとロールアップが進まない。
-    if (!legacy && onAfterPresent)
+    if (!legacy && onAfterPresent) {
+        cccaster::core::timer::IdlePresentation::Scope idle(monitor_present::Pump);
         onAfterPresent(pDevice);
+    }
     if (cccaster::diagnostics::SpinProbe::pending)
         cccaster::diagnostics::SpinProbe::sample.gameReturn = cccaster::diagnostics::SpinProbe::Now();
     if (cccaster::core::timer::FrameTiming::releaseDueTicks) {
@@ -641,6 +675,7 @@ HRESULT APIENTRY DxHook::Hooked_Present(LPDIRECT3DDEVICE9 pDevice, const RECT *p
 HRESULT APIENTRY DxHook::Hooked_Reset(LPDIRECT3DDEVICE9 pDevice,
                                       D3DPRESENT_PARAMETERS *pPresentationParameters) {
     scene_pair_merge::Reset();
+    monitor_present::Reset();
     borderless::ReleaseResources();
     if (pPresentationParameters)
         borderless::ConfigureDevice(nullptr, *pPresentationParameters, false);

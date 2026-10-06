@@ -12,14 +12,38 @@ import subprocess
 import time
 
 
+def protected_files(sides):
+    return {str(p): hashlib.sha256(p.read_bytes()).hexdigest()
+            for side in sides for p in [side / 'MBAA.exe', *side.rglob('*.ini'), *side.rglob('*.rep')]}
+
+
+def diagnostic_environment(args):
+    env = {k: v for k, v in os.environ.items()
+           if not k.upper().startswith(('CCCASTER_', 'CCBENCH_'))}
+    env['CCCASTER_STARTUP_TRACE'] = '1'
+    comparisons = {'system-info': ['SECONDS'], 'assets': ['ASSETS'], 'first': ['FIRST'],
+                   'io': ['IO'], 'fonts': ['FONTS'], 'remaining': ['IO', 'FONTS'],
+                   'restore': ['RESTORE'], 'entry': ['ENTRY'], 'replay': ['REPLAY'], 'all': ['']}
+    if args.variant == 'baseline':
+        for key in comparisons[args.comparison]:
+            env['CCCASTER_STARTUP_' + (key + '_' if key else '') + 'BASELINE'] = '1'
+    for enabled, key in [(args.profile, 'PROFILE'), (args.verify_io, 'IO_VERIFY'),
+                         (args.verify_assets, 'ASSETS_VERIFY'), (getattr(args, 'verify_restore', False), 'RESTORE_VERIFY')]:
+        if enabled:
+            env['CCCASTER_STARTUP_' + key] = '1'
+    return env
+
+
 def readiness(content, mode):
     """表示・入力経路・選択モードを独立して確認する。"""
-    expected = dict(target=1, mode=20, kind=4112, versus=0) if mode == 'training' else dict(
+    expected = dict(target=4, mode=26, kind=1, versus=2) if mode == 'replay' else dict(
+        target=1, mode=20, kind=4112, versus=0) if mode == 'training' else dict(
         target=0, mode=20, kind=1, versus=1)
     records = [dict(zip(('target', 'mode', 'kind', 'versus'), map(int, match)))
                for match in re.findall(r'\[StartupMode\]\s+target=(\d+)\s+mode=(\d+)\s+kind=(\d+)\s+versus=(\d+)', content)]
-    present = bool(re.search(r'\[Startup\]\s+event=chara_present\b', content))
-    input_ready = bool(re.search(r'\[Startup\]\s+event=chara_input\b', content))
+    prefix = 'replay' if mode == 'replay' else 'chara'
+    present = bool(re.search(r'\[Startup\]\s+event=' + prefix + r'_present\b', content))
+    input_ready = bool(re.search(r'\[Startup\]\s+event=' + prefix + r'_input\b', content))
     return {'charaPresent': present, 'charaInput': input_ready, 'expectedMode': expected,
             'observedModes': records, 'modeMatches': bool(records) and all(r == expected for r in records),
             'ready': present and input_ready and bool(records) and all(r == expected for r in records)}
@@ -28,6 +52,8 @@ def readiness(content, mode):
 def measure_idle_cpu(pid, seconds, out):
     """読取り専用。全論理CPUを100%とするプロセスCPU時間率。"""
     import psutil
+    from steam_runtime import module_base, preferred
+    image_base = module_base(pid)
     process = psutil.Process(pid)
     kernel = C.WinDLL('kernel32', use_last_error=True)
     kernel.OpenProcess.argtypes = [W.DWORD, W.BOOL, W.DWORD]
@@ -38,6 +64,7 @@ def measure_idle_cpu(pid, seconds, out):
     if not handle:
         raise C.WinError(C.get_last_error())
     def read(address):
+        address = image_base + preferred(address) - 0x400000
         value = W.DWORD()
         if not kernel.ReadProcessMemory(handle, address, C.byref(value), 4, None):
             raise C.WinError(C.get_last_error())
@@ -75,9 +102,9 @@ def measure_idle_cpu(pid, seconds, out):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=['training', 'versus'], required=True)
+    parser.add_argument('--mode', choices=['training', 'versus', 'replay'], required=True)
     parser.add_argument('--variant', choices=['baseline', 'fast'], required=True)
-    parser.add_argument('--comparison', choices=['all', 'system-info', 'assets', 'first'], default='all',
+    parser.add_argument('--comparison', choices=['all', 'system-info', 'assets', 'first', 'io', 'fonts', 'remaining', 'restore', 'entry', 'replay'], default='all',
                         help='他の高速化を維持し、system-info は情報収集省略、assets は素材キャッシュだけを比較する')
     parser.add_argument('--empty-cache', action='store_true',
                         help='試行出力内の未作成・各側独立キャッシュを指定する。既存キャッシュは変更しない')
@@ -87,6 +114,11 @@ def main():
                         help='MBAACC_1 と MBAACC_2 を含む専用テストディレクトリ')
     parser.add_argument('--port', type=int, default=18940)
     parser.add_argument('--caster-dir', default='cccaster_st')
+    parser.add_argument('--profile', action='store_true', help='関数別診断。正式な速度比較では使わない')
+    parser.add_argument('--verify-io', action='store_true', help='読込み完了バッファのハッシュを記録')
+    parser.add_argument('--verify-assets', action='store_true', help='DDSの元素材とテクスチャを照合')
+    parser.add_argument('--verify-restore', action='store_true', help='復元データを通常生成したfont atlasと全内容比較')
+    parser.add_argument('--restore-cache', type=Path, help='次回起動用データの専用保存先。複数側では側番号を付加')
     parser.add_argument('--ready-hold-seconds', type=float, default=2,
                         help='キャラセレ到達後の保持秒数（画面確認用）')
     parser.add_argument('--idle-cpu-seconds', type=int, default=0,
@@ -96,9 +128,11 @@ def main():
     args = parser.parse_args()
     if not 2 <= args.ready_hold_seconds <= 120:
         parser.error('ready-hold-secondsは2..120')
+    if args.empty_cache and args.restore_cache:
+        parser.error('empty-cacheとrestore-cacheは同時指定できません')
     if args.idle_cpu_seconds and (args.mode != 'training' or args.idle_cpu_seconds < 1):
         parser.error('CPU待機測定はTrainingかつ正の秒数のみ')
-    args.instances = args.instances if args.instances is not None else (1 if args.mode == 'training' else 2)
+    args.instances = args.instances if args.instances is not None else (2 if args.mode == 'versus' else 1)
     if args.idle_cpu_seconds and args.instances != 1:
         parser.error('CPU待機測定は他窓の干渉を避けるため --instances 1 のみ')
     if args.mode == 'versus' and args.instances != 2:
@@ -160,10 +194,8 @@ def main():
     root, out = args.root.resolve(), args.out.resolve()
     sides = [root / f'MBAACC_{side}' for side in range(1, args.instances + 1)]
     exe_name = 'CCCaster_Steam.exe'
-    if args.mode == 'training':
-        exe_name = 'CCCaster_startup_worker.exe'
-        if not all((side / args.caster_dir / exe_name).is_file() for side in sides):
-            exe_name = 'CCCaster_Steam_GUI.exe'
+    if args.mode in ('training', 'replay'):
+        exe_name = 'CCCaster_Steam_GUI.exe'
     game_paths = {(side / 'MBAA.exe').resolve() for side in sides}
     if len(game_paths) != args.instances:
         raise RuntimeError('指定数の独立したゲームコピーが必要です')
@@ -187,27 +219,20 @@ def main():
         finally:
             close(handle)
     out.mkdir(parents=True, exist_ok=False)
+    protected_before = protected_files(sides)
+    (out / 'protected_before.json').write_text(json.dumps(protected_before, indent=2), encoding='utf-8')
     logs = [side / args.caster_dir / 'cccaster_hook_log.txt' for side in sides]
     for index, log in enumerate(logs, 1):
         if log.exists():
             shutil.move(str(log), str(out / f'before_{index}.log'))
-    env = os.environ.copy()
-    env['CCCASTER_STARTUP_TRACE'] = '1'
-    env.pop('CCCASTER_STARTUP_BASELINE', None)
-    env.pop('CCCASTER_STARTUP_SECONDS_BASELINE', None)
-    env.pop('CCCASTER_STARTUP_ASSETS_BASELINE', None)
-    env.pop('CCCASTER_STARTUP_FIRST_BASELINE', None)
-    if args.variant == 'baseline':
-        env[{'system-info': 'CCCASTER_STARTUP_SECONDS_BASELINE',
-             'assets': 'CCCASTER_STARTUP_ASSETS_BASELINE',
-             'first': 'CCCASTER_STARTUP_FIRST_BASELINE',
-             'all': 'CCCASTER_STARTUP_BASELINE'}[args.comparison]] = '1'
+    env = diagnostic_environment(args)
     binaries = [{'side': i, 'files': {
         str(p): hashlib.sha256(p.read_bytes()).hexdigest()
         for p in (side / 'MBAA.exe', side / args.caster_dir / exe_name,
                   side / args.caster_dir / 'libcccaster_steam_hook.dll')}}
         for i, side in enumerate(sides, 1)]
     workers, events, files, games = [], [], [], {}
+    commands = []
     starts, ready_at = [], [None] * args.instances
     game_exits = {}
     idle_cpu = None
@@ -234,30 +259,38 @@ def main():
         deadline = time.monotonic() + 30 + args.ready_hold_seconds
         for index, side in enumerate(sides, 1):
             launcher_log = out / f'launcher_{index}.log'
-            if args.mode == 'training':
+            if args.mode in ('training', 'replay'):
                 name = f'Local\\CCCasterStartup_{os.getpid()}_{index}'
                 cancel = event(None, True, False, name)
                 if not cancel:
                     raise C.WinError(C.get_last_error())
                 events.append(cancel)
                 command = [str(side / args.caster_dir / exe_name), '--worker', name,
-                           str(launcher_log), 'training', '0']
+                           str(launcher_log), args.mode, '0']
                 stdout = subprocess.DEVNULL
             else:
                 command = [str(side / args.caster_dir / exe_name), '--headless']
-                command += ['--host'] if index == 1 else ['--ip', '127.0.0.1']
+                # --hostは6文字P2P待受。IP直結の比較ペアは対応する旧待受を使う。
+                command += ['--legacy-host'] if index == 1 else ['--ip', '127.0.0.1']
                 command += ['--port', str(args.port)]
                 stdout = launcher_log.open('wb')
                 files.append(stdout)
             stderr = (out / f'launcher_{index}.err').open('wb')
             files.append(stderr)
+            commands.append(command)
             starts.append(qpc_us())
             side_env = env.copy()
+            if args.mode == 'versus' and index == 1:
+                # Windows API経由の環境更新はCRTのgetenvに反映されないため生成時に渡す。
+                side_env['CCCASTER_LEGACY_HOST'] = '1'
             if args.empty_cache:
                 cache = out / f'cache_{index}'
                 if cache.exists():
                     raise RuntimeError('初回測定のキャッシュは未作成でなければなりません')
                 side_env['CCCASTER_STARTUP_CACHE_DIR'] = str(cache)
+                side_env['CCCASTER_STARTUP_RESTORE_DIR'] = str(cache / 'restore')
+            if args.restore_cache:
+                side_env['CCCASTER_STARTUP_RESTORE_DIR'] = str(args.restore_cache.resolve() / str(index))
             workers.append(subprocess.Popen(command, cwd=side / args.caster_dir, env=side_env,
                                             stdout=stdout, stderr=stderr,
                                             creationflags=subprocess.CREATE_NO_WINDOW))
@@ -342,8 +375,14 @@ def main():
             samples.append({'side': index, 'events': found, 'validation': readiness(content, args.mode)})
         if status == 'ready' and not all(sample['validation']['ready'] for sample in samples):
             status = 'validation_failed'
+        protected_after = protected_files(sides)
+        (out / 'protected_after.json').write_text(json.dumps(protected_after, indent=2), encoding='utf-8')
+        protected_unchanged = protected_before == protected_after
+        if not protected_unchanged:
+            status = 'protected_changed'
         result = {'label': args.label, 'mode': args.mode, 'variant': args.variant,
                   'comparison': args.comparison, 'binaries': binaries, 'idleCpu': idle_cpu,
+                  'protected_unchanged': protected_unchanged, 'protected_count': len(protected_before),
                   'casterDir': args.caster_dir,
                   'readyHoldSeconds': args.ready_hold_seconds,
                   'diagnosticEnvironment': {key: value for key, value in env.items()
@@ -353,6 +392,7 @@ def main():
                   'status': status, 'error': error, 'root': str(root), 'samples': samples,
                   'cleanupErrors': cleanup_errors,
                   'launchQpcUs': starts, 'workerPids': [p.pid for p in workers],
+                  'commands': commands, 'transport': 'legacy-loopback' if args.mode == 'versus' else 'local',
                   'gamePids': list(games), 'network': env.get('CCCASTER_TEST_NETWORK'),
                   'gameProcesses': game_results,
                   'note': '表示・通常入力経路・モード照合後2秒を維持。idleCpu有効時はさらに10秒安定化後に採取。CPU率は全論理CPUを100%とするCPU時間率。物理表示・手入力応答の確認ではありません。'}
