@@ -33,9 +33,29 @@ int main() {
     check(step({},Left).hudStep == -1,"左でHUDを逆順へ");
     check(step({0,CC_BUTTON_A}).hudStep == 1,"AでHUD切替");
     step({},Down);
+    check(menu.row == 3,"下で解像度行");
+    const auto resize = step({},Right);
+    check(resize.block && resize.resolutionStep == 1 && resize.fullscreen == -1 && !resize.hudStep && !resize.delayStep,"解像度のみを変更");
+    check(step({},Left).resolutionStep == -1,"左で小さい解像度へ");
+    step({},Down);
+    check(menu.row == 4 && step({},Right).fullscreen == 1,"全画面をONへ");
+    check(step({},Left).fullscreen == 0,"全画面をOFFへ");
+    check(menu.Step({0,CC_BUTTON_A},0,true,false,true,true,true).fullscreen == 0,"Aで全画面を解除");
+    for (unsigned i = 0; i < 4; ++i) {
+        step({},Down);
+        check(menu.row == i+5,"標準の表示設定行を選択");
+        const auto result = step({},Right);
+        check(result.nativeStep == 1 && !result.resolutionStep && result.fullscreen == -1 && !result.delayStep,"標準表示設定だけを操作");
+        const auto option = static_cast<cccaster::game_interface::NativeDisplayOption>(i);
+        const auto* definition = cccaster::game_interface::DisplayDefinition(option);
+        check(cccaster::game_interface::NextDisplayValue(option,0,-1) == definition->count-1,"標準選択肢の逆順循環");
+        check(cccaster::game_interface::NextDisplayValue(option,definition->count-1,1) == 0,"標準選択肢の順方向循環");
+        check(cccaster::game_interface::NextDisplayValue(option,-1,1) == -1,"未対応の値を操作しない");
+    }
+    step({},Down);
     check(menu.row == 0,"最下段から先頭へ");
     step({},Up);
-    check(menu.row == 2,"先頭から最下段へ");
+    check(menu.row == 8,"先頭から最下段へ");
     using cccaster::domain::ui::HudDisplay;
     using cccaster::domain::ui::HudDisplayMode;
     HudDisplay::Cycle(-1);

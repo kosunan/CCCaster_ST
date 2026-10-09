@@ -10,6 +10,13 @@ int main() {
         if (!pass) { std::fprintf(stderr, "FAIL: %s\n", label); ++failures; }
     };
     check(HudDisplay::Get() == HudDisplayMode::Compact, "default compact");
+    DelayChangeHighlight highlight;
+    check(!highlight.Observe(2,1000000), "initial delay does not flash");
+    check(highlight.Observe(3,1100000), "committed change flashes");
+    check(highlight.Observe(3,2099999), "repeated rendering retains highlight for one second");
+    check(!highlight.Observe(3,2100000), "one-second boundary ends highlight");
+    check(highlight.Observe(2,2200000) && highlight.Observe(4,2900000), "later change restarts highlight");
+    check(highlight.Observe(4,3899999) && !highlight.Observe(4,3900000), "restart uses the latest change time");
     HudDisplay::Cycle();
     check(HudDisplay::Get() == HudDisplayMode::Detailed, "detailed");
     HudDisplay::Cycle();

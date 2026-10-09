@@ -9,9 +9,10 @@ import re
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import time
 import uuid
-from run_training_corner import protected
+from run_training_corner import protected, digest
 from steam_runtime import module_base, preferred
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -58,10 +59,21 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inspect-seconds', type=int, default=0)
     parser.add_argument('--interactive', action='store_true')
+    parser.add_argument('--palette', action='store_true', help='マウスの画面操作と読取り検査を組み合わせてパレット／鉛筆を確認')
+    parser.add_argument('--palette-animation', action='store_true', help='左右プレビューの再生・停止・コマ送り・オブジェクトを画面操作と読取りで確認')
+    parser.add_argument('--palette-close', action='store_true', help='編集中の実キャラ不変・閉じる際の一括反映・開き直してUndo/Redoを確認')
+    parser.add_argument('--extra', action='store_true', help='ACT取込み・永続保存・再ロードを画面操作と読取りで確認')
+    parser.add_argument('--extra-restore', action='store_true', help='既存の保存ファイルを別プロセスで復元して検査')
+    parser.add_argument('--extra-select', action='store_true', help='既存カラー一覧の7ページ目から42番(EXTRA 6)を選び、実データ適用を検査')
+    parser.add_argument('--extra-fixture', type=Path, help='専用コピーのSION EXTRA 6へ置く検証用カラー。元ゲームと設定は変更しない')
+    parser.add_argument('--color-page-preview', action='store_true', help='extra-selectの42番で画面確認用に待機。continueで再開')
+    parser.add_argument('--color-page-fixtures', action='store_true', help='独立コピーの37〜41番に識別用の5色を一時配置し、終了時に元へ戻す')
     parser.add_argument('--hidden', action='store_true',help='隠し8体とイクリプスを検査')
     parser.add_argument('--steam-input-slot',type=int,choices=(0,1,2,3,4),default=0)
     parser.add_argument('--wait-for-input',action='store_true',help='input-ready.jsonを書きstart-inputを待つ')
     args = parser.parse_args()
+    if args.palette_animation or args.palette_close: args.palette=True
+    if args.extra_restore: args.extra=True
     import vgamepad as vg
     from vgamepad.win import vigem_client as vc
     product = random.SystemRandom().randrange(0x8000,0xFFFF)
@@ -78,6 +90,7 @@ def main():
     before = {str(p): protected(p) for p in sources}
     result = dict(errors=[], samples=[], runtime=str(runtime))
     proc = handle = pad = image_base = None
+    color_backups = {}
     copies_before = None
     caster = runtime / 'MBAACC_1/cccaster_st'
     log = caster / 'cccaster_hook_log.txt'
@@ -86,6 +99,7 @@ def main():
     k.ReadProcessMemory.argtypes = [W.HANDLE, C.c_void_p, C.c_void_p, C.c_size_t, C.c_void_p]
     k.CloseHandle.argtypes = [W.HANDLE]
     buttons = dict(a=vg.DS4_BUTTONS.DS4_BUTTON_SQUARE, b=vg.DS4_BUTTONS.DS4_BUTTON_CROSS,
+                   d=vg.DS4_BUTTONS.DS4_BUTTON_TRIANGLE,
                    start=vg.DS4_BUTTONS.DS4_BUTTON_TRIGGER_RIGHT,
                    save=vg.DS4_BUTTONS.DS4_BUTTON_SHARE, reset=vg.DS4_BUTTONS.DS4_BUTTON_OPTIONS)
     directions = dict(left=vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_WEST,
@@ -122,6 +136,7 @@ def main():
                      intro=read_legacy(0x55D20B,1), p1x=read_legacy(0x555238), p2x=read_legacy(0x555D34),
                      p1pattern=read_legacy(0x555140), p2pattern=read_legacy(0x555C3C),
                      assets=[read_legacy(0x557D30 + i*12) for i in range(4)],
+                     presentation=[[read_legacy(0x5642C8 + i*0x20 + j*4) for j in range(7)] for i in range(4)],
                      actors=[dict(exists=read_legacy(0x555130+i*0xAFC), character=read_legacy(0x555135+i*0xAFC,1),
                                   moon=read_legacy(0x55513C+i*0xAFC,2)) for i in range(4)],
                      enemy_status=read_legacy(0x77C1E8),
@@ -139,7 +154,9 @@ def main():
         pad.reset(); pad.update(); time.sleep(.16)
 
     def open_menu():
-        press('start')
+        for _ in range(3):
+            if read_legacy(0x74D7FC): break
+            press('start'); time.sleep(.4)
         wait(lambda: read_legacy(0x74D7FC) != 0, reason='Trainingメニューが開かない')
         time.sleep(.4)
 
@@ -153,6 +170,20 @@ def main():
     def resumed():
         wait(lambda: read_legacy(0x55D20B,1) == 0 and read_legacy(0x55D203,1) == 0 and read_legacy(0x562A64) == 0,
              reason='切替後に練習へ復帰しない')
+
+    def menu_item(key):
+        menu = read(read(read_legacy(0x74D7FC)+0x0c))
+        begin,end = read(menu+0x40),read(menu+0x44)
+        keys=[]
+        for p in range(begin,end,4):
+            string=read(p)+0x38
+            address=string if read(string+0x14)<16 else read(string)
+            keys.append(read_bytes(address,read(string+0x10)).decode('ascii',errors='replace'))
+        target=keys.index(key)
+        for _ in range(len(keys)):
+            if read(menu+0x38)==target: return
+            press('down')
+        raise RuntimeError('メニュー項目に未到達: '+key)
 
     def choose(side, character, moon, label, already_open=False):
         before_change = sample(label+'_before')
@@ -192,11 +223,28 @@ def main():
         other = 'p'+str(2-side)
         if after_change[other] != before_change[other]: raise RuntimeError(label+': 相手の選択が変更された')
         if after_change['actors'][side]['moon'] != moon: raise RuntimeError(label+': 実体のムーンが不一致')
+        if after_change['actors'][side]['character'] != character: raise RuntimeError(label+': ボスの戦闘番号が不一致')
         for key in ('mode','stage','bgm_thread','bgm_patch','enemy_status'):
             if after_change[key] != before_change[key]: raise RuntimeError(label+': '+key+'が変化')
         time.sleep(.25)
         if read_legacy(0x55D1CC) <= after_change['sim']: raise RuntimeError(label+': 更新停止')
         return after_change
+
+    def check_boss_presentation(value):
+        # 0x426340の命名規則を.p索引に照合した収録数。巨大秋葉は顔だけ、ヘルメスは固有画像。
+        # 根拠: test/source/boss_assets/audit.py。子キャラのCUTなしは標準TagType=2の分岐。
+        expected = {16:(True,False,0),32:(True,True,3),53:(True,True,3),58:(True,True,3),
+                    59:(True,True,3),72:(True,True,7),73:(True,True,3),85:(True,True,31)}
+        for slot,actor in enumerate(value['actors']):
+            character=actor['character']
+            if not actor['exists'] or character not in expected: continue
+            face,color,mask=expected[character]
+            if slot>=2 and character==85: mask=0
+            images=value['presentation'][slot]
+            actual=(bool(images[0]),bool(images[1]),sum(1<<i for i,p in enumerate(images[2:]) if p))
+            if actual!=(face,color,mask):
+                raise RuntimeError(f'{value["label"]}: slot={slot} char={character} 表示資産が不一致 {actual}')
+            if not value['assets'][slot]: raise RuntimeError('ボスの戦闘データが未ロード')
 
     try:
         print('Logs:', out, flush=True)
@@ -227,11 +275,32 @@ def main():
         (caster/f'{device}__{guid}.ini').write_text(
             '[Mapping]\nUp=H0_8\nDown=H0_2\nLeft=H0_4\nRight=H0_6\n'+mapping,encoding='utf-8')
         copies_before = protected(runtime)
+        binary_names=('CCCaster_Steam.exe','CCCaster_Steam_GUI.exe','libcccaster_steam_hook.dll')
+        result['tested_binaries']={name:digest(caster/name) for name in binary_names}
+        if result['tested_binaries']!={name:digest(ROOT/'build/bin'/name) for name in binary_names}:
+            raise RuntimeError('配置バイナリがbuild/binと不一致')
+        if args.extra_fixture:
+            fixture = args.extra_fixture.resolve()
+            destination = caster/'extra_colors/character_0/extra_6.cccolor'
+            destination.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copy2(fixture,destination)
+            result['extra_fixture'] = dict(path=str(fixture),sha256=digest(fixture))
+        if args.color_page_fixtures:
+            source=(caster/'extra_colors/character_0/extra_6.cccolor').read_bytes()
+            for index,rgb in enumerate((0x40d040,0xe06030,0x20d0e0,0xd040c0,0xd0d030),1):
+                path=caster/f'extra_colors/character_0/extra_{index}.cccolor'
+                color_backups[path]=path.read_bytes() if path.exists() else None
+                data=bytearray(source)
+                for color in range(1,256): data[24+color*4:28+color*4]=rgb.to_bytes(4,'little')
+                checksum=2166136261
+                for byte in data[:-4]: checksum=((checksum^byte)*16777619)&0xffffffff
+                data[-4:]=(checksum or 1).to_bytes(4,'little');path.write_bytes(data)
         if log.exists():
             shutil.copy2(log, out / 'previous_game.log')
             log.unlink()
         env = {key:value for key,value in os.environ.items() if not key.startswith('CCCASTER_')}
         env.update(CCCASTER_TRAINING_TRACE='1', CCCASTER_INPUT_DIAGNOSTIC='1')
+        if args.palette_animation: env['CCCASTER_PALETTE_PREVIEW_TRACE']='1'
         with (out / 'launcher.log').open('w') as stream:
             proc = subprocess.Popen([str(caster / 'CCCaster_Steam.exe'), '--training'], cwd=caster, env=env,
                                     stdout=stream, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -244,13 +313,52 @@ def main():
         deadline = time.monotonic() + 40
         while '[TrainingAdvantage] valid=1' not in text():
             if time.monotonic() > deadline: raise RuntimeError('戦闘に未到達')
-            if '[FastBoot] ★ CharaSelect reached!' in text(): press('a')
+            if '[FastBoot] ★ CharaSelect reached!' in text():
+                if args.extra_select and handle is None:
+                    pid = subprocess.check_output(['pwsh','-NoProfile','-Command',
+                        f"Get-CimInstance Win32_Process -Filter \"Name='MBAA.exe'\" | Where-Object ParentProcessId -eq {proc.pid} | Select-Object -ExpandProperty ProcessId"], text=True).strip()
+                    image_base = module_base(int(pid))
+                    handle = k.OpenProcess(0x10,False,int(pid))
+                if args.extra_select and read_legacy(0x74D8EC)==2 and '[ExtraColor] CHOOSE side=0 character=0 extra=6' not in text():
+                    time.sleep(.6)
+                    press('left')
+                    wait(lambda: f'[ExtraColor] PAGE side=0 color=37 saved={int(args.color_page_fixtures)}' in text(),reason='7ページ目に移れない')
+                    if not args.color_page_fixtures:
+                        press('a')
+                        if read_legacy(0x74D8EC)!=2: raise RuntimeError('未登録37番を決定できてしまう')
+                    press('right')
+                    if read_legacy(0x74D904)!=0: raise RuntimeError('7ページ目から標準1番へ戻れない')
+                    press('left');press('left')
+                    if read_legacy(0x74D904)!=30: raise RuntimeError('7ページ目から標準31番へ戻れない')
+                    press('right')
+                    if args.color_page_fixtures:
+                        for index,rgb in enumerate((0x40d040,0xe06030,0x20d0e0,0xd040c0,0xd0d030)):
+                            cg=read(read(read_legacy(0x74D808)+0x1b0)+4)
+                            if read(cg+16+17*4)!=rgb: raise RuntimeError(f'{37+index}番とプレビューの色が不一致')
+                            press('down')
+                        press('down');press('down') # RANDOM経由で37番へ戻る。
+                    press('up')
+                    if read(read_legacy(0x74D808)+0x38)!=1: raise RuntimeError('7ページ目からRANDOMへ移れない')
+                    press('up')
+                    wait(lambda: '[ExtraColor] PAGE side=0 color=42 saved=1' in text(),reason='RANDOMから42番へ戻れない')
+                    result['native_color_page']=dict(page_count=7,rows=6,empty_rejected=not args.color_page_fixtures,
+                        wrap=True,random_return=True,distinct_previews=args.color_page_fixtures)
+                    if args.color_page_preview:
+                        print('COLOR_PAGE_PREVIEW: 42 / continueで再開',flush=True)
+                        for line in sys.stdin:
+                            command=line.strip()
+                            if command=='continue': break
+                            press(command)
+                        deadline=time.monotonic()+40
+                    press('a')
+                    wait(lambda: '[ExtraColor] CHOOSE side=0 character=0 extra=6' in text(),reason='42番を決定できない')
+                else: press('a')
             else: time.sleep(.2)
         pid = subprocess.check_output(['pwsh','-NoProfile','-Command',
             f"Get-CimInstance Win32_Process -Filter \"Name='MBAA.exe'\" | Where-Object ParentProcessId -eq {proc.pid} | Select-Object -ExpandProperty ProcessId"], text=True).strip()
         image_base=module_base(int(pid))
         result['image_base']=hex(image_base)
-        handle = k.OpenProcess(0x10,False,int(pid))
+        if handle is None: handle = k.OpenProcess(0x10,False,int(pid))
         table = read_legacy(0x55DF18)
         kind, base, stride, count = [read(table+i*4) for i in range(4)]
         if not 0 < count <= 256: raise RuntimeError('キャラ定義数が不正')
@@ -266,10 +374,149 @@ def main():
         initial = sample('initial')
         press('save')
         wait(lambda: '[TrainingState] event=1 ' in text(), reason='保存できない')
-        open_picker()
+        if args.extra_select:
+            data=(caster/'extra_colors/character_0/extra_6.cccolor').read_bytes()
+            if read_bytes(read_legacy(0x557D34)+0x10,1024)!=b'\0'*4+data[28:1048]:
+                raise RuntimeError('Trainingキャラ選択のエクストラパレットが不一致')
+            if not re.search(r'\[ExtraColor\] LOAD slot=0 character=0 .*matched=1 applied=1',text()):
+                raise RuntimeError('Trainingキャラ選択でエクストラ未適用')
+            if not re.search(r'\[TrainingPalette\] APPLY slot=0 pages=\d+ pixels=13 uploaded=1',text()):
+                raise RuntimeError('Trainingキャラ選択で鉛筆を復元できない')
+            result['extra_selection']=True
+            loads=text().count('[TrainingState] event=2 ')
+            press('right');press('reset')
+            wait(lambda: text().count('[TrainingState] event=2 ')>loads,reason='エクストラ選択後のFN保存復元が失敗')
+            resumed();sample('extra_selected')
+        elif args.palette or args.extra:
+            original_palettes = [read_bytes(read_legacy(0x557D34+i*12)+0x10,1024) for i in range(2)]
+            last_palettes = original_palettes
+            last_apply_count = 0
+            result['palette_checks'] = []
+            animation_checks={}
+            def animation():
+                rows=re.findall(r'\[PaletteAnimation\] slot=(\d+) motion=(\d+) object=(\d+) frame=(\d+) state=(\d+) sprite=(\d+) still=(\d+) playing=(\d+)',text())
+                if not rows: raise RuntimeError('アニメーション描画記録なし')
+                return dict(zip(('slot','motion','object','frame','state','sprite','still','playing'),map(int,rows[-1])))
+            if args.extra_restore: shutil.copy2(caster/'extra_colors/character_0/extra_6.cccolor',out/'saved_extra_6.cccolor')
+            open_menu(); menu_item('CC_PALETTE'); press('a')
+            print('PALETTE ready. Commands: palette_applied / pixel_applied / cancelled / p2_applied / restored / reopen / done; close: preview_only / retained / reopened / undo_closed / redo_closed / pixel_retained; normal pad commands also available',flush=True)
+            for line in iter(input, 'done'):
+                if args.palette_animation and line.startswith('animation_'):
+                    first=animation(); world=read_legacy(0x55D1CC);actors=read_bytes(image_base+preferred(0x555130)-0x400000,0xAFC*4)
+                    time.sleep(.35);second=animation()
+                    if read_legacy(0x55D1CC)!=world or read_bytes(image_base+preferred(0x555130)-0x400000,0xAFC*4)!=actors: raise RuntimeError('プレビュー中に戦闘状態が進行した')
+                    if line in ('animation_playing','animation_object'):
+                        if not first['playing'] or first['frame']==second['frame'] or first['still']!=second['still']: raise RuntimeError('再生／静止画の独立性不一致')
+                        if line=='animation_object' and not first['object']: raise RuntimeError('オブジェクトモーション未選択')
+                    elif line=='animation_paused':
+                        if first['playing'] or first!=second: raise RuntimeError('一時停止していない')
+                    elif line=='animation_step':
+                        paused=animation_checks['animation_paused']['after']
+                        if first['playing'] or first!=second or first['frame']!=paused['frame']+1: raise RuntimeError('1F送り不一致')
+                    elif line=='animation_static':
+                        paused=animation_checks['animation_step']['after']
+                        if first['playing'] or first!=second or first['frame']!=paused['frame'] or first['motion']!=paused['motion'] or first['still']==paused['still']:
+                            raise RuntimeError('静止画切替がアニメーションと独立していない')
+                    else: raise RuntimeError('不明なアニメーション検査: '+line)
+                    animation_checks[line]=dict(before=first,after=second,world=world)
+                    print('PASS '+line,flush=True);continue
+                if line == 'reopen':
+                    if not read_legacy(0x74D7FC): open_menu()
+                    menu_item('CC_PALETTE'); press('a')
+                    continue
+                if line in buttons or line in directions:
+                    press(line); continue
+                if args.extra and line == 'reload':
+                    press('b'); resumed();choose(0,7,0,'extra_other_character');choose(0,0,0,'extra_reload_original')
+                    open_menu(); menu_item('CC_PALETTE'); press('a');continue
+                if args.extra and line == 'extra_loaded':
+                    data=(out/'saved_extra_6.cccolor').read_bytes()
+                    expected=b'\0'*4+data[28:1048]
+                    wait(lambda: read_bytes(read_legacy(0x557D34)+0x10,1024)==expected,reason='再ロードしたエクストラのパレットが不一致')
+                if args.palette_close and line in ('palette_applied','pixel_applied','p2_applied','undo_closed','redo_closed','restored'):
+                    # 両側の画像一括更新はパッド解放の固定待機より長い場合がある。
+                    wait(lambda: text().rfind('[TrainingPalette] CLOSE')>text().rfind('[TrainingPalette] OPEN '),
+                         reason='編集画面を閉じる際の反映が完了しない')
+                    # 長い一括反映中に離したBをゲームが読み取ってから次の操作へ進む。
+                    time.sleep(.2)
+                current = [read_bytes(read_legacy(0x557D34+i*12)+0x10,1024) for i in range(2)]
+                applies = re.findall(r'\[TrainingPalette\] APPLY slot=(\d+) pages=(\d+) pixels=(\d+) uploaded=(\d+)',text())
+                if args.extra and line == 'act_applied':
+                    source=Path('C:/Users/junna/Downloads/Crimson Cacophony.act').read_bytes()
+                    expected=b''.join(source[i:i+3]+b'\0' for i in range(0,768,3))
+                    expected=b'\0'*4+expected[4:]
+                    if current[0] != expected: raise RuntimeError('ACTの256色が実メモリと不一致')
+                elif args.extra and line == 'extra_saved':
+                    saved=caster/'extra_colors/character_0/extra_6.cccolor'
+                    data=saved.read_bytes()
+                    if data[:8] != b'CCL1\0\0\0\0': raise RuntimeError('キャラ別EXTRA 6の形式が不正')
+                    shutil.copy2(saved,out/'saved_extra_6.cccolor')
+                elif args.extra and line == 'extra_loaded':
+                    data=(out/'saved_extra_6.cccolor').read_bytes()
+                    expected=b'\0'*4+data[28:1048]
+                    if current[0] != expected: raise RuntimeError('再ロードしたエクストラのパレットが不一致')
+                    if not applies or int(applies[-1][2])==0: raise RuntimeError('鉛筆が復元されていない')
+                elif line == 'palette_applied':
+                    if current[0]==original_palettes[0] or current[1]!=original_palettes[1]: raise RuntimeError('P1パレット変更の範囲が不正')
+                    if not applies or applies[-1][0]!='0' or applies[-1][3]!='1': raise RuntimeError('P1適用未成功')
+                elif line == 'pixel_applied':
+                    if current!=last_palettes: raise RuntimeError('ピクセル編集でパレットを変更した')
+                    if len(applies)<=last_apply_count or int(applies[-1][2])<=0 or applies[-1][3]!='1': raise RuntimeError('ピクセルの適用未成功')
+                elif args.palette_close and line in ('preview_only','retained','reopened','pixel_retained'):
+                    opened=text().rfind('[TrainingPalette] OPEN ')
+                    closed=text().rfind('[TrainingPalette] CLOSE')
+                    should_open=line in ('preview_only','reopened')
+                    if opened<0 or (opened>closed)!=should_open: raise RuntimeError('編集画面の開閉状態が不一致')
+                    if current!=last_palettes or len(applies)!=last_apply_count: raise RuntimeError('開閉だけで編集中の色・画素が変化した')
+                    if line=='pixel_retained' and (not applies or int(applies[-1][2])<=0): raise RuntimeError('閉じた後に鉛筆が残っていない')
+                elif args.palette_close and line=='undo_closed':
+                    if current!=original_palettes or len(applies)<=last_apply_count: raise RuntimeError('再表示後のUndoが閉じる際に反映されない')
+                elif args.palette_close and line=='redo_closed':
+                    if current[0]==original_palettes[0] or current[1]!=original_palettes[1] or len(applies)<=last_apply_count: raise RuntimeError('Redoが閉じる際に反映されない')
+                elif line == 'cancelled':
+                    if current!=last_palettes: raise RuntimeError('取消が実パレットを変更した')
+                    if len(applies)!=last_apply_count: raise RuntimeError('取消がピクセルを適用した')
+                elif line == 'p2_applied':
+                    if current[0]!=last_palettes[0] or current[1]==last_palettes[1]: raise RuntimeError('P2パレット変更の範囲が不正')
+                    if not applies or applies[-1][0]!='1' or applies[-1][3]!='1': raise RuntimeError('P2適用未成功')
+                elif line == 'restored':
+                    if current!=original_palettes: raise RuntimeError('元のパレットに戻らない')
+                else: raise RuntimeError('不明な検査コマンド: '+line)
+                if args.palette_close and line in ('palette_applied','pixel_applied','p2_applied','undo_closed','redo_closed','restored'):
+                    if text().rfind('[TrainingPalette] OPEN ')>text().rfind('[TrainingPalette] CLOSE'): raise RuntimeError('閉じる前に実キャラへ反映された')
+                    expected=2 if line=='restored' else 1
+                    if len(applies)!=last_apply_count+expected: raise RuntimeError('閉じる際の一括反映回数が不一致')
+                result['palette_checks'].append(dict(check=line,applies=applies,
+                    changed_entries=[sum(a[j:j+4]!=b[j:j+4] for j in range(0,1024,4)) for a,b in zip(original_palettes,current)]))
+                last_palettes=current
+                last_apply_count=len(applies)
+                print('PASS '+line,flush=True)
+            required={'extra_loaded'} if args.extra_restore else {'act_applied','extra_saved','extra_loaded'} if args.extra else {'palette_applied','pixel_applied','cancelled','p2_applied','restored'}
+            if args.palette_close: required={'palette_applied','preview_only','retained','reopened','undo_closed','redo_closed','pixel_applied','pixel_retained','p2_applied','restored'}
+            if required-{item['check'] for item in result['palette_checks']}: raise RuntimeError('必要な画面操作が未確認')
+            if args.palette_animation:
+                result['animation_checks']=animation_checks
+                if {'animation_playing','animation_paused','animation_step','animation_static','animation_object'}-animation_checks.keys():
+                    raise RuntimeError('必要なアニメーション操作が未確認')
+            if text().rfind('[TrainingPalette] OPEN ')>text().rfind('[TrainingPalette] CLOSE'):
+                press('b')
+                wait(lambda: text().rfind('[TrainingPalette] CLOSE')>text().rfind('[TrainingPalette] OPEN '),reason='カラー編集を閉じられない')
+                time.sleep(.2)
+            press('b'); resumed(); initial_world=read_legacy(0x55D1CC)
+            time.sleep(.3)
+            if read_legacy(0x55D1CC)<=initial_world: raise RuntimeError('編集後に戦闘が進行しない')
+            press('save'); loads=text().count('[TrainingState] event=2 ')
+            press('right'); press('reset')
+            wait(lambda: text().count('[TrainingState] event=2 ')>loads,reason='編集後のFN保存復元が失敗')
+            resumed(); sample('palette_finished')
+            if '[Exception]' in text(): raise RuntimeError('例外を検出')
+        else:
+            open_picker()
         if args.inspect_seconds:
             print('INSPECT picker', flush=True); time.sleep(args.inspect_seconds)
-        if args.interactive:
+        if args.palette or args.extra or args.extra_select:
+            pass
+        elif args.interactive:
             print('Commands: a b start save reset left right up down sample quit',flush=True)
             for line in iter(input, 'quit'):
                 if line == 'sample': sample('interactive')
@@ -280,11 +527,12 @@ def main():
             result['interactive_only'] = True
         elif args.hidden:
             # ムーン9を持つ通常キャラと姫アルク、および追加した全8体。
-            cases=[(0,30,9),(1,51,9),(0,16,9),(1,32,0),(0,53,8),(1,58,9),
-                   (0,59,9),(1,72,9),(0,73,9),(1,85,9),(0,0,0),(1,11,0),(0,53,8)]
+            bosses=[(16,9),(32,0),(53,8),(58,9),(59,9),(72,9),(73,9),(85,9)]
+            cases=[(0,30,9),(1,51,9)]+[(side,c,m) for side in range(2) for c,m in bosses]+[(0,0,0),(1,11,0),(0,53,8)]
             for i,(side,character,moon) in enumerate(cases):
                 changed=choose(side,character,moon,f'hidden_{i}_{character}_{moon}',already_open=i==0)
-                if character==85 and not changed['actors'][3]['exists']: raise RuntimeError('ボス子キャラ未生成')
+                check_boss_presentation(changed)
+                if character==85 and not changed['actors'][side+2]['exists']: raise RuntimeError('ボス子キャラ未生成')
                 # 変身・攻撃を含む通常入力後にもメニューへ戻れることを次ケースで確認する。
                 press('a'); time.sleep(.5)
             # 元のキャラ選択画面への復帰を通常メニュー入力で検査。
@@ -347,7 +595,7 @@ def main():
             open_picker(); press('a'); press('a'); press('a'); press('b'); resumed()
             if text().count('[TrainingCharacter] LOAD end') != old: raise RuntimeError('同一選択を再ロードした')
             # 既存のENEMY設定を通常の入力でDUMMYへ変更して切替。
-            open_menu(); press('down'); press('down')
+            open_menu(); menu_item('ENEMY_STATUS')
             for _ in range(5): press('right')
             press('b'); resumed()
             if read_legacy(0x77C1E8) != 5: raise RuntimeError('既存のENEMY設定を操作できない')
@@ -364,8 +612,13 @@ def main():
                 f"Get-CimInstance Win32_Process | Where-Object {{ $_.ParentProcessId -eq {proc.pid} -and $_.ExecutablePath -eq '{target}' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"],capture_output=True)
             if proc.poll() is None: proc.terminate(); proc.wait(timeout=5)
         if log.exists(): shutil.copy2(log,out / 'game.log')
+        for path,data in color_backups.items():
+            if data is None: path.unlink(missing_ok=True)
+            else: path.write_bytes(data)
         result['protected_unchanged'] = before == {str(p): protected(p) for p in sources}
         result['test_ini_unchanged'] = copies_before is not None and copies_before == protected(runtime)
+        if 'tested_binaries' in result and result['tested_binaries']!={name:digest(ROOT/'build/bin'/name) for name in result['tested_binaries']}:
+            result['errors'].append('試験中にbuild/binが変わった')
         result['passed'] = not result['errors'] and result['protected_unchanged'] and result['test_ini_unchanged'] and not args.interactive
         (out / 'result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
         print(json.dumps(result,ensure_ascii=False,indent=2),flush=True)

@@ -11,11 +11,12 @@ static bool spun = false;
 void HookLog(const char *) {}
 namespace cccaster::core::timer {
 int64_t WasapiClock::GetTimeTicks() { return now; }
+void WasapiClock::PrepareRelease(int64_t) {}
 }
 namespace cccaster::platform {
 int64_t RealMonotonicTicks() { return now; }
 void RealSleepMs(uint32_t ms) { now += ms * 60000; ++sleepCalls; }
-void PreciseWaitUs(int64_t us) { now += us * 60; ++preciseCalls; }
+void RealSleepUs(int64_t us) { now += us * 60; ++preciseCalls; }
 void CpuRelax() { now += 6; spun = true; }
 }
 static void require(bool condition) { if (!condition) std::abort(); }

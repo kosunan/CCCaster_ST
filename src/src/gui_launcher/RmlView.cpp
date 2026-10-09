@@ -90,10 +90,10 @@ void RmlView::Translate(const std::string& language) {
     Text("language",language_=="ja"?"English":"日本語"); peopleSignature_.clear();requestSignature_.clear();
 }
 void RmlView::Navigate(const std::string& page) {
-    if(page!="matching"&&page!="spectate"&&page!="training"&&page!="replay"&&page!="settings"&&page!="guide"&&page!="controller")return;
+    if(page!="matching"&&page!="spectate"&&page!="settings"&&page!="guide"&&page!="controller")return;
     if(page_=="controller"&&page!="controller")send_({{"type","controller"},{"action","close"}});
     page_=page;
-    for(const char* name:{"matching","spectate","training","replay","settings","guide","controller"}) {
+    for(const char* name:{"matching","spectate","settings","guide","controller"}) {
         Show((std::string("page-")+name).c_str(),page_==name);
         if(auto* e=Find(std::string("nav-")+name))e->SetClass("active",page_==name);
     }
@@ -182,7 +182,7 @@ void RmlView::ProcessEvent(Rml::Event& event) {
             }
         }
         else if(id=="watch")send_({{"type","launch"},{"mode","spectate"},{"code",Value("spectator-code")}});
-        else if(id=="training"||id=="replay")send_({{"type","launch"},{"mode",id}});
+        else if(id=="training"||id=="replay"||id=="offline")send_({{"type","launch"},{"mode",id}});
         else if(id=="cancel-session")command("cancel_session");
         else if(id=="use-reply"||id=="manual-start")send_({{"type","manual_reply"},{"code",id=="manual-start"?"start":Value("manual-peer")}});
         else if(id=="dismiss-notice")command("dismiss_notice");
@@ -210,7 +210,7 @@ void RmlView::ProcessEvent(Rml::Event& event) {
         else if(id=="training-standby")send_({{"type","settings"},{"key","TrainingStandby"},{"value",checked}});
         else if(id=="connection-preference")send_({{"type","settings"},{"key","ConnectionPreference"},{"value",Number(Value("connection-preference"))}});
         else {
-            const std::map<std::string,std::string> keys={{"sound","Sound"},{"flash","FlashTaskbar"},{"popup","DesktopPopup"},{"allow-spectators","AllowSpectators"},{"software-rendering","SoftwareRendering"}};
+            const std::map<std::string,std::string> keys={{"sound","Sound"},{"flash","FlashTaskbar"},{"popup","DesktopPopup"},{"allow-spectators","AllowSpectators"},{"show-opponent-extra-colors","ShowOpponentExtraColors"},{"boss-characters","BossCharacters"},{"software-rendering","SoftwareRendering"}};
             if(auto it=keys.find(id);it!=keys.end())send_({{"type","settings"},{"key",it->second},{"value",checked}});
         }
     }
@@ -301,7 +301,7 @@ void RmlView::State(const Json& value) {
     Show("direct-lookup",value.value("connectionLookup",false));
     Disable("direct-port",busy||outgoing||registered);
     if(registered) {SetValue("direct-port",std::to_string(m["port"].get<int>()),true);SetValue("matching-port",std::to_string(m["port"].get<int>()),true);}
-    for(const char* id:{"watch","training","replay"})Disable(id,running||value.value("connectionLookup",false));
+    for(const char* id:{"watch","training","replay","offline"})Disable(id,running||value.value("connectionLookup",false));
     Disable("profile-fields",running||registered);SetValue("player-name",p["name"]);Show("profile-error",p["error"]);Disable("emblem-remove",running||registered||p["emblemId"].get<uint64_t>()==0);
     Show("profile-locked",running||registered);
     const auto imageId=p["emblemId"].get<uint64_t>();const auto source="emblem:"+std::to_string(imageId);
@@ -310,11 +310,15 @@ void RmlView::State(const Json& value) {
         if(emblem->GetAttribute<std::string>("src","")!=source)emblem->SetAttribute("src",source);
     }
     Show("matching-emblem",imageId!=0);Show("matching-emblem-placeholder",imageId==0);
-    for(auto [id,key]:std::vector<std::pair<const char*,const char*>>{{"sound","Sound"},{"flash","FlashTaskbar"},{"popup","DesktopPopup"},{"allow-spectators","AllowSpectators"},{"software-rendering","SoftwareRendering"}})check(id,c[key]);
+    for(auto [id,key]:std::vector<std::pair<const char*,const char*>>{{"sound","Sound"},{"flash","FlashTaskbar"},{"popup","DesktopPopup"},{"allow-spectators","AllowSpectators"},{"show-opponent-extra-colors","ShowOpponentExtraColors"},{"boss-characters","BossCharacters"},{"software-rendering","SoftwareRendering"}})check(id,c[key]);
     SetValue("connection-preference",std::to_string(c["ConnectionPreference"].get<int>()));SetValue("ntfy-server",c["NtfyServer"]);
     Disable("allow-spectators",busy||outgoing||!m["incoming"].empty());Disable("save-server",busy||registered);
+    Disable("show-opponent-extra-colors",busy||registered);
+    Disable("boss-characters",busy||registered||outgoing||!m["incoming"].empty());
     Text("renderer-status",value["display"]["software"].get<bool>()?t("CPU描画","CPU rendering"):t("GPU描画","GPU rendering"));
     Show("session-card",running||s["failed"].get<bool>()||!s["log"].get<std::string>().empty()||s["status"]!=t("開始できます。","Ready when you are."));
+    document_->SetClass("session-idle",!running&&!s["failed"].get<bool>());
+    document_->SetClass("session-failed",s["failed"]);
     Find("session-card")->SetClass("failed",s["failed"]);Text("session-status",s["status"]);
     Text("session-badge",running?(game?t("ゲーム実行中","Game running"):t("接続・待機中","Connecting / waiting")):t("待機","Idle"));
     std::string routes;int index=0;for(const auto& r:s["routes"]) {if(!r.get<std::string>().empty())routes+=(index?"IPv6: ":"IPv4: ")+r.get<std::string>()+"\n";++index;}Text("routes",routes);

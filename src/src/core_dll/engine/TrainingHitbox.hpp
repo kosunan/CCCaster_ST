@@ -1,0 +1,63 @@
+#pragma once
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <cstdint>
+
+namespace cccaster::training_hitbox {
+enum class Kind : unsigned { Attack, Hurt, Push, Shield, Clash, Throw, Count };
+inline constexpr unsigned Count=unsigned(Kind::Count);
+inline constexpr std::array<const char*,Count> Names{"ATTACK","HURT","PUSH","SHIELD","CLASH","THROW (CONTACT)"};
+struct Rect { int32_t x0=0,y0=0,x1=0,y1=0; bool operator==(const Rect&) const = default; };
+// Steam 0x48A990の640x480画像の最終合成先。D3D viewport全体とは異なる。
+// AUTOの比率は通常窓／ボーダーレス側で解決して渡す。
+inline Rect CompositeRect(int width,int height,unsigned aspect,int autoWidth,int autoHeight) {
+    if(width<=0 || height<=0 || width>16384 || height>16384)return {};
+    if(!aspect)return {0,0,width,height};
+    long double rw=4,rh=3;
+    switch(aspect) {
+    case 1:rw=autoWidth;rh=autoHeight;break;
+    case 3:rw=16;rh=9;break;
+    case 4:rw=16;rh=10;break;
+    case 5:rw=5;rh=4;break;
+    case 6:rw=15;rh=9;break;
+    }
+    if(rw<=0 || rh<=0)return {};
+    int w=width,h=height;
+    if(rw/rh>double(4.0/3.0))w=int(double((rh*4)/(rw*3)*width));
+    else h=int(double((rw*3)/(rh*4)*height));
+    const int x=(width-w)/2,y=(height-h)/2;
+    return {x,y,x+w,y+h};
+}
+struct Pose {
+    int32_t x=0,y=0,offsetX=0,offsetY=0,cameraX=0,cameraY=0;
+    bool left=false,attached=false,doubleSize=false;
+};
+// Steam 0x4700E0のADD/SUB/NEG/SARと同じ32bit演算。生矩形は符号付き16bit。
+inline int32_t Add(int32_t a,int32_t b){return std::bit_cast<int32_t>(uint32_t(a)+uint32_t(b));}
+inline int32_t Neg(int32_t a){return std::bit_cast<int32_t>(0u-uint32_t(a));}
+inline Rect Transform(Rect r,const Pose& p) {
+    if(p.left){r.x0=Neg(r.x0);r.x1=Neg(r.x1);}
+    if(p.doubleSize){r.x0=Add(r.x0,r.x0);r.y0=Add(r.y0,r.y0);r.x1=Add(r.x1,r.x1);r.y1=Add(r.y1,r.y1);}
+    const auto x=Add(Add(Add(p.x,p.attached?p.offsetX:0),Neg(p.cameraX))>>7,320);
+    const auto y=Add(Add(Add(p.y,p.attached?p.offsetY:0),Neg(p.cameraY))>>7,432);
+    r.x0=Add(r.x0,x);r.x1=Add(r.x1,x);r.y0=Add(r.y0,y);r.y1=Add(r.y1,y);
+    if(r.x0>r.x1)std::swap(r.x0,r.x1);
+    if(r.y0>r.y1)std::swap(r.y0,r.y1);
+    return r;
+}
+// Steam 0x4C6760: 0、0x4C672D: 1..8、0x4C6959: 9、0x4C7274: 11。
+// 未同定のslot10や12以降へ意味を付けない。
+inline Kind DefenseKind(unsigned slot) {
+    return slot==0?Kind::Push:slot<=8?Kind::Hurt:slot==9?Kind::Shield:slot==11?Kind::Clash:Kind::Count;
+}
+struct Options {
+    std::array<bool,Count> visible{};
+    unsigned selected=0;
+    bool Any()const {for(bool v:visible)if(v)return true;return false;}
+    void Move(int delta){selected=(selected+Count+delta)%Count;}
+    void Set(bool value){visible[selected]=value;}
+    void Toggle(){visible[selected]=!visible[selected];}
+    unsigned Mask()const {unsigned mask=0;for(unsigned i=0;i<Count;++i)if(visible[i])mask|=1u<<i;return mask;}
+};
+}

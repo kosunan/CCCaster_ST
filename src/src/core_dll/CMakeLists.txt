@@ -20,14 +20,23 @@ add_library(cccaster_hook SHARED
     mbaa_mem/GameMemory.cpp
     mbaa_mem/MbaaMemTrace.cpp
     mbaa_mem/RealGameMemory.cpp
+    mbaa_mem/NativeResolution.cpp
+    mbaa_mem/NativeInputWrites.cpp
+    mbaa_mem/NativeFpsCounter.cpp
     mbaa_mem/TrainingMetrics.cpp
     mbaa_mem/StateSweep.cpp
     mbaa_mem/TrainingCharacterMenu.cpp
+    mbaa_mem/TrainingHitboxMenu.cpp
+    mbaa_mem/BossCharacterSelect.cpp
+    mbaa_mem/TrainingPaletteMenu.cpp
+    mbaa_mem/ExtraColorSelection.cpp
+    mbaa_mem/NativeColorMenu.cpp
     mbaa_mem/CombatStress.cpp
     mbaa_mem/NetplayMenu.cpp
     mbaa_mem/ReplaySave.cpp
     mbaa_mem/StartupAssets.cpp
     mbaa_mem/StartupFileRead.cpp
+    mbaa_mem/StartupSounds.cpp
     mbaa_mem/StartupDirectEntry.cpp
 
     # === hook/ — 外部 API フック ===
@@ -43,6 +52,8 @@ add_library(cccaster_hook SHARED
 
     # === engine/ — メインロジック ===
     engine/SceneRunner.cpp
+    engine/SelectionPreferences.cpp
+    engine/ExtraColorStore.cpp
     engine/GameFrameOrchestrator.cpp
     engine/SceneFastBoot.cpp
     engine/SceneInputFilter.cpp
@@ -65,6 +76,8 @@ add_library(cccaster_hook SHARED
     ui/HudResources.cpp
     ui/StartupFontCache.cpp
     ui/TrainingCharacterView.cpp
+    ui/TrainingHitboxView.cpp
+    ui/TrainingPaletteView.cpp
     ui/TrainingStandbyView.cpp
     ui/State_Ui_Logic.cpp
     ui/ScoreBroadcast.cpp
@@ -83,7 +96,7 @@ add_library(cccaster_hook SHARED
 target_include_directories(cccaster_hook PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 # Link everything to the hook DLL
-target_link_libraries(cccaster_hook PRIVATE minhook imgui d3d9 dwmapi dinput8 dxguid cfgmgr32 hid ws2_32 mswsock ole32 winmm bcrypt)
+target_link_libraries(cccaster_hook PRIVATE minhook imgui d3d9 dwmapi dinput8 dxguid cfgmgr32 hid ws2_32 mswsock ole32 winmm bcrypt comdlg32 ZLIB::ZLIB)
 target_include_directories(cccaster_hook PRIVATE
     ${minhook_SOURCE_DIR}/include
     ${imgui_SOURCE_DIR}
@@ -96,6 +109,6 @@ if(WIN32)
     target_link_options(cccaster_hook PRIVATE -static -static-libgcc -static-libstdc++ -Wl,--kill-at)
 endif()
 
-target_link_libraries(cccaster_hook PRIVATE cccaster_transport)
+target_link_libraries(cccaster_hook PRIVATE cccaster_transport cccaster_precise_wait)
 
 set_target_properties(cccaster_hook PROPERTIES OUTPUT_NAME cccaster_steam_hook)

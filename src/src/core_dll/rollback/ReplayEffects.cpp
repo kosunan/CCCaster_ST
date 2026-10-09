@@ -1,4 +1,6 @@
 #include "core_dll/rollback/SteamReplayEffects.hpp"
+#include "core_dll/hook/HookBatch.hpp"
+#include "core_dll/mbaa_mem/StartupSounds.hpp"
 #include "core_dll/rollback/ReplayEffects.hpp"
 #include "core_dll/rollback/IntroSoundClock.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
@@ -101,6 +103,7 @@ uintptr_t cccaster_sfx_skip = 0;
 __attribute__((force_align_arg_pointer)) int __cdecl cccaster_sfx_should_play(uint32_t sound) {
     // 表示だけの先行1更新では、履歴・音声時計への記録も実際の再生も抑止する。
     if (introPreview) return 0;
+    cccaster::game_memory::startup_sounds::Ensure(sound);
     if (soundProbe) ++soundCalls;
     cccaster::diagnostics::sound_api::SetSound(sound);
     if (sound >= 1500)
@@ -147,13 +150,13 @@ bool InstallReplayEffects() {
         if (std::getenv("CCCASTER_SOUND_PROBE") || cccaster::diagnostics::sound_api::Enabled()) {
             if (MH_CreateHook(sites.update, reinterpret_cast<void*>(ProbeSoundUpdate),
                     reinterpret_cast<void**>(&soundUpdate)) != MH_OK ||
-                MH_EnableHook(sites.update) != MH_OK) return false;
+                cccaster::hook_batch::Enable(sites.update) != MH_OK) return false;
             soundProbe = true;
         }
         if (std::getenv("CCCASTER_TRACE_RNG")) {
             void* rng = steam_effects::ResolveRngTrace(edition, image);
             if (!rng || MH_CreateHook(rng, reinterpret_cast<void*>(cccaster_rng_hook),
-                    &cccaster_rng_original) != MH_OK || MH_EnableHook(rng) != MH_OK) return false;
+                    &cccaster_rng_original) != MH_OK || cccaster::hook_batch::Enable(rng) != MH_OK) return false;
             cccaster::domain::session::DebugLog("[RNGCALL] Steam function trace excludes inline RNG updates");
         }
         // 466CE0 thiscall GetStatus + scriptの両呼出元を再配置込みで照合。
@@ -166,11 +169,12 @@ bool InstallReplayEffects() {
             !steam_effects::Match(image,0xc20c0,singleCall,std::array<size_t,0>{})) return false;
         auto *status = reinterpret_cast<void *>(image.Resolve(0x66ce0));
         if (MH_CreateHook(status,reinterpret_cast<void *>(cccaster_sound_status_hook),
-                &cccaster_sound_status_original) != MH_OK || MH_EnableHook(status) != MH_OK) return false;
+                &cccaster_sound_status_original) != MH_OK || cccaster::hook_batch::Enable(status) != MH_OK) return false;
         cccaster::testing::combat_stress::Install();
         installed = true;
         return true;
-    }
+}
+
 void BeginSimulationEffects(uint32_t frame) {
     activeFrame = frame;
     auto &slot = history[frame % history.size()];

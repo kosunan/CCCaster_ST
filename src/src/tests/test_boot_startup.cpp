@@ -19,7 +19,9 @@ int wmain(int argc,wchar_t**argv) {
         if(launcher.GetProcessHandle()) CC_CHECK(WaitForSingleObject(launcher.GetProcessHandle(),0)==WAIT_OBJECT_0);
     } else {
         const std::wstring mode=argv[2];
-        const auto expected = mode==L"game" ? boot::Error::GameMismatch : mode==L"missing" ? boot::Error::DllFile : mode==L"mismatch" ? boot::Error::BuildMismatch : boot::Error::DllFormat;
+        const auto expected = mode==L"game" ? boot::Error::GameMismatch : mode==L"game_missing" ? boot::Error::GameMissing
+            : mode==L"game_file" ? boot::Error::GameFile : mode==L"game_format" ? boot::Error::GameFormat
+            : mode==L"missing" ? boot::Error::DllFile : mode==L"mismatch" ? boot::Error::BuildMismatch : boot::Error::DllFormat;
         CC_CHECK(status.error==expected);
         CC_CHECK(launcher.GetProcessHandle()==nullptr);
     }

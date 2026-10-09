@@ -1,7 +1,9 @@
 #include "core_dll/ui/HudResources.hpp"
 #include "core_dll/ui/StartupFontCache.hpp"
 #include "core_dll/ui/TrainingCharacterView.hpp"
+#include "core_dll/ui/TrainingPaletteView.hpp"
 #include "core_dll/ui/HudInputSpace.hpp"
+#include "core_dll/ui/HudDrawSpace.hpp"
 #include "core_dll/hook/BorderlessDisplay.hpp"
 #include "shared_contracts/EmblemTexture.hpp"
 #include "core_dll/engine/SceneRunner.hpp"
@@ -17,7 +19,9 @@ constexpr float Sizes[]{15, 13, 24, 10, 22, 12};
 ImFont* fonts[6][6]{};
 emblem::Texture textures[2];
 Layout layout;
+Rect nativeViewport;
 InputSpace inputSpace;
+ImVec2 bufferSize;
 unsigned FontScale(float scale) {
     unsigned s = 0;
     while (s < 5 && Scales[s] < scale) ++s;
@@ -48,25 +52,39 @@ void AddFonts() {
 void Prepare(IDirect3DDevice9* device) {
     auto& io = ImGui::GetIO();
     const auto client = io.DisplaySize;
+    bufferSize = client;
     IDirect3DSurface9* buffer = nullptr;
     if (SUCCEEDED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &buffer))) {
         D3DSURFACE_DESC desc{};
         if (SUCCEEDED(buffer->GetDesc(&desc))) {
-            io.DisplaySize = ImVec2(float(desc.Width), float(desc.Height));
+            bufferSize = ImVec2(float(desc.Width), float(desc.Height));
         }
         buffer->Release();
     }
+    ImVec2 origin{};
     if (game_interface::borderless::Active()) {
         const auto rect = game_interface::borderless::FitContent(LONG(client.x), LONG(client.y));
-        inputSpace.Begin({float(rect.right - rect.left), float(rect.bottom - rect.top)}, io.DisplaySize,
-                         {float(rect.left), float(rect.top)});
-    } else inputSpace.Begin(client, io.DisplaySize);
+        io.DisplaySize = {float(rect.right - rect.left), float(rect.bottom - rect.top)};
+        origin = {float(rect.left), float(rect.top)};
+    }
+    // HUDは窓／全画面の実際の表示領域で等倍率に配置する。全画面の黒帯は除く。
+    if (io.DisplaySize.x <= 0 || io.DisplaySize.y <= 0) io.DisplaySize = bufferSize;
+    inputSpace.Begin(io.DisplaySize, io.DisplaySize, origin);
     D3DVIEWPORT9 viewport{};
     Rect bounds{0, 0, io.DisplaySize.x, io.DisplaySize.y};
     if (SUCCEEDED(device->GetViewport(&viewport)) && viewport.Width && viewport.Height &&
-        viewport.X + viewport.Width <= io.DisplaySize.x && viewport.Y + viewport.Height <= io.DisplaySize.y)
-        bounds = {float(viewport.X), float(viewport.Y), float(viewport.Width), float(viewport.Height)};
+        viewport.X + viewport.Width <= bufferSize.x && viewport.Y + viewport.Height <= bufferSize.y)
+        bounds = DisplayViewport({float(viewport.X), float(viewport.Y), float(viewport.Width), float(viewport.Height)},
+                                 bufferSize, io.DisplaySize);
+    nativeViewport = bounds;
     layout = Layout::Fit(bounds);
+    static ImVec2 lastBuffer{}, lastDisplay{};
+    if (lastBuffer.x != bufferSize.x || lastBuffer.y != bufferSize.y ||
+        lastDisplay.x != io.DisplaySize.x || lastDisplay.y != io.DisplaySize.y) {
+        domain::session::DebugLog("[HudGeometry] buffer=%gx%g display=%gx%g scale=%g",
+            bufferSize.x, bufferSize.y, io.DisplaySize.x, io.DisplaySize.y, layout.scale);
+        lastBuffer = bufferSize; lastDisplay = io.DisplaySize;
+    }
     if (AddFontScale(FontScale(layout.scale))) {
         // NewFrame前にだけatlasを変更する。リサイズで必要になった倍率も一度だけ追加し、
         // 同じTTF・サイズ・oversamplingを維持する。既存ImFontポインターは保持される。
@@ -80,13 +98,23 @@ void Prepare(IDirect3DDevice9* device) {
                                    : emblem::Store::Players(mode == 2);
     for (unsigned side = 0; side < 2; ++side) textures[side].Update(device, players[side].get());
     domain::ui::training_character_view::Prepare(device);
+    domain::ui::training_palette_view::Prepare(device);
 }
 void FinishInput() { inputSpace.End(); }
+void RenderDrawData() {
+    auto* data = ImGui::GetDrawData();
+    // このフレームの描画データへ一度だけ適用。提示の繰返しでは再描画しない。
+    MapDrawDataToBuffer(*data, bufferSize);
+    ImGui_ImplDX9_RenderDrawData(data);
+}
 void Release() {
     for (auto& texture : textures) texture.Release();
     domain::ui::training_character_view::Release();
+    domain::ui::training_palette_view::Release();
 }
 Layout CurrentLayout() { return layout; }
+Rect CurrentViewport() { return nativeViewport; }
+Rect BackbufferToDisplay(Rect bounds) { return DisplayViewport(bounds,bufferSize,ImGui::GetIO().DisplaySize); }
 ImFont* Font(unsigned role, float scale) {
     const unsigned s = FontScale(scale);
     return fonts[s][(std::min)(role, 5u)] ? fonts[s][(std::min)(role, 5u)] : ImGui::GetFont();

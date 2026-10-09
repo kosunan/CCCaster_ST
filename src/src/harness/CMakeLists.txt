@@ -19,6 +19,8 @@ add_executable(harness
 
     # ── 検証対象（実コード）──
     ${CORE}/engine/SceneRunner.cpp
+    ${CORE}/engine/SelectionPreferences.cpp
+    ../cli_launcher/ConfigManager.cpp
     ${CORE}/engine/SceneInputFilter.cpp
     # SceneFastBoot.cpp は harness_stubs.cpp で置換（seam 外の実アドレスを触るため）
     ${CORE}/sync/NetplaySession.cpp
@@ -52,7 +54,7 @@ else()
     target_link_libraries(harness PRIVATE Threads::Threads)
 endif()
 
-target_link_libraries(harness PRIVATE cccaster_transport)
+target_link_libraries(harness PRIVATE cccaster_transport cccaster_precise_wait ZLIB::ZLIB)
 
 if(WIN32)
     add_executable(probe_suspended_image probe_suspended_image.cpp)

@@ -17,6 +17,7 @@
 #include "core_dll/ui/State_Ui_Logic.hpp"
 #include <cstring>
 #include <algorithm>
+#include <cstdlib>
 #include "core_dll/sync/FrameSequence.hpp"
 #include "core_dll/mbaa_mem/GamePhase.hpp"
 
@@ -64,6 +65,7 @@ struct SyncPayload {
 #pragma pack(pop)
 static_assert(20 + sizeof(SyncPayload) + sizeof(cccaster::emblem::Chunk) <= 1200,
               "Emblem extension must fit a single conservative UDP datagram");
+static_assert(20+sizeof(SyncPayload)+sizeof(cccaster::training_palette::network::Chunk)<=1200);
 
 // ============================================================================
 // BuildUnifiedPacket — CCS1統一ヘッダ + ペイロードを組み立てる
@@ -99,6 +101,8 @@ void SyncCodec::Initialize(bool isHost, int delayFrames, int maxRollback, Metron
 
 void SyncCodec::Reset() {
     _emblems.Start(cccaster::emblem::Store::Get(0));
+    const char* receive=std::getenv("CCCASTER_RECEIVE_EXTRA_COLORS");
+    _extraColors.Reset(!receive || std::strcmp(receive,"0")!=0);_extraTurn=false;
     _peerClosed = false;
     _clock.Reset();
     _lastModelEvaluation = UINT32_MAX;
@@ -167,7 +171,9 @@ void SyncCodec::ProcessReceivedPacket(const std::vector<uint8_t> &data, const st
         return;
     _framesSinceLastRecv = 0;
     auto &shared = NetplaySession::GetMutableState();
-    if (!gtp.selection.Valid()) return;
+    const bool peerBosses=(gtp.flags & FLAG_BOSS_CHARACTERS)!=0;
+    const bool allowBosses=shared.localBossCharacters.load(std::memory_order_acquire) && peerBosses;
+    if (!gtp.selection.Valid(allowBosses)) return;
     if (!gtp.epochStart.Valid()) return;
     if (!gtp.retry.Valid()) return;
     {
@@ -182,8 +188,10 @@ void SyncCodec::ProcessReceivedPacket(const std::vector<uint8_t> &data, const st
     }
     {
         std::lock_guard lock(shared.selectionMutex);
-        shared.peerSelection.Accept(gtp.selection);
+        shared.peerSelection.Accept(gtp.selection,allowBosses);
     }
+    // 対戦開始後に設定変更しない。再送の順序逆転でも一度成立した対応通知を失わない。
+    if(peerBosses)shared.peerBossCharacters.store(true,std::memory_order_release);
     if (gtp.consumedFrame > shared.peerConsumedFrame.load(std::memory_order_relaxed))
         shared.peerConsumedFrame.store(gtp.consumedFrame, std::memory_order_release);
     if (!_isHost && gtp.seedEpoch > 0 && gtp.seedEpoch == gtp.phaseBaseFrame) {
@@ -199,6 +207,8 @@ void SyncCodec::ProcessReceivedPacket(const std::vector<uint8_t> &data, const st
     }
 
     // ロード中の相手にも、イントロへ先着した相手にも同じ対象世代を通知する。
+    if (gtp.flags & FLAG_PRESENT_ROLLBACK)
+        shared.peerPresentRollback.store(true, std::memory_order_release);
     // 両ビット同時・境界外は無視。再送の順序が逆転しても受信世代を戻さない。
     const auto skipFlags = gtp.flags & (FLAG_LOADING_SKIP_CURRENT | FLAG_LOADING_SKIP_NEXT);
     if (gtp.phaseBaseFrame && gtp.phaseBaseFrame % sync::FrameSequence::STRIDE == 0 &&
@@ -211,6 +221,11 @@ void SyncCodec::ProcessReceivedPacket(const std::vector<uint8_t> &data, const st
             shared.peerLoadingSkipEpoch.store(epoch, std::memory_order_release);
     }
 
+    if(data.size()==UNIFIED_HEADER_SIZE+sizeof(SyncPayload)+sizeof(cccaster::training_palette::network::Chunk)) {
+        cccaster::training_palette::network::Chunk chunk;
+        std::memcpy(&chunk,data.data()+UNIFIED_HEADER_SIZE+sizeof(SyncPayload),sizeof(chunk));
+        _extraColors.Receive(chunk);
+    }
     if (data.size() == UNIFIED_HEADER_SIZE + sizeof(SyncPayload) + sizeof(cccaster::emblem::Chunk)) {
         cccaster::emblem::Chunk chunk;
         std::memcpy(&chunk, data.data() + UNIFIED_HEADER_SIZE + sizeof(SyncPayload), sizeof(chunk));
@@ -424,6 +439,8 @@ void SyncCodec::BuildPacketInto(std::vector<uint8_t> &packet, uint32_t frame, ui
     gtp.maxRollback = static_cast<uint8_t>(_maxRollback);
 
     gtp.flags = ready ? FLAG_READY : 0;
+    if (state.localPresentRollback.load(std::memory_order_acquire)) gtp.flags |= FLAG_PRESENT_ROLLBACK;
+    if (state.localBossCharacters.load(std::memory_order_acquire)) gtp.flags |= FLAG_BOSS_CHARACTERS;
     if (phaseToken != 0)
         gtp.flags |= FLAG_PHASE_READY;
     const auto skipEpoch = state.localLoadingSkipEpoch.load(std::memory_order_acquire);
@@ -458,10 +475,17 @@ void SyncCodec::BuildPacketInto(std::vector<uint8_t> &packet, uint32_t frame, ui
     }
     BuildUnifiedPacket(packet, uint8_t(phaseToken), PKT_SYNC_TICK, now, &gtp, sizeof(gtp));
     cccaster::emblem::Chunk chunk;
-    if (_emblems.Next(now / 60, chunk)) {
+    _extraTurn=!_extraTurn;
+    if (!_extraTurn && _emblems.Next(now / 60, chunk)) {
         const auto offset = packet.size();
         packet.resize(offset + sizeof(chunk));
         std::memcpy(packet.data() + offset, &chunk, sizeof(chunk));
+    } else {
+        cccaster::training_palette::network::Chunk color;
+        if(_extraColors.Next(color,now/60)) {
+            const auto offset=packet.size();packet.resize(offset+sizeof(color));
+            std::memcpy(packet.data()+offset,&color,sizeof(color));
+        }
     }
 }
 

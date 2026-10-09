@@ -5,17 +5,40 @@
 #include "core_dll/sync/InputTimeline.hpp"
 #include "core_dll/sync/NetplaySession.hpp"
 #include "core_dll/common/Platform.hpp"
+#include "core_dll/engine/SceneRunner.hpp"
+#include "core_dll/mbaa_mem/GamePhaseDetector.hpp"
+#include "core_dll/mbaa_mem/TrainingHitboxMenu.hpp"
+#include "core_dll/mbaa_mem/TrainingPaletteMenu.hpp"
+#include "core_dll/engine/SelectionOptions.hpp"
+#include "shared_contracts/IpcData.hpp"
 #include <windowsx.h>
 #include <vector>
 
 // 非表示の自プロセス窓で本物のWndProcを検査。画面・実マウスは移動しない。
 void HookLog(const char *) {}
+namespace {
+uint8_t appMode = 255;
+auto phase = cccaster::game_interface::GamePhase::Unknown;
+bool hitboxOpen = false, mappingOpen = false;
+struct LocalExit {};
+unsigned localTerminations = 0;
+}
+namespace cccaster::domain::session {
+uint8_t SceneRunner::AppMode() { return appMode; }
+}
+namespace cccaster::game_interface {
+GamePhase PhaseMonitor::GetCurrentPhase() { return phase; }
+}
+namespace cccaster::training_hitbox {
+bool Active() { return hitboxOpen; }
+}
 namespace cccaster::platform {
 int64_t RealMonotonicTicks() { return 1; }
+[[noreturn]] void TerminateSelf() { ++localTerminations; throw LocalExit{}; }
 }
 namespace cccaster::domain::ui {
 int UIManager::HandleWndProcMessage(HWND, UINT, WPARAM, LPARAM) { return 0; }
-bool UIManager::IsMappingWindowOpen() { return false; }
+bool UIManager::IsMappingWindowOpen() { return mappingOpen; }
 }
 namespace cccaster::core::sync {
 InputTimeline &InputTimeline::GetInstance() { static InputTimeline s; return s; }
@@ -25,8 +48,14 @@ NetplaySession &NetplaySession::GetInstance() { static NetplaySession s; return 
 void NetplaySession::Stop() {}
 }
 namespace {
+// 終了stubの例外をWinAPI内部へ投げない。設置済みの本物のWndProcを直接呼ぶ。
+LRESULT ExitMessage(HWND hwnd, UINT message, WPARAM w, LPARAM l) {
+    const auto procedure = reinterpret_cast<WNDPROC>(GetWindowLongPtr(hwnd, GWLP_WNDPROC));
+    try { return procedure(hwnd, message, w, l); }
+    catch (const LocalExit&) { return 0; }
+}
 unsigned nativeCaption = 0, nativeModal = 0, updates = 0, escapeMessages = 0;
-unsigned nativeMenu = 0, closeCommands = 0, nativeEnter = 0;
+unsigned nativeMenu = 0, closeCommands = 0, closeMessages = 0, nativeEnter = 0;
 LRESULT CALLBACK Original(HWND hwnd, UINT message, WPARAM w, LPARAM l) {
     if ((message == WM_SYSKEYDOWN || message == WM_SYSKEYUP || message == WM_SYSCHAR) && w == VK_RETURN) {
         ++nativeEnter; return 0;
@@ -36,6 +65,7 @@ LRESULT CALLBACK Original(HWND hwnd, UINT message, WPARAM w, LPARAM l) {
         ++nativeMenu; return 0;
     }
     if (message == WM_SYSCOMMAND && (w & 0xfff0) == SC_CLOSE) { ++closeCommands; return 0; }
+    if (message == WM_CLOSE) { ++closeMessages; return 0; }
     if (message == WM_NCLBUTTONDOWN || message == WM_NCLBUTTONUP || message == WM_NCLBUTTONDBLCLK) {
         ++nativeCaption; return 0;
     }
@@ -189,8 +219,9 @@ int main() {
     SendMessage(window,WM_CONTEXTMENU,reinterpret_cast<WPARAM>(window),-1);
     CC_CHECK_EQ(nativeCaption,0);
     CC_CHECK_EQ(nativeMenu,0);
-    SendMessage(window,WM_SYSCOMMAND,SC_CLOSE,0);
-    CC_CHECK_EQ(closeCommands,1);
+    ExitMessage(window,WM_SYSCOMMAND,SC_CLOSE,0);
+    CC_CHECK_EQ(closeCommands,0);
+    CC_CHECK_EQ(localTerminations,1);
     CC_CASE("タイトルバー押下で非アクティブ窓へフォーカスが移り、保持中も通常処理へ戻る");
     // 非表示窓ではOSの前面化制限と切り離してアクティブ窓・入力先を検査する。
     // 解放も移動もしていない押下直後に切り替わることが必要。
@@ -224,10 +255,10 @@ int main() {
     const auto beforeCancel = Position(window);
     Begin(window);
     MoveTo(window,beforeCancel.left+180,beforeCancel.top+30);
-    SendMessage(window,WM_KEYDOWN,VK_ESCAPE,0);
+    ExitMessage(window,WM_KEYDOWN,VK_ESCAPE,0);
     CC_CHECK(WndProcHook::BlocksEscapeExit());
-    SendMessage(window,WM_KEYDOWN,VK_ESCAPE,1LL<<30);
-    SendMessage(window,WM_KEYUP,VK_ESCAPE,0);
+    ExitMessage(window,WM_KEYDOWN,VK_ESCAPE,1LL<<30);
+    ExitMessage(window,WM_KEYUP,VK_ESCAPE,0);
     CC_CHECK(!WndProcHook::BlocksEscapeExit());
     CC_CHECK_EQ(escapeMessages,0);
     CC_CHECK_EQ(Position(window).left,beforeCancel.left);
@@ -253,11 +284,89 @@ int main() {
     CC_CHECK(GetCapture() != window);
     CC_CASE("解除時に捕捉とフックを残さずタイトルバー以外を横取りしない");
     Begin(window);
-    SendMessage(window,WM_KEYDOWN,VK_ESCAPE,0);
+    ExitMessage(window,WM_KEYDOWN,VK_ESCAPE,0);
     SendMessage(window,WM_KILLFOCUS,0,0);
     CC_CHECK(!WndProcHook::BlocksEscapeExit());
     SendMessage(window,WM_NCLBUTTONDOWN,HTCLOSE,0);
     CC_CHECK_EQ(nativeCaption,1);
+    CC_CHECK_EQ(localTerminations,1);
+    CC_CASE("戦闘中だけEsc・閉じるボタン・直接終了要求を遮断しIPCへ通知しない");
+    using namespace cccaster::public_api;
+    using cccaster::game_interface::GamePhase;
+    SharedState state{};
+    state.magicVersion = IPC_VERSION_MAGIC;
+    const auto ipc = IpcManager::CreateAndWrite(state);
+    CC_CHECK(ipc != nullptr);
+    for (const auto mode : {0, 1, 2, 4, 5, 255}) {
+        appMode = mode;
+        for (const auto scene : {GamePhase::Unknown, GamePhase::MainMenu, GamePhase::CharaSelect,
+                                GamePhase::Loading, GamePhase::InGame, GamePhase::Rematch}) {
+            phase = scene;
+            const bool blocked = (mode == 0 || mode == 5) && scene == GamePhase::InGame;
+            CC_CHECK_EQ(WndProcHook::BlocksCloseExit(), blocked);
+            CC_CHECK_EQ(WndProcHook::BlocksEscapeExit(), blocked);
+            IpcManager::UpdateOrReadState([mode](SharedState &s) {
+                s.targetGameMode = mode; s.gameShutdownRequest = false; s.localExitReason = 0;
+            });
+            const auto beforeClose = closeMessages;
+            const auto beforeCommand = closeCommands;
+            const auto beforeCaption = nativeCaption;
+            const auto beforeTerminate = localTerminations;
+            for (auto message : {WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCLBUTTONDBLCLK})
+                SendMessage(window,message,HTCLOSE,0);
+            ExitMessage(window,WM_SYSCOMMAND,SC_CLOSE | 3,0);
+            ExitMessage(window,WM_CLOSE,0,0);
+            SharedState observed{};
+            CC_CHECK(IpcManager::OpenAndRead(observed));
+            CC_CHECK_EQ(observed.gameShutdownRequest, !blocked && mode == 0);
+            CC_CHECK_EQ(observed.localExitReason, blocked ? 0u : unsigned(SessionExitReason::CloseButton));
+            CC_CHECK_EQ(nativeCaption-beforeCaption, blocked ? 0u : 3u);
+            CC_CHECK_EQ(closeMessages-beforeClose,0u);
+            CC_CHECK_EQ(closeCommands-beforeCommand,0u);
+            CC_CHECK_EQ(localTerminations-beforeTerminate, blocked || mode == 0 ? 0u : 2u);
+            IpcManager::UpdateOrReadState([](SharedState &s) { s.gameShutdownRequest=false;s.localExitReason=0; });
+            const auto beforeEscape = closeMessages;
+            const auto beforeEscapeTerminate = localTerminations;
+            for (auto message : {WM_KEYDOWN, WM_SYSKEYDOWN}) ExitMessage(window,message,VK_ESCAPE,0);
+            ExitMessage(window,WM_KEYDOWN,VK_ESCAPE,1LL<<30);
+            ExitMessage(window,WM_KEYUP,VK_ESCAPE,0);
+            WndProcHook::PumpMessages();
+            CC_CHECK(IpcManager::OpenAndRead(observed));
+            CC_CHECK_EQ(observed.gameShutdownRequest, !blocked && mode == 0);
+            CC_CHECK_EQ(observed.localExitReason, blocked ? 0u : unsigned(SessionExitReason::Escape));
+            CC_CHECK_EQ(closeMessages-beforeEscape,0u);
+            CC_CHECK_EQ(localTerminations-beforeEscapeTerminate, blocked || mode == 0 ? 0u : 3u);
+        }
+    }
+    CC_CASE("戦闘からキャラ選択へ移っても押し続けたEscでは終了しない");
+    const auto beforeHeldTerminate = localTerminations;
+    appMode=5;phase=GamePhase::InGame;
+    ExitMessage(window,WM_KEYDOWN,VK_ESCAPE,0);
+    phase=GamePhase::CharaSelect;
+    CC_CHECK(WndProcHook::BlocksEscapeExit());
+    ExitMessage(window,WM_KEYDOWN,VK_ESCAPE,1LL<<30);
+    ExitMessage(window,WM_KEYUP,VK_ESCAPE,0);
+    CC_CHECK(!WndProcHook::BlocksEscapeExit());
+    CC_CHECK_EQ(localTerminations,beforeHeldTerminate);
+    CC_CASE("選択設定・パレット・HITBOX・F4のEscを終了要求にしない");
+    appMode=1;phase=GamePhase::InGame;
+    namespace options=cccaster::domain::scene::selection_options;
+    for (unsigned menu=0;menu<4;++menu) {
+        options::active = menu==0;
+        cccaster::training_palette::editorOpen=menu==1;
+        hitboxOpen=menu==2;mappingOpen=menu==3;
+        IpcManager::UpdateOrReadState([](SharedState &s) { s.gameShutdownRequest=false;s.localExitReason=0; });
+        const auto beforeClose=closeMessages;
+        const auto beforeMenuTerminate=localTerminations;
+        ExitMessage(window,WM_KEYDOWN,VK_ESCAPE,0);
+        WndProcHook::PumpMessages();
+        SharedState observed{}; CC_CHECK(IpcManager::OpenAndRead(observed));
+        CC_CHECK_EQ(observed.localExitReason,0);
+        CC_CHECK_EQ(closeMessages,beforeClose);
+        CC_CHECK_EQ(localTerminations,beforeMenuTerminate);
+    }
+    options::active=false;cccaster::training_palette::editorOpen=false;hitboxOpen=mappingOpen=false;
+    CloseHandle(ipc);
     Begin(window);
     WndProcHook::Shutdown();
     CC_CHECK(GetCapture() != window);

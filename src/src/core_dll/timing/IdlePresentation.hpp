@@ -14,7 +14,9 @@ struct IdlePresentation {
     }
     struct Scope {
         Callback previous;
-        explicit Scope(Callback value) : previous(callback) { callback = value; }
+        explicit Scope(Callback value) : previous(callback) {
+            callback = value;
+        }
         ~Scope() { callback = previous; }
         Scope(const Scope&) = delete;
         Scope& operator=(const Scope&) = delete;

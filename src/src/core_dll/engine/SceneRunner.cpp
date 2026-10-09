@@ -1,10 +1,16 @@
+#include "core_dll/hook/HookBatch.hpp"
 #include "core_dll/engine/ReplayFileName.hpp"
+#include "core_dll/mbaa_mem/TrainingPaletteMenu.hpp"
+#include "core_dll/mbaa_mem/ExtraColorSelection.hpp"
+#include "core_dll/mbaa_mem/BossCharacterSelect.hpp"
+#include "core_dll/timing/SpinAssistScope.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
 #include "core_dll/timing/UpdateCadence.hpp"
 #include "core_dll/spectator/Playback.hpp"
 #include <cstdio>
 #include <string>
 #include "core_dll/timing/FrameTiming.hpp"
+#include "core_dll/timing/FramePipeline.hpp"
 #include "core_dll/ui/ScoreBroadcast.hpp"
 #include "core_dll/timing/SpinProbe.hpp"
 #include "core_dll/timing/WasapiClock.hpp"
@@ -49,13 +55,43 @@
 #include "core_dll/engine/StageRematch.hpp"
 #include "core_dll/engine/LocalInputGate.hpp"
 #include "core_dll/engine/SelectionOptions.hpp"
+#include "core_dll/engine/SelectionPreferences.hpp"
+#include "core_dll/hook/DisplaySettings.hpp"
 #include "core_dll/ui/HudDisplay.hpp"
 #include "core_dll/engine/TrainingInputDelay.hpp"
+#include "core_dll/engine/LocalInputHistory.hpp"
 #include "core_dll/engine/RetryInputGate.hpp"
 #include "core_dll/ui/State_Ui_Logic.hpp"
 
 namespace cccaster::domain::session {
 using namespace cccaster::core::sync;
+
+namespace {
+void BeginNormalFrame(int64_t due, uint32_t frame, bool play) {
+    using Timing = cccaster::core::timer::FrameTiming;
+    auto &cadence = cccaster::diagnostics::UpdateCadence::Get();
+    if (cccaster::diagnostics::UpdateCadence::Enabled()) cadence.Arm(frame, play);
+    // No input preparation between this final wait and the coarse wait.
+    const auto boundary = due ? cccaster::core::timer::WasapiClock::WaitForRelease(due)
+                              : cccaster::platform::RealMonotonicTicks();
+    // 補助担当の境界採時はDeadlineWorkへ記録する。処理区間と表示FPSは、
+    // ゲームスレッドが待機から戻った同一の実時刻を起点にする。
+    const auto actual = due ? cccaster::core::timer::WasapiClock::releaseSample.received : boundary;
+    Timing::BeginFrame(actual, frame);
+    if (cadence.Armed()) cadence.Capture(actual);
+    cccaster::diagnostics::FramePipeline::Begin(frame, actual);
+    // Controlled preparation spikes exercise the real schedule, without changing
+    // either clock or recorded timestamps. Disabled unless explicitly requested.
+    static const int testPrepareUs = [] {
+        const auto *value = std::getenv("CCCASTER_TEST_FRAME_PREPARE_US");
+        return value ? std::clamp(std::atoi(value), 0, 8000) : 0;
+    }();
+    if (testPrepareUs && play && frame % 60 == 0) {
+        const auto until = cccaster::platform::RealMonotonicTicks() + int64_t(testPrepareUs) * 60;
+        while (cccaster::platform::RealMonotonicTicks() < until) cccaster::platform::CpuRelax();
+    }
+}
+}
 using Session = cccaster::core::netplay::NetplaySession;
 using GamePhase = cccaster::game_interface::GamePhase;
 using GameInput = cccaster::game_interface::GameInput;
@@ -70,6 +106,7 @@ struct SceneRuntime {
     cccaster::spectator::Record spectatorPending;
     bool spectatorHasPending = false;
     SessionScore score;
+    uint64_t localScoreGeneration = 0;
     FrameAdvantageTracker advantage;
     FrameBarHistory frameBar;
     TrainingState trainingState;
@@ -89,6 +126,11 @@ struct SceneRuntime {
     uint32_t replayFrame = 0, replayTarget = 0, lastForced = 0;
     bool rollbackWitnessPending = false;
     std::vector<char> rollbackExpected, rollbackActual;
+    uint32_t pendingReplay = 0, inputLead = 0;
+    LocalInputHistory localInputs;
+    bool localRollback = false;
+    uint32_t localWorld = 0, replayTargetWorld = 0;
+    bool pendingForced = false;
     bool snapshotReady = false;
     uint32_t retryDriveFrames = 0;
     bool fastRematchTransition = false;
@@ -112,6 +154,8 @@ SceneRuntime runtime;
 
 bool StepSelectionOptions(GameInput input, bool available, bool editable) {
     namespace options = scene::selection_options;
+    namespace preferences = scene::selection_preferences;
+    const bool restoring = available && preferences::Restore();
     auto &mem = cccaster::game_interface::GameMem();
     const bool mapping = cccaster::domain::ui::StateUiLogic::IsMappingWindowOpen();
     options::visible = available;
@@ -120,11 +164,45 @@ bool StepSelectionOptions(GameInput input, bool available, bool editable) {
     options::animationValue = available ? mem.StageAnimation() : -1;
     options::animationOn = options::animationValue == 1;
     const bool wasOpen = options::menu.open;
-    const auto result = options::menu.Step(input, options::actions.exchange(0), available, mapping,
-        editable && !SettingsCommands::pending.load(), options::animationOn);
+    namespace display = cccaster::game_interface::borderless;
+    auto displayState = available ? display::GetDisplaySettings() : display::DisplaySettings{};
+    const auto result = options::menu.Step(input, options::actions.exchange(0), available && !restoring, mapping,
+        editable && !SettingsCommands::pending.load(), options::animationOn, displayState.fullscreen);
     options::active = options::menu.open;
+    if (result.resolutionStep) {
+        const bool accepted = mem.ChangeRenderResolution(result.resolutionStep);
+        DebugLog("[SelectionOptions] RESOLUTION accepted=%d",int(accepted));
+    }
+    const auto resolution = available ? mem.RenderResolution() : cccaster::game_interface::ScreenResolution{};
+    if (result.fullscreen >= 0) {
+        const bool applied = !resolution.pending && display::SetFullscreen(result.fullscreen == 1);
+        displayState = display::GetDisplaySettings();
+        if (applied) preferences::Save(preferences::Key::Fullscreen, int(displayState.fullscreen));
+        DebugLog("[SelectionOptions] DISPLAY action=fullscreen applied=%d size=%dx%d fullscreen=%d", int(applied),
+            displayState.windowSize.width, displayState.windowSize.height, int(displayState.fullscreen));
+    }
+    options::displayAvailable = displayState.available;
+    options::fullscreen = displayState.fullscreen;
+    options::resolutionAvailable = resolution.available;
+    options::resolutionPending = resolution.pending;
+    options::renderWidth = resolution.width;
+    options::renderHeight = resolution.height;
+    for (unsigned i = 0; i < options::nativeValues.size(); ++i) {
+        const auto option = static_cast<cccaster::game_interface::NativeDisplayOption>(i);
+        auto value = available ? mem.DisplayOption(option) : -1;
+        if (result.nativeStep && options::menu.row == i + 5) {
+            const int next = cccaster::game_interface::NextDisplayValue(option, value, result.nativeStep);
+            if (next >= 0 && mem.SetDisplayOption(option, next)) {
+                value = next;
+                preferences::Save(preferences::Key(unsigned(preferences::Key::CharacterFilter) + i), value);
+            }
+        }
+        options::nativeValues[i] = value;
+    }
+    if (options::nativeValues[1] >= 0) display::SetScaleFilter(options::nativeValues[1] == 1);
     if (result.hudStep) {
         ui::HudDisplay::Cycle(result.hudStep);
+        preferences::Save(preferences::Key::Hud, int(ui::HudDisplay::Get()));
         DebugLog("[SelectionOptions] HUD mode=%s", ui::HudDisplay::Name());
     }
     if (wasOpen != options::menu.open)
@@ -132,7 +210,8 @@ bool StepSelectionOptions(GameInput input, bool available, bool editable) {
     if (result.delayStep) {
         const int value = std::clamp(options::delay + result.delayStep, 0, public_api::NetplaySettings::MaxDelay);
         if (value != options::delay) {
-            const bool accepted = runtime.context->appMode == 1 ? SceneRunner::RequestTrainingDelay(value)
+            const bool accepted = runtime.context->appMode == 1 || runtime.context->appMode == 5
+                ? SceneRunner::RequestLocalDelay(value)
                 : SettingsCommands::Request(false, value);
             DebugLog("[SelectionOptions] DELAY request=%d accepted=%d", value, int(accepted));
         }
@@ -141,8 +220,9 @@ bool StepSelectionOptions(GameInput input, bool available, bool editable) {
         result.animation != options::animationValue && mem.SetStageAnimation(result.animation == 1)) {
         options::animationValue = result.animation;
         options::animationOn = result.animation == 1;
+        preferences::Save(preferences::Key::Animation, result.animation);
     }
-    return result.block;
+    return result.block || restoring;
 }
 
 void PublishSpectatorConfirmed() {
@@ -181,6 +261,11 @@ void PublishSpectatorConfirmed() {
 }
 
 void WriteGameInputs(GamePhase phase, uint32_t p1, uint32_t p2) {
+    if(phase==GamePhase::CharaSelect) {
+        auto first=GameInput::Unpack(p1),second=GameInput::Unpack(p2);
+        cccaster::training_palette::selection::Filter(first,second);
+        p1=first.Pack();p2=second.Pack();
+    }
     auto &mem = cccaster::game_interface::GameMem();
     if (phase == GamePhase::Rematch) {
         const int before = scene::rematchChoice.result;
@@ -227,12 +312,12 @@ void Fail(Error error, const char *reason) {
     FrameControl::SetModeNormalSpeed();
     DebugLog("[InputGate] FAILED reason=%s frame=%u WT=%u", reason, runtime.sequence.Next(),
              cccaster::game_interface::GameMem().WorldTimer());
-    // IpcManagerの関数ポインタAPIへ同一ゲームスレッドの一時値を渡す。
-    static uint32_t code;
-    code = static_cast<uint32_t>(error);
-    cccaster::public_api::IpcManager::UpdateOrReadState([](cccaster::public_api::SharedState &s) {
+    cccaster::public_api::IpcManager::UpdateOrReadState([error, reason](cccaster::public_api::SharedState &s) {
         s.syncCompleted = false;
-        if (s.lastErrorCode != static_cast<uint32_t>(Error::PeerClosed)) s.lastErrorCode = code;
+        if (s.lastErrorCode != static_cast<uint32_t>(Error::PeerClosed)) {
+            s.lastErrorCode = static_cast<uint32_t>(error);
+            std::snprintf(s.lastErrorReason, sizeof(s.lastErrorReason), "%s", reason);
+        }
     });
     FrameControl::ExitGame();
 }
@@ -341,7 +426,7 @@ bool Wait(const char *reason, int64_t timeoutUs, Predicate predicate, int64_t de
                  cccaster::core::timer::WasapiClock::GetTimeTicks() < readyHintTicks + 60 * readyHintSpinGuardUs))
                 cccaster::platform::CpuRelax();
             else
-                cccaster::platform::PreciseWaitUs(std::min<int64_t>(500, remaining));
+                cccaster::platform::RealSleepUs(std::min<int64_t>(500, remaining));
         });
     if (probe) Probe::sample.bounded = Probe::Now();
     if (waitReason) Probe::RecordInputWait(runtime.sequence.Next(),waitReason,inputWaitBegin,Probe::Now());
@@ -382,19 +467,44 @@ bool Wait(const char *reason, int64_t timeoutUs, Predicate predicate, int64_t de
          reason);
     return false;
 }
+bool WaitForCapture(const char *reason, uint32_t frame, int64_t hint, int64_t guard = 1000) {
+    using namespace cccaster::core::timer;
+    auto &timeline = cccaster::core::sync::InputTimeline::GetInstance();
+    const auto original = [&] { return timeline.HasCaptured(frame) || timeline.HasOverflowed(); };
+    if (!SpinPrototype::Publication()) return Wait(reason, 3000000, original, 0, hint, 0, guard);
+    const auto now = WasapiClock::GetTimeTicks();
+    const auto estimate = cccaster::platform::RealMonotonicTicks() + hint - now;
+    SpinObservationScope assist(true, SpinChannels::Publication, estimate - guard * 60, estimate + guard * 60,
+        [](void *arg, int) {
+            return cccaster::core::sync::InputTimeline::GetInstance().HasCaptured(uint32_t(*static_cast<int64_t *>(arg)));
+        }, frame);
+    const auto workers = assist.Workers();
+    // 公開をacquireで読んだ補助時計の結果もrelease/acquireで受け取る。
+    const auto result = Wait(reason, 3000000, [&] { return assist.Ready() || original(); }, 0, hint, 0, guard);
+    const auto actual = cccaster::platform::RealMonotonicTicks();
+    assist.Finish();
+    int winner = -1;
+    const auto observed = assist.Observed(actual, &winner);
+    static const bool trace = SpinPrototype::Flag("CCCASTER_PACE_TRACE");
+    if (trace && result) cccaster::diagnostics::DeferredNumericLog::Log(
+        "[PublicationRace] f=%u workers=%d winner=%d observed=%lld actual=%lld",
+        frame, workers, winner, observed, actual);
+    return result;
+}
 } // namespace
 
 void SceneRunner::Init(MatchContext &ctx) {
     cccaster::domain::ui::StateUiLogic::ResetUtilityMetrics(ctx.appMode == 0);
     runtime.ready.store(false);
-    runtime.score.Reset(ctx.appMode == 0);
+    runtime.score.Reset(ctx.appMode == 0 || ctx.appMode == 5);
+    runtime.localScoreGeneration = 0;
     runtime.advantage.Reset();
     runtime.frameBar.Reset();
     runtime.trainingState.Reset();
     runtime.trainingDelay = {};
     runtime.requestedTrainingDelay = -1;
-    if (ctx.appMode == 1) {
-        ctx.maxRollback = 0; // オフラインでは予測・ロールバックを行わない。
+    if (ctx.appMode == 1 || ctx.appMode == 5) {
+        ctx.maxRollback = 0; // No network prediction setting; local correction has its own two-update window.
         cccaster::domain::ui::StateUiLogic::SetDelay(ctx.delay);
         cccaster::domain::ui::StateUiLogic::SetRollback(0);
     }
@@ -405,6 +515,7 @@ void SceneRunner::Init(MatchContext &ctx) {
     runtime.stageRematch = {};
     runtime.localInputGate = {};
     scene::selection_options::Reset();
+    scene::selection_preferences::Initialize();
     runtime.secondInputGate = {};
     runtime.running = true;
     runtime.sequence = FrameSequence{};
@@ -412,7 +523,13 @@ void SceneRunner::Init(MatchContext &ctx) {
     runtime.loadingInputTick = runtime.loadingButtons = runtime.loadingSkipFrames = 0;
     runtime.loadingSkipRequested = false;
     runtime.replayFrame = runtime.replayTarget = runtime.lastForced = 0;
+    runtime.pendingReplay = runtime.inputLead = 0;
+    runtime.pendingForced = false;
+    runtime.rollbackWitnessPending = false;
     runtime.snapshotReady = false;
+    runtime.localRollback = false;
+    runtime.localInputs.Clear();
+    cccaster::game_interface::GameMem().ConfigureInputWriteMonitor(false);
     runtime.previous = GamePhase::Unknown;
     runtime.previousIntro = 255;
     runtime.syncedReported = false;
@@ -428,7 +545,7 @@ void SceneRunner::Init(MatchContext &ctx) {
     }
     if (cccaster::diagnostics::startup::Baseline()) FrameControl::SetModeNormalSpeed();
     else FrameControl::SetModeHighSpeedSkip();
-    scene::SceneFastBoot::Start(ctx.appMode == 2 ? cccaster::public_api::IpcGameMode::Versus
+    scene::SceneFastBoot::Start(ctx.appMode == 2 || ctx.appMode == 5 ? cccaster::public_api::IpcGameMode::Versus
                                                : static_cast<cccaster::public_api::IpcGameMode>(ctx.appMode));
     runtime.ready.store(true, std::memory_order_release);
     DebugLog("[SceneRunner] rollback session initialized role=%s", ctx.isHost ? "host" : "client");
@@ -440,8 +557,21 @@ void SceneRunner::FlushCadence() {
     auto &cadence = Cadence::Get();
     if (!cadence.Take(s)) return;
     const auto &release = cccaster::core::timer::WasapiClock::releaseSample;
-    DebugLog("[ReleaseGate] f=%u ready=%lld due=%lld exit=%lld actual=%lld readyLate=%lld ppm=%lld",
+    DebugLog(cccaster::core::timer::OfflinePacing::Mode() == cccaster::core::timer::OfflinePacing::Variant::Normal ||
+             (runtime.context && runtime.context->appMode == 0) ?
+             "[FrameStart] f=%u ready=%lld due=%lld exit=%lld actual=%lld readyLate=%lld ppm=%lld" :
+             "[ReleaseGate] f=%u ready=%lld due=%lld exit=%lld actual=%lld readyLate=%lld ppm=%lld",
              s.frame, release.ready, release.due, release.exit, s.now, release.readyLate, release.ppm);
+    if (release.requested) {
+        DebugLog("[DeadlineWork] f=%u worker=%d due=%lld start=%lld done=%lld pub=%lld seen=%lld reader=%d armed=%lld",
+            s.frame, release.winner, release.due, release.boundary, release.completed,
+            release.publicationUpper, release.received, int(release.upperFromReader), release.armed);
+        DebugLog("[BoundaryRace] f=%u requested=%d workers=%d valid=%d covered=%d winner=%d armed=%lld due=%lld boundary=%lld game=%lld received=%lld",
+            s.frame, release.requested, release.workers, release.valid, release.covered, release.winner,
+            release.armed, release.due, release.boundary, release.exit, release.received);
+        DebugLog("[BoundarySlots] f=%u s0=%lld s1=%lld s2=%lld s3=%lld", s.frame,
+            release.stamps[0], release.stamps[1], release.stamps[2], release.stamps[3]);
+    }
     cccaster::diagnostics::DeferredNumericLog::Flush();
     DebugLog("[UpdateCadence] n=%u f=%u prev=%u ticks=%lld interval=%lld error=%lld consecutive=%d spike=%d dropped=%u evidence=%d play=%d",
              s.ordinal, s.frame, s.previous, s.now, s.interval, s.error, int(s.consecutive),
@@ -518,6 +648,291 @@ void SceneRunner::PrepareDrawing() {
         cccaster::core::SpeedFlags::RenderSkip().store(false, std::memory_order_release);
 }
 
+namespace {
+uint32_t AlignedInputSource(uint32_t frame) {
+    return runtime.postRoundDelay.Source(frame) + runtime.inputLead;
+}
+bool ReadAlignedLocal(uint32_t frame, uint32_t &value) {
+    if (runtime.localRollback) return runtime.localInputs.Read(frame,runtime.context->isHost ? 0 : 1,value);
+    return MatchInputBuffer::GetInstance().TryGetLocalInput(AlignedInputSource(frame), value);
+}
+bool ReadAlignedRemote(uint32_t frame, uint32_t &value) {
+    if (runtime.localRollback) return runtime.localInputs.Read(frame,runtime.context->isHost ? 1 : 0,value);
+    return MatchInputBuffer::GetInstance().TryGetRemoteInput(AlignedInputSource(frame), value);
+}
+void StopLocalRollback() {
+    if (!runtime.localRollback) return;
+    runtime.localRollback = runtime.snapshotReady = false;
+    runtime.inputLead = 0;
+    runtime.localInputs.Clear();
+    cccaster::game_interface::GameMem().ConfigureInputWriteMonitor(false);
+    DebugLog("[LocalInputRollback] RESET mode=%u world=%u",unsigned(runtime.context->appMode),
+        cccaster::game_interface::GameMem().WorldTimer());
+}
+bool PrepareLocalRollback(GameInput p1, GameInput p2, bool eligible) {
+    // 予約を1更新前へ差し替える自入力再計算は取りやめ。比較実験だけに残す。
+    static const bool experiment = [] {
+        const auto* value = std::getenv("CCCASTER_TEST_LOCAL_INPUT_ROLLBACK");
+        return value && value[0] == '1';
+    }();
+    if (!experiment) { StopLocalRollback(); return true; }
+    auto& mem = cccaster::game_interface::GameMem();
+    if (!eligible || !mem.SupportsSnapshots()) { StopLocalRollback(); return true; }
+    if (runtime.localRollback && (mem.WorldTimer() != runtime.localWorld+1 || !runtime.sequence.CanAdvance()))
+        StopLocalRollback();
+    if (!runtime.localRollback) {
+        const auto size = mem.PresentationSnapshotSize();
+        if (!size || !runtime.sequence.Begin(0) || !mem.ConfigureInputWriteMonitor(true)) {
+            Fail(Error::SyncTimeout,"local input rollback preparation failed"); return false;
+        }
+        runtime.localInputs.Clear();
+        runtime.history.Reset(runtime.sequence.Next(),2);
+        runtime.snapshots.Reset(size,true);
+        runtime.localRollback = runtime.snapshotReady = true;
+        runtime.inputLead = 1;
+        DebugLog("[LocalInputRollback] ACTIVE mode=%u D=%d epoch=%u",unsigned(runtime.context->appMode),
+            int(runtime.context->delay),runtime.sequence.Base());
+    }
+    const auto frame = runtime.sequence.Next();
+    runtime.localInputs.Publish(frame,p1,p2);
+    const auto local = (runtime.context->isHost ? p1 : p2).Pack();
+    const auto remote = (runtime.context->isHost ? p2 : p1).Pack();
+    if (!runtime.snapshots.Save(frame,mem,local,remote) || !runtime.history.Record(frame,local,remote) ||
+        !runtime.sequence.Commit(frame)) {
+        Fail(Error::SyncTimeout,"local input rollback history failed"); return false;
+    }
+    runtime.localWorld = mem.WorldTimer();
+    mem.BeginSimulation(frame);
+    return true;
+}
+uint32_t ReconcileInputWrites() {
+    auto* writes = cccaster::game_interface::GameMem().InputWrites();
+    if (!writes) return 0;
+    const auto difference = writes->Compare(runtime.history.Confirmed()+1,runtime.history.Next(),
+        [](uint32_t frame,unsigned player,uint32_t& raw) {
+            return (runtime.context->isHost == (player == 0) ? ReadAlignedLocal : ReadAlignedRemote)(frame,raw);
+        },[&](uint32_t frame,const cccaster::sync::InputWriteHistory::Write& w,uint32_t raw,
+              const cccaster::sync::ActorInputValue& expected) {
+            writes->Request(frame,w.context.actor,raw);
+            if (cccaster::testing::IsInputTraceEnabled() || cccaster::testing::IsScriptedInputEnabled())
+                DebugLog("[NativeInputWrite] MISMATCH frame=%u player=%u address=%08X raw=%08X beforeDir=%u beforeButtons=%08X beforeRelease=%08X expectedDir=%u expectedButtons=%08X expectedRelease=%08X",
+                    frame,unsigned(w.context.source+1),unsigned(w.context.actor+0x2E7),raw,
+                    unsigned(w.actual.direction),w.actual.buttons,w.actual.released,
+                    unsigned(expected.direction),expected.buttons,expected.released);
+        });
+    return difference.first;
+}
+bool BeginRollback(uint32_t mismatch, bool forced) {
+    auto &mem = cccaster::game_interface::GameMem();
+    const auto next = runtime.sequence.Next();
+    runtime.replayTargetWorld = mem.WorldTimer();
+    if (forced) {
+        const auto size = mem.SnapshotSize();
+        runtime.rollbackExpected.resize(size); runtime.rollbackActual.resize(size);
+        if (!size || !mem.SaveSnapshot(runtime.rollbackExpected)) {
+            Fail(Error::SyncTimeout, "rollback witness expected save failed"); return false;
+        }
+        runtime.rollbackWitnessPending = true;
+        DebugLog("[RollbackWitness] BEGIN frame=%u target=%u confirmed=%u bytes=%u", mismatch,
+                 next, runtime.history.Confirmed(), static_cast<unsigned>(size));
+    }
+    const bool replayProbe = cccaster::diagnostics::SpinProbe::Enabled();
+    if (replayProbe) cccaster::diagnostics::DeferredNumericLog::Prepare();
+    runtime.replayBeginTicks = replayProbe ? cccaster::platform::RealMonotonicTicks() : 0;
+    runtime.replaySaveTicks = runtime.replayPrepareTicks = 0;
+    runtime.replaySaved = runtime.replaySkipped = 0;
+    runtime.replayFrom = mismatch;
+    const unsigned targetIntro = mem.IntroState();
+    const auto restoreStart = cccaster::platform::RealMonotonicUs();
+    if (!mem.BeginReplay(mismatch, runtime.sequence.Next()) ||
+        !runtime.snapshots.Load(mismatch, mem)) {
+        Fail(Error::SyncTimeout, "rollback restore failed");
+        return false;
+    }
+    if (std::getenv("CCCASTER_PACE_TRACE"))
+        DebugLog("[RestoreStage] f=%u restore=%lld", runtime.sequence.Next(),
+                 cccaster::platform::RealMonotonicUs() - restoreStart);
+    runtime.replayRestoreEnd = replayProbe ? cccaster::platform::RealMonotonicTicks() : 0;
+    runtime.replayFrame = mismatch;
+    runtime.replayTarget = next;
+    runtime.replayStarted = cccaster::platform::RealMonotonicUs();
+    cccaster::domain::ui::StateUiLogic::RecordRollback(runtime.replayTarget - mismatch);
+    if (cccaster::testing::IsScriptedInputEnabled() || cccaster::testing::IsInputTraceEnabled())
+        cccaster::diagnostics::DeferredNumericLog::Log("[Rollback] BEGIN frame=%u target=%u depth=%u forced=%d intro=%u targetIntro=%u", mismatch, next,
+                 next - mismatch, forced, unsigned(mem.IntroState()), targetIntro);
+    return true;
+}
+void FinishRollback() {
+    auto &mem = cccaster::game_interface::GameMem();
+    cccaster::diagnostics::DeferredNumericLog::Flush();
+    if (runtime.localRollback && mem.WorldTimer() != runtime.replayTargetWorld) {
+        Fail(Error::SyncTimeout,"local rollback advanced simulation time"); return;
+    }
+    const auto replayElapsedUs = cccaster::platform::RealMonotonicUs() - runtime.replayStarted;
+    const auto replayEnd = runtime.replayBeginTicks ? cccaster::platform::RealMonotonicTicks() : 0;
+    if (runtime.replayBeginTicks) {
+        cccaster::diagnostics::DeferredNumericLog::Flush();
+        DebugLog("[ReplayWork] f=%u from=%u begin=%lld restoreEnd=%lld end=%lld saves=%lld prepare=%lld pid=%u tid=%u saved=%u skipped=%u",
+            runtime.replayTarget, runtime.replayFrom, runtime.replayBeginTicks, runtime.replayRestoreEnd,
+            replayEnd, runtime.replaySaveTicks, runtime.replayPrepareTicks,
+            cccaster::platform::ProcessId(), cccaster::platform::ThreadId(), runtime.replaySaved, runtime.replaySkipped);
+    }
+    if (cccaster::testing::IsScriptedInputEnabled() || cccaster::testing::IsInputTraceEnabled())
+        DebugLog("[Rollback] END target=%u WT=%u elapsedUs=%lld", runtime.replayTarget,
+                 mem.WorldTimer(), replayElapsedUs);
+    runtime.replayFrame = 0;
+    mem.EndReplay();
+    FrameControl::SetModeNormalSpeed();
+    if (runtime.rollbackWitnessPending) {
+        runtime.rollbackWitnessPending = false;
+        const auto size = runtime.rollbackExpected.size();
+        if (mem.SnapshotSize() != size || !mem.SaveSnapshot(runtime.rollbackActual)) {
+            DebugLog("[RollbackWitness] FAIL target=%u reason=actual-save bytes=%u",
+                     runtime.replayTarget, static_cast<unsigned>(size));
+            Fail(Error::SyncTimeout, "rollback witness actual save failed");
+            return;
+        }
+        size_t first = size, different = 0;
+        for (size_t i = 0; i < size; ++i) {
+            if (runtime.rollbackExpected[i] != runtime.rollbackActual[i]) {
+                if (first == size) first = i;
+                ++different;
+            }
+        }
+        if (different) {
+            DebugLog("[RollbackWitness] FAIL target=%u bytes=%u different=%u firstOffset=%u expected=%u actual=%u",
+                     runtime.replayTarget, static_cast<unsigned>(size),
+                     static_cast<unsigned>(different), static_cast<unsigned>(first),
+                     static_cast<unsigned char>(runtime.rollbackExpected[first]),
+                     static_cast<unsigned char>(runtime.rollbackActual[first]));
+            Fail(Error::SyncTimeout, "rollback witness snapshot mismatch");
+            return;
+        }
+        DebugLog("[RollbackWitness] PASS target=%u bytes=%u depth=4", runtime.replayTarget,
+                 static_cast<unsigned>(size));
+    }
+    if (runtime.localRollback && cccaster::testing::IsInputTraceEnabled())
+        DebugLog("[LocalInputRollback] END mode=%u target=%u world=%u expectedWorld=%u",unsigned(runtime.context->appMode),
+            runtime.replayTarget,mem.WorldTimer(),runtime.replayTargetWorld);
+}
+} // namespace
+
+bool SceneRunner::BeforePresent() {
+    if (!IsReady() || !runtime.running || !runtime.context ||
+        (runtime.context->appMode != 0 && !runtime.localRollback) ||
+        !runtime.snapshotReady) return false;
+    auto &mem = cccaster::game_interface::GameMem();
+    if (runtime.pendingReplay) return true;
+    if (const auto* writes = mem.InputWrites(); writes && writes->fault) {
+        cccaster::diagnostics::DeferredNumericLog::Flush();
+        Fail(Error::SyncTimeout,"native input write did not match conversion contract"); return true;
+    }
+    if (runtime.replayFrame) {
+        if (runtime.replayFrame < runtime.replayTarget) return true;
+        FinishRollback();
+        if (!runtime.running) return true;
+    }
+    const auto phase = cccaster::game_interface::PhaseMonitor::GetCurrentPhase();
+    const bool boundary = !mem.CanRollback() || phase != runtime.previous ||
+        (mem.IntroState() == 2 && runtime.previousIntro != 2);
+    // 自入力の最後の予測も確定させてから入力時計を止める。未採取のままPauseしない。
+    if (!runtime.localRollback && (boundary || !runtime.history.CanPredict())) {
+        if (!Wait("rollback boundary drain", 3000000, [&] {
+                if (!boundary) return runtime.history.ReadyToResume(ReadAlignedLocal, ReadAlignedRemote, true);
+                for (uint32_t f=runtime.history.Confirmed()+1; f<runtime.history.Next(); ++f) {
+                    uint32_t a, b;
+                    if (!ReadAlignedLocal(f,a) || !ReadAlignedRemote(f,b)) return false;
+                }
+                return true;
+            })) return true;
+    }
+    // 相手が未着の古い枠を待たず、自入力の新しい実値も同じ履歴へ訂正する。
+    uint32_t localChanged=0, remoteChanged=0;
+    for (uint32_t f=runtime.history.Confirmed()+1; f<runtime.history.Next(); ++f) {
+        const auto *entry=runtime.history.Get(f); uint32_t value=0;
+        if (!entry) continue;
+        localChanged += ReadAlignedLocal(f,value) && value!=entry->local;
+        remoteChanged += ReadAlignedRemote(f,value) && value!=entry->remote;
+    }
+    // Observe native actor stores first. Raw history still handles non-actor inputs and gated updates.
+    const auto addressMismatch = ReconcileInputWrites();
+    auto mismatch=runtime.history.Reconcile(ReadAlignedLocal, ReadAlignedRemote);
+    if (addressMismatch && (!mismatch || addressMismatch < mismatch)) mismatch = addressMismatch;
+    const auto next=runtime.sequence.Next();
+    static const bool introTest=std::getenv("CCCASTER_TEST_INTRO_ROLLBACK")!=nullptr;
+    const bool forceIntro=!runtime.localRollback && introTest && next!=runtime.lastForced && mem.CanRollback() && next-runtime.sequence.Base()>8 &&
+        (mem.IntroState()!=2 || runtime.previousIntro==2) &&
+        (mem.IntroState()==1 || mem.IntroState()==2 || runtime.previousIntro==1) &&
+        (next-runtime.lastForced>30 || mem.IntroState()!=runtime.previousIntro);
+    const bool forced=!mismatch && runtime.history.Confirmed()>=next-1 && (forceIntro || (!runtime.localRollback && runtime.context->isHost && std::getenv("CCCASTER_TEST_ROLLBACK") && mem.CanPredict() &&
+        phase==GamePhase::InGame && next-runtime.sequence.Base()>400 && next-runtime.lastForced>180));
+    if (forced) { mismatch=next-4; runtime.lastForced=next; }
+    if (!mismatch) {
+        if (runtime.localRollback && cccaster::testing::IsInputTraceEnabled())
+            DebugLog("[CONFIRMED] %u",runtime.history.Confirmed());
+        return false;
+    }
+    runtime.pendingReplay=mismatch; runtime.pendingForced=forced;
+    cccaster::core::SpeedFlags::RenderSkip().store(true, std::memory_order_release);
+    if (cccaster::testing::IsScriptedInputEnabled() || cccaster::testing::IsInputTraceEnabled())
+        DebugLog("[PresentRollback] CHECK frame=%u from=%u local=%u remote=%u lead=%u world=%u", next-1,
+            mismatch,localChanged,remoteChanged,runtime.inputLead,mem.WorldTimer());
+    return true;
+}
+
+bool SceneRunner::ContinueReplay() {
+    if (!IsReady() || !runtime.running || !runtime.context) return false;
+    if (runtime.pendingReplay || runtime.replayFrame) {
+        // Stepの先頭を通らない再計算でも、前更新の固定長診断バッファを毎回回収する。
+        cccaster::diagnostics::DeferredNumericLog::Flush();
+        cccaster::diagnostics::SpinProbe::Flush();
+    }
+    if (runtime.pendingReplay) {
+        const auto from=runtime.pendingReplay;runtime.pendingReplay=0;
+        if (!BeginRollback(from,runtime.pendingForced)) return true;
+        runtime.pendingForced=false;
+    }
+    if (!runtime.replayFrame) return false;
+    auto &mem=cccaster::game_interface::GameMem();
+    auto &ctx=*runtime.context;
+    cccaster::core::timer::FrameTiming::releaseDueTicks=0;
+    cccaster::core::timer::FrameTiming::releaseFrame=0;
+    cccaster::core::timer::FrameTiming::presentDueTicks=0;
+    if (runtime.replayFrame==runtime.replayTarget) {
+        Fail(Error::SyncTimeout,"replay completion must precede Present");return true;
+    }
+    const auto saveBegin = runtime.replayBeginTicks ? cccaster::platform::RealMonotonicTicks() : 0;
+    uint32_t local, remote;
+    // 強制ロールバック診断は確定済みフレームへ戻るため、従来の全保存を維持。
+    static const bool keepConfirmed = std::getenv("CCCASTER_KEEP_CONFIRMED_REPLAY_SNAPSHOTS") ||
+                                      std::getenv("CCCASTER_TEST_ROLLBACK") ||
+                                      std::getenv("CCCASTER_TEST_INTRO_ROLLBACK") ||
+                                      cccaster::diagnostics::UpdateCadence::Evidence();
+    const bool save = keepConfirmed || runtime.history.NeedsReplaySnapshot(runtime.replayFrame);
+    if (!runtime.history.ResolveReplay(runtime.replayFrame, ReadAlignedLocal, ReadAlignedRemote, local, remote) ||
+        (save && !runtime.snapshots.Save(runtime.replayFrame, mem, local, remote))) {
+        Fail(Error::SyncTimeout, "rollback history missing");
+        return true;
+    }
+    if (save) ++runtime.replaySaved;
+    else ++runtime.replaySkipped;
+    const auto prepareBegin = runtime.replayBeginTicks ? cccaster::platform::RealMonotonicTicks() : 0;
+    runtime.replaySaveTicks += prepareBegin - saveBegin;
+    mem.BeginSimulation(runtime.replayFrame);
+    FrameControl::SetModeHighSpeedSkip();
+    // 最終更新はゲーム本体の描画から実行して、訂正済み画像をそのまま提示する。
+    if (runtime.replayFrame + 1 == runtime.replayTarget)
+        cccaster::core::SpeedFlags::RenderSkip().store(false, std::memory_order_release);
+    FrameControl::WriteInput(GameInput::Unpack(ctx.isHost ? local : remote),
+                             GameInput::Unpack(ctx.isHost ? remote : local));
+    TraceFrame(runtime.replayFrame, GameInput::Unpack(ctx.isHost ? local : remote),
+               GameInput::Unpack(ctx.isHost ? remote : local));
+    if (runtime.replayBeginTicks)
+        runtime.replayPrepareTicks += cccaster::platform::RealMonotonicTicks() - prepareBegin;
+    ++runtime.replayFrame;
+    return true;
+}
+
 void SceneRunner::Step() {
     using OfflinePacing = cccaster::core::timer::OfflinePacing;
     OfflinePacing::Flush();
@@ -530,6 +945,8 @@ void SceneRunner::Step() {
         (runtime.context->appMode != 2 && OfflinePacing::Mode() == OfflinePacing::Variant::Normal)) {
         thread_local cccaster::platform::TimingThread priority("game");
         priority.MaintainAffinity();
+        if (cccaster::core::timer::SpinPrototype::Any())
+            cccaster::core::timer::WasapiClock::InitializeHelpers();
     }
     auto &ctx = *runtime.context;
     auto &mem = cccaster::game_interface::GameMem();
@@ -541,16 +958,34 @@ void SceneRunner::Step() {
         Fail(Error::SyncTimeout, "game memory unavailable");
         return;
     }
-    if ((ctx.appMode == 0 || ctx.appMode == 2) && !mem.ConfigureNetplayMenu()) {
-        Fail(Error::SyncTimeout, "netplay menu hook unavailable");
-        return;
-    }
-    if (ctx.appMode == 1 && !mem.ConfigureTrainingMenu()) {
-        Fail(Error::SyncTimeout, "training character menu hook unavailable");
-        return;
-    }
+    {
+        cccaster::hook_batch::Scope startupHooks(!scene::SceneFastBoot::IsComplete() &&
+            !cccaster::diagnostics::startup::Baseline() && !std::getenv("CCCASTER_STARTUP_MINIMAL_BASELINE"));
+        if ((ctx.appMode == 0 || ctx.appMode == 2) && !mem.ConfigureNetplayMenu()) {
+            Fail(Error::SyncTimeout, "netplay menu hook unavailable");
+            return;
+        }
+        if (ctx.appMode == 1 && !mem.ConfigureTrainingMenu()) {
+            Fail(Error::SyncTimeout, "training character menu hook unavailable");
+            return;
+        }
+        if(ctx.appMode==0 || ctx.appMode==1 || ctx.appMode==5) {
+            if(!cccaster::training_palette::Install()){Fail(Error::SyncTimeout,"extra color hook unavailable");return;}
+            cccaster::training_palette::selection::Configure(ctx.appMode,ctx.isHost);
+            cccaster::training_palette::selection::Tick();
+        }
+        const auto& bossState=Session::GetState();
+        const auto localBossOption=std::getenv("CCCASTER_BOSS_CHARACTERS");
+        const bool showBosses=boss::Enabled(ctx.appMode,localBossOption && localBossOption[0]=='1',
+            bossState.peerBossCharacters.load(std::memory_order_acquire)) ||
+            (ctx.appMode==2 && (boss::IsBoss(runtime.spectator.match.p1.character) || boss::IsBoss(runtime.spectator.match.p2.character)));
+        if(!boss::selection::Configure(ctx.appMode,showBosses)){Fail(Error::SyncTimeout,"boss character hooks unavailable");return;}
+    } // 初回のメニュー・パレット・ボス選択フックを一括有効化してからゲームへ戻す。
     auto &inputBuffer = MatchInputBuffer::GetInstance();
     const auto earlyPhase = cccaster::game_interface::PhaseMonitor::GetCurrentPhase();
+    if (earlyPhase == GamePhase::InGame) mem.PrepareStartupResources();
+    // 戦闘中も完成画像をモニター周期で再提示する。追加提示の可否は
+    // 待機側のスピン開始までの残り時間と、MonitorPresentの提示コストで判断する。
     if (runtime.loadingStarted && earlyPhase != GamePhase::Loading) {
         DebugLog("[LoadingInput] END role=%d elapsedUs=%lld qpc=%lld", int(ctx.isHost),
             cccaster::platform::RealMonotonicUs() - runtime.loadingStarted, cccaster::platform::RealMonotonicUs());
@@ -615,160 +1050,11 @@ void SceneRunner::Step() {
         (earlyPhase != runtime.previous ||
          (earlyPhase == GamePhase::InGame && mem.IntroState() == 2 && runtime.previousIntro != 2)))
         timeline.Pause();
-reconcileBoundary:
-    const auto readRemote = [&](uint32_t f, uint32_t &v) {
-        return inputBuffer.TryGetRemoteInput(runtime.postRoundDelay.Source(f), v);
-    };
-    if (runtime.snapshotReady && !runtime.replayFrame) {
-        const auto currentPhase = cccaster::game_interface::PhaseMonitor::GetCurrentPhase();
-        if (!mem.CanRollback() || currentPhase != runtime.previous ||
-            (mem.IntroState() == 2 && runtime.previousIntro != 2)) {
-            if (!Wait("rollback boundary drain", 3000000, [&] {
-                    for (uint32_t f = runtime.history.Confirmed() + 1; f < runtime.history.Next(); ++f) {
-                        uint32_t v;
-                        if (!readRemote(f, v))
-                            return false;
-                    }
-                    return true;
-                }))
-                return;
-        }
-        uint32_t mismatch = runtime.history.Reconcile(readRemote);
-        const uint32_t next = runtime.sequence.Next();
-        static const bool introTest = std::getenv("CCCASTER_TEST_INTRO_ROLLBACK") != nullptr;
-        // 新ラウンドのintro=2入口では旧世代へ強制的に戻さない。
-        // 本番の境界drainを通した後、新世代内の保存が揃ってから試験する。
-        const bool forceIntro = introTest && next != runtime.lastForced && mem.CanRollback() && next - runtime.sequence.Base() > 8 &&
-            (mem.IntroState() != 2 || runtime.previousIntro == 2) &&
-            (mem.IntroState() == 1 || mem.IntroState() == 2 || runtime.previousIntro == 1) &&
-            (next - runtime.lastForced > 30 || mem.IntroState() != runtime.previousIntro);
-        const bool forced = !mismatch && runtime.history.Confirmed() >= next - 1 && (forceIntro || (ctx.isHost && std::getenv("CCCASTER_TEST_ROLLBACK") && mem.CanPredict() &&
-                            cccaster::game_interface::PhaseMonitor::GetCurrentPhase() == GamePhase::InGame &&
-                            next - runtime.sequence.Base() > 400 && next - runtime.lastForced > 180));
-        if (forced) {
-            const auto size = mem.SnapshotSize();
-            runtime.rollbackExpected.resize(size);
-            runtime.rollbackActual.resize(size);
-            if (!size || !mem.SaveSnapshot(runtime.rollbackExpected)) {
-                DebugLog("[RollbackWitness] FAIL target=%u reason=expected-save bytes=%u", next,
-                         static_cast<unsigned>(size));
-                Fail(Error::SyncTimeout, "rollback witness expected save failed");
-                return;
-            }
-            runtime.rollbackWitnessPending = true;
-            mismatch = next - 4;
-            runtime.lastForced = next;
-            DebugLog("[RollbackWitness] BEGIN frame=%u target=%u confirmed=%u bytes=%u", mismatch,
-                     next, runtime.history.Confirmed(), static_cast<unsigned>(size));
-        }
-        if (mismatch) {
-            const bool replayProbe = cccaster::diagnostics::SpinProbe::Enabled();
-            if (replayProbe) cccaster::diagnostics::DeferredNumericLog::Prepare();
-            runtime.replayBeginTicks = replayProbe ? cccaster::platform::RealMonotonicTicks() : 0;
-            runtime.replaySaveTicks = runtime.replayPrepareTicks = 0;
-            runtime.replaySaved = runtime.replaySkipped = 0;
-            runtime.replayFrom = mismatch;
-            const unsigned targetIntro = mem.IntroState();
-            const auto restoreStart = cccaster::platform::RealMonotonicUs();
-            if (!mem.BeginReplay(mismatch, runtime.sequence.Next()) ||
-                !runtime.snapshots.Load(mismatch, mem)) {
-                Fail(Error::SyncTimeout, "rollback restore failed");
-                return;
-            }
-            if (std::getenv("CCCASTER_PACE_TRACE"))
-                DebugLog("[RestoreStage] f=%u restore=%lld", runtime.sequence.Next(),
-                         cccaster::platform::RealMonotonicUs() - restoreStart);
-            runtime.replayRestoreEnd = replayProbe ? cccaster::platform::RealMonotonicTicks() : 0;
-            runtime.replayFrame = mismatch;
-            runtime.replayTarget = next;
-            runtime.replayStarted = cccaster::platform::RealMonotonicUs();
-            cccaster::domain::ui::StateUiLogic::RecordRollback(runtime.replayTarget - mismatch);
-            if (cccaster::testing::IsScriptedInputEnabled() || cccaster::testing::IsInputTraceEnabled())
-                cccaster::diagnostics::DeferredNumericLog::Log("[Rollback] BEGIN frame=%u target=%u depth=%u forced=%d intro=%u targetIntro=%u", mismatch, next,
-                         next - mismatch, forced, unsigned(mem.IntroState()), targetIntro);
-        }
-    }
-    if (runtime.replayFrame) {
-        if (runtime.replayFrame == runtime.replayTarget) {
-            const auto replayElapsedUs = cccaster::platform::RealMonotonicUs() - runtime.replayStarted;
-            const auto replayEnd = runtime.replayBeginTicks ? cccaster::platform::RealMonotonicTicks() : 0;
-            if (runtime.replayBeginTicks) {
-                cccaster::diagnostics::DeferredNumericLog::Flush();
-                DebugLog("[ReplayWork] f=%u from=%u begin=%lld restoreEnd=%lld end=%lld saves=%lld prepare=%lld pid=%u tid=%u saved=%u skipped=%u",
-                    runtime.replayTarget, runtime.replayFrom, runtime.replayBeginTicks, runtime.replayRestoreEnd,
-                    replayEnd, runtime.replaySaveTicks, runtime.replayPrepareTicks,
-                    cccaster::platform::ProcessId(), cccaster::platform::ThreadId(), runtime.replaySaved, runtime.replaySkipped);
-            }
-            if (cccaster::testing::IsScriptedInputEnabled() || cccaster::testing::IsInputTraceEnabled())
-                DebugLog("[Rollback] END target=%u WT=%u elapsedUs=%lld", runtime.replayTarget,
-                         mem.WorldTimer(), replayElapsedUs);
-            runtime.replayFrame = 0;
-            mem.EndReplay();
-            FrameControl::SetModeNormalSpeed();
-            if (runtime.rollbackWitnessPending) {
-                runtime.rollbackWitnessPending = false;
-                const auto size = runtime.rollbackExpected.size();
-                if (mem.SnapshotSize() != size || !mem.SaveSnapshot(runtime.rollbackActual)) {
-                    DebugLog("[RollbackWitness] FAIL target=%u reason=actual-save bytes=%u",
-                             runtime.replayTarget, static_cast<unsigned>(size));
-                    Fail(Error::SyncTimeout, "rollback witness actual save failed");
-                    return;
-                }
-                size_t first = size, different = 0;
-                for (size_t i = 0; i < size; ++i) {
-                    if (runtime.rollbackExpected[i] != runtime.rollbackActual[i]) {
-                        if (first == size) first = i;
-                        ++different;
-                    }
-                }
-                if (different) {
-                    DebugLog("[RollbackWitness] FAIL target=%u bytes=%u different=%u firstOffset=%u expected=%u actual=%u",
-                             runtime.replayTarget, static_cast<unsigned>(size),
-                             static_cast<unsigned>(different), static_cast<unsigned>(first),
-                             static_cast<unsigned char>(runtime.rollbackExpected[first]),
-                             static_cast<unsigned char>(runtime.rollbackActual[first]));
-                    Fail(Error::SyncTimeout, "rollback witness snapshot mismatch");
-                    return;
-                }
-                DebugLog("[RollbackWitness] PASS target=%u bytes=%u depth=4", runtime.replayTarget,
-                         static_cast<unsigned>(size));
-            }
-            // 再計算そのものが終了画面へ達する場合も、未着末尾入力をdrainしてから
-            // 遷移・集計へ進む。次のゲーム更新を挟まず、訂正があれば再び再計算する。
-            goto reconcileBoundary;
-        } else {
-            const auto saveBegin = runtime.replayBeginTicks ? cccaster::platform::RealMonotonicTicks() : 0;
-            uint32_t local, remote;
-            // 強制ロールバック診断は確定済みフレームへ戻るため、従来の全保存を維持。
-            static const bool keepConfirmed = std::getenv("CCCASTER_KEEP_CONFIRMED_REPLAY_SNAPSHOTS") ||
-                                              std::getenv("CCCASTER_TEST_ROLLBACK") ||
-                                              std::getenv("CCCASTER_TEST_INTRO_ROLLBACK") ||
-                                              cccaster::diagnostics::UpdateCadence::Evidence();
-            const bool save = keepConfirmed || runtime.history.NeedsReplaySnapshot(runtime.replayFrame);
-            if (!runtime.history.ResolveReplay(runtime.replayFrame, readRemote, local, remote) ||
-                (save && !runtime.snapshots.Save(runtime.replayFrame, mem, local, remote))) {
-                Fail(Error::SyncTimeout, "rollback history missing");
-                return;
-            }
-            if (save) ++runtime.replaySaved;
-            else ++runtime.replaySkipped;
-            const auto prepareBegin = runtime.replayBeginTicks ? cccaster::platform::RealMonotonicTicks() : 0;
-            runtime.replaySaveTicks += prepareBegin - saveBegin;
-            mem.BeginSimulation(runtime.replayFrame);
-            FrameControl::SetModeHighSpeedSkip();
-            FrameControl::WriteInput(GameInput::Unpack(ctx.isHost ? local : remote),
-                                     GameInput::Unpack(ctx.isHost ? remote : local));
-            TraceFrame(runtime.replayFrame, GameInput::Unpack(ctx.isHost ? local : remote),
-                       GameInput::Unpack(ctx.isHost ? remote : local));
-            if (runtime.replayBeginTicks)
-                runtime.replayPrepareTicks += cccaster::platform::RealMonotonicTicks() - prepareBegin;
-            ++runtime.replayFrame;
-            return;
-        }
-    }
+    const auto readLocal = ReadAlignedLocal;
+    const auto readRemote = ReadAlignedRemote;
     PublishSpectatorConfirmed();
-    if (runtime.snapshotReady) {
-        Session::GetMutableState().consumedFrame.store(runtime.postRoundDelay.Source(runtime.history.Confirmed()),
+    if (ctx.appMode == 0 && runtime.snapshotReady) {
+        Session::GetMutableState().consumedFrame.store(AlignedInputSource(runtime.history.Confirmed()),
                                                        std::memory_order_release);
         if (cccaster::testing::IsScriptedInputEnabled() || cccaster::testing::IsInputTraceEnabled())
             DebugLog("[CONFIRMED] %u", runtime.history.Confirmed());
@@ -776,10 +1062,10 @@ reconcileBoundary:
     const auto phase = cccaster::game_interface::PhaseMonitor::GetCurrentPhase();
     const auto intro = mem.IntroState();
     const auto world = mem.WorldTimer();
-    if (phase != GamePhase::CharaSelect || (ctx.appMode != 0 && ctx.appMode != 1))
+    if (phase != GamePhase::CharaSelect || (ctx.appMode != 0 && ctx.appMode != 1 && ctx.appMode != 5))
         StepSelectionOptions({}, false, false);
     // 直前までの予測は上のdrain/replayで確定済み。intro=1/2とは分離する。
-    if (runtime.snapshotReady && phase == GamePhase::InGame && intro == 0 &&
+    if (ctx.appMode == 0 && runtime.snapshotReady && phase == GamePhase::InGame && intro == 0 &&
         !mem.CanPredict() && !runtime.postRoundDelay.first) {
         runtime.postRoundDelay.Begin(runtime.sequence.Next(), ctx.maxRollback);
         DebugLog("[PostRoundDelay] first=%u extra=%u", runtime.postRoundDelay.first,
@@ -797,6 +1083,28 @@ reconcileBoundary:
                     unsigned(sample.valid), sample.trueFrame, sample.simulationFrame, sample.round,
                     sample.activeCharacter[0], sample.activeCharacter[1], sample.inactionable[0],
                     sample.inactionable[1], unsigned(sample.stopped), unsigned(result.state), result.p1Frames);
+                if (sample.valid) for (unsigned side = 0; side < 2; ++side) {
+                    const auto &bar = runtime.frameBar;
+                    const bool recorded = bar.Size() && bar.At(bar.Size() - 1).trueFrame == sample.trueFrame;
+                    const auto cell = recorded ? bar.At(bar.Size() - 1).players[side] : ClassifyFrameBar(sample, side);
+                    const auto &detail = sample.detail[side];
+                    // DebugLogは256byte。生値を3行へ分け、後半の判定根拠を欠落させない。
+                    DebugLog("[FrameBarDetail] true=%u side=%u state=%s pattern=%u moveFrame=%u boxesKnown=%u boxes=%u stun=%d untech=%d/%d",
+                        sample.trueFrame, side, FrameBarStateName(cell.state), sample.pattern[side], detail.patternFrame,
+                        unsigned(detail.attackBoxesKnown), unsigned(detail.attackBoxCount), detail.stunRemaining,
+                        int(detail.untechElapsed), int(detail.untechTotal));
+                    DebugLog("[FrameBarFlags] true=%u side=%u stanceKnown=%u stance=%u thrown=%u protection=%u/%u stop=%u/%u timer=%u hurtKnown=%u hurt=%u white=%u canMove=%u guardEligible=%u reserved=%d recorded=%u",
+                        sample.trueFrame, side, unsigned(detail.stanceKnown), unsigned(detail.stance),
+                        unsigned(detail.thrown), unsigned(detail.strikeProtected), unsigned(detail.throwProtected),
+                        unsigned(detail.hitstop), unsigned(detail.receivedHitstop), unsigned(sample.timerSuppressed),
+                        unsigned(detail.hurtBoxesKnown), unsigned(detail.hurtBoxCount), unsigned(cell.strikeInvulnerable),
+                        unsigned(detail.canMove), unsigned(detail.guardEligible), int(detail.reservedPattern), unsigned(recorded));
+                    DebugLog("[FrameBarReference] true=%u side=%u signal=%s signalFrame=%u stateFrame=%u attackData=%u activeBoxes=%u animationKnown=%u defenseSlots=%u air=%u busy=%d base=%s",
+                        sample.trueFrame, side, FrameBarSignalName(cell.signal), cell.signalFrame, cell.runFrame,
+                        unsigned(sample.attacking[side]), unsigned(cell.activeBoxes), unsigned(detail.animationKnown),
+                        unsigned(detail.defenseSlotCount), unsigned(detail.airborne), sample.inactionable[side],
+                        FrameBarStateName(ReferenceFrameBarState(sample.inactionable[side], sample.pattern[side], detail)));
+                }
             }
         } else { runtime.advantage.Reset(); runtime.frameBar.Reset(); }
     }
@@ -823,6 +1131,17 @@ reconcileBoundary:
             DebugLog("[SessionScore] revision=%llu match=%llu p1=%u p2=%u unresolved=%u rounds=%u/%u required=%u",
                 static_cast<unsigned long long>(score.revision), static_cast<unsigned long long>(score.lastMatchGeneration),
                 score.p1Wins, score.p2Wins, score.unresolved, facts.p1Rounds, facts.p2Rounds, facts.roundsToWin);
+        }
+    }
+    if (ctx.appMode == 5) {
+        if (phase == GamePhase::InGame && runtime.previous != GamePhase::InGame)
+            ++runtime.localScoreGeneration;
+        const auto scoreScene = phase == GamePhase::InGame ? ScoreScene::Battle
+            : phase == GamePhase::Rematch ? ScoreScene::Result
+            : phase == GamePhase::CharaSelect ? ScoreScene::CharacterSelect : ScoreScene::Other;
+        if (runtime.score.Observe(scoreScene, runtime.localScoreGeneration, mem.ReadMatchResult(), true)) {
+            const auto score = runtime.score.Snapshot();
+            DebugLog("[OfflineScore] p1=%u p2=%u unresolved=%u", score.p1Wins, score.p2Wins, score.unresolved);
         }
     }
     if (phase != runtime.previous) {
@@ -889,15 +1208,28 @@ reconcileBoundary:
         const bool finalGate = OfflinePacing::Mode() != OfflinePacing::Variant::Legacy;
         // トレーニングのキャラセレは対戦の同期締切を持たない。ここだけ最後の
         // CPUスピンを200µsに抑え、対戦中の従来2msガードはそのまま残す。
-        const int64_t offlineSpinGuardUs = ctx.appMode == 1 && phase == GamePhase::CharaSelect ? 200 : 2000;
+        const int64_t offlineSpinGuardUs = (ctx.appMode == 1 || ctx.appMode == 5) && phase == GamePhase::CharaSelect ? 200 : 2000;
         offlineDue = metronome.WaitForNextTick(false, finalGate ?
-            60 * cccaster::core::timer::FrameTiming::ReleasePreparationUs : 0, offlineSpinGuardUs);
+            60 * cccaster::core::timer::FrameTiming::FinalSpinUs : 0, offlineSpinGuardUs);
+        if (OfflinePacing::Mode() == OfflinePacing::Variant::Normal)
+            BeginNormalFrame(offlineDue, mem.WorldTimer(), phase == GamePhase::InGame && intro == 0);
         OfflinePacing::Waited(mem.WorldTimer(), offlineDue);
     }
     if (ctx.appMode != 0) {
+        if (SamplesLocalInputAfterWait()) {
+            // 待機前の状態を約1F保持せず、この更新で使う入力をここで1回だけ採る。
+            // キー/F4のメッセージとUIエッジも同じ時点へそろえ、既存の入力遮断を通す。
+#ifdef _WIN32
+            cccaster::game_interface::WndProcHook::PumpMessages();
+#endif
+            cccaster::game_interface::DirectInputHook::Poll();
+            cccaster::game_interface::DirectInputHook::PollUi();
+        }
         const auto raw1 = cccaster::game_interface::DirectInputHook::GetPlayer1Input();
         const auto raw2 = cccaster::game_interface::DirectInputHook::GetPlayer2Input();
+        cccaster::diagnostics::FramePipeline::InputRead();
         const auto firstInput = GameInput::Unpack(raw1), secondInput = GameInput::Unpack(raw2);
+        bool replacedLocalState = false;
         const bool standbyPrompt = ctx.appMode == 1 && ui::training_standby_view::Step(
             {firstInput.direction ? firstInput.direction : secondInput.direction,
              static_cast<uint16_t>(firstInput.buttons | secondInput.buttons)});
@@ -905,24 +1237,38 @@ reconcileBoundary:
         if (standbyPrompt) StepSelectionOptions({}, false, false);
         auto output1 = runtime.localInputGate.Apply(GameInput::Unpack(raw1), configuring);
         auto output2 = runtime.secondInputGate.Apply(GameInput::Unpack(raw2), configuring);
-        if (ctx.appMode == 1 && phase == GamePhase::CharaSelect && !standbyPrompt) {
+        if ((ctx.appMode == 1 || ctx.appMode == 5) && phase == GamePhase::CharaSelect && !standbyPrompt) {
             const auto first = GameInput::Unpack(raw1), second = GameInput::Unpack(raw2);
             if (StepSelectionOptions({first.direction ? first.direction : second.direction,
                     static_cast<uint16_t>(first.buttons | second.buttons)}, true, true))
                 output1 = output2 = {};
+            cccaster::training_palette::selection::Filter(output1,output2);
         }
-        if (ctx.appMode == 1) {
+        if (ctx.appMode == 1 || ctx.appMode == 5) {
             const int requested = runtime.requestedTrainingDelay.exchange(-1);
             if (requested >= 0 && requested != ctx.delay &&
-                (phase == GamePhase::CharaSelect || phase == GamePhase::InGame)) {
+                (phase == GamePhase::CharaSelect || (ctx.appMode == 1 && phase == GamePhase::InGame))) {
                 ctx.delay = requested;
                 runtime.trainingDelay.Clear();
+                replacedLocalState = true;
                 SettingsCommands::delay = requested;
                 cccaster::domain::ui::StateUiLogic::SetDelay(requested);
-                DebugLog("[TrainingDelay] ACTIVE D=%d R=0 mode=%u", requested, mem.GameMode());
+                DebugLog("[%sDelay] ACTIVE D=%d R=0 mode=%u", ctx.appMode == 1 ? "Training" : "Offline", requested, mem.GameMode());
             }
+        }
+        if (ctx.appMode == 5) {
+            // ポーズ操作は即時。選択・ロード・結果画面へ戦闘中の遅延入力を持ち越さない。
+            const bool delayActive = phase == GamePhase::InGame && !mem.IsPauseMenuOpen() &&
+                !configuring && mem.IntroState() == 0;
+            output1.buttons &= ~(CC_BUTTON_FN1 | CC_BUTTON_FN2);
+            output2.buttons &= ~(CC_BUTTON_FN1 | CC_BUTTON_FN2);
+            const auto delayed = runtime.trainingDelay.Apply(output1, output2, ctx.delay, delayActive);
+            output1 = delayed[0]; output2 = delayed[1];
+        }
+        if (ctx.appMode == 1) {
             mem.SetTrainingHold(false);
             if (mem.StepTrainingMenu(output1, output2, configuring)) {
+                replacedLocalState = true;
                 // 資産変更後は旧ポインタを含む保存を破棄する。
                 runtime.trainingState.Reset();
                 runtime.trainingDelay.Clear();
@@ -943,6 +1289,7 @@ reconcileBoundary:
                                            event == TrainingStateEvent::RecordingRestarted ||
                                            event == TrainingStateEvent::CornerReset;
             if (trainingRestarted) {
+                replacedLocalState = true;
                 runtime.advantage.Reset();
                 runtime.frameBar.Reset();
                 runtime.trainingDelay.Clear();
@@ -973,7 +1320,16 @@ reconcileBoundary:
                 DebugLog("[TrainingDelayInput] D=%d active=%d in1=%08X in2=%08X out1=%08X out2=%08X",
                     int(ctx.delay), int(delayActive), before1.Pack(), before2.Pack(), output1.Pack(), output2.Pack());
         }
+        if (ctx.appMode == 1 || ctx.appMode == 5) {
+            const bool eligible = LocalInputHistory::Eligible(ctx.appMode,
+                phase == GamePhase::InGame && mem.CanPredict(),mem.IsPauseMenuOpen(),configuring,
+                runtime.trainingState.Holding(),replacedLocalState,
+                ctx.appMode == 1 && (mem.IsTrainingDummy() || mem.IsTrainingRecording()),
+                firstInput.buttons | secondInput.buttons);
+            if (!PrepareLocalRollback(output1,output2,eligible)) return;
+        }
         FrameControl::WriteInput(output1, output2);
+        cccaster::diagnostics::FramePipeline::Prepared();
         if (cccaster::diagnostics::input::Enabled()) {
             static cccaster::diagnostics::input::Sampler samples;
             if (samples.Record(raw1, raw2, configuring))
@@ -985,7 +1341,7 @@ reconcileBoundary:
         runtime.previous = phase;
         runtime.previousIntro = intro;
         OfflinePacing::Prepared();
-        if (OfflinePacing::Mode() != OfflinePacing::Variant::Legacy) {
+        if (OfflinePacing::Mode() == OfflinePacing::Variant::GateOnly) {
             // 入力準備・Present復帰・ゲームのCS解放後に同じ絶対締切で解放する。
             // 準備にかかった時間を1フレームの周期へ追加しない。
             cccaster::core::timer::FrameTiming::releaseDueTicks = offlineDue;
@@ -1034,8 +1390,7 @@ reconcileBoundary:
         if (!runtime.sequence.CanAdvance() || timeline.HasOverflowed()) {
             Fail(Error::SyncTimeout, "retry input range exhausted"); return;
         }
-        if (!Wait("local retry clock", 3000000, [&] { return timeline.HasCaptured(frame); },
-                  0, timeline.NextDeadlineTicks())) return;
+        if (!WaitForCapture("local retry clock", frame, timeline.NextDeadlineTicks())) return;
         uint32_t input = 0;
         if (!MatchInputBuffer::GetInstance().TryGetLocalInput(frame, input)) {
             Fail(Error::SyncTimeout, "local retry input missing"); return;
@@ -1161,8 +1516,8 @@ reconcileBoundary:
             Fail(Error::SyncTimeout, "character select input range exhausted");
             return;
         }
-        if (!runtime.stageRematch.active && !Wait("local selection clock", 3000000, [&] { return timeline.HasCaptured(frame); },
-                  0, timeline.NextDeadlineTicks(), 0, 200)) return;
+        if (!runtime.stageRematch.active && !WaitForCapture("local selection clock", frame,
+                  timeline.NextDeadlineTicks(), 200)) return;
         uint32_t localInput = 0;
         if (!runtime.stageRematch.active && !buf.TryGetLocalInput(frame, localInput)) {
             Fail(Error::SyncTimeout, "local selection input missing"); return;
@@ -1203,12 +1558,14 @@ reconcileBoundary:
             SettingsCommands::rollback = local.rollback = peer.rollback;
         }
         local.ack = peer.revision;
+        cccaster::training_palette::selection::Publish(local.epoch,local.revision);
         const auto navFrame = runtime.stageRematch.active ? ++runtime.retryDriveFrames : frame;
         const auto remoteInput = preparingStageRematch ? GameInput{} : mem.DriveRemoteSelection(ctx.isHost, peer, navFrame);
         const bool settingsReady = ctx.isHost ? !SettingsCommands::pending.load() :
             (!local.commandSerial || peer.commandAck == local.commandSerial);
         const auto &hostState = ctx.isHost ? local : peer;
-        if (local.PeerHasFinal(peer) && hostState.stageConfirmed && settingsReady && state.isSynced)
+        if (local.PeerHasFinal(peer) && hostState.stageConfirmed && settingsReady && state.isSynced &&
+            cccaster::training_palette::selection::Ready(local.epoch,local.character,peer.character,local.revision,peer.revision))
             runtime.selectionReleased = true;
         if (runtime.broadcasting && !runtime.spectatorSelectionSent &&
             (runtime.selectionReleased || runtime.spectatorSelectionRevisions[0] != local.revision ||
@@ -1247,9 +1604,15 @@ reconcileBoundary:
         }
         // キャラ確定後は戻る操作を閉じ、ステージ操作はホストだけが所有する。
         auto own = GameInput::Unpack(localInput & SettingsCommands::GameMask);
-        if (!runtime.stageRematch.active && StepSelectionOptions(own, true,
-                !local.confirmed && !runtime.selectionReleased && mem.SelectionDelayEditable(ctx.isHost)))
-            own = {};
+        if (!runtime.stageRematch.active) {
+            GameInput menuInput;
+            if (!timeline.TryGetMenuInput(frame, menuInput)) {
+                Fail(Error::SyncTimeout, "local selection menu input missing"); return;
+            }
+            if (StepSelectionOptions(menuInput, true,
+                    !local.confirmed && !runtime.selectionReleased && mem.SelectionDelayEditable(ctx.isHost)))
+                own = {};
+        }
         if (local.confirmed) {
             own.buttons &= ~(CC_BUTTON_B | CC_BUTTON_CANCEL);
             if (!ctx.isHost || local.stageConfirmed) own = {};
@@ -1266,7 +1629,10 @@ reconcileBoundary:
                       [&] { return cccaster::core::timer::WasapiClock::GetTimeTicks() >= due; }, due,
                       0, 200)) return;
         }
-        FrameControl::WriteInput(ctx.isHost ? own : remoteInput, ctx.isHost ? remoteInput : own);
+        auto first=ctx.isHost ? own : remoteInput,second=ctx.isHost ? remoteInput : own;
+        if(!runtime.stageRematch.active)
+            cccaster::training_palette::selection::Filter(first,second);
+        FrameControl::WriteInput(first,second);
         if (std::getenv("CCCASTER_PACE_TRACE")) {
             const auto now = cccaster::platform::RealMonotonicUs();
             DebugLog("[SelectPace] f=%u WT=%u interval=%lld local=%u peer=%u", frame, world,
@@ -1398,12 +1764,17 @@ reconcileBoundary:
             ? cccaster::public_api::NetplaySettings::BurstRollback : 0);
         runtime.postRoundDelay.Reset();
         runtime.snapshotReady = phase == GamePhase::InGame && ctx.maxRollback > 0 && mem.SupportsSnapshots();
-        if (runtime.snapshotReady && !mem.SnapshotSize()) {
+        runtime.inputLead = runtime.snapshotReady && state.localPresentRollback.load() && state.peerPresentRollback.load() ? 1 : 0;
+        if (!mem.ConfigureInputWriteMonitor(runtime.inputLead != 0)) {
+            Fail(Error::SyncTimeout,"native input write observation hooks unavailable"); return;
+        }
+        DebugLog("[PresentRollback] ACTIVE lead=%u D=%d epoch=%u",runtime.inputLead,int(ctx.delay),runtime.sequence.Base());
+        if (runtime.snapshotReady && !(runtime.inputLead ? mem.PresentationSnapshotSize() : mem.SnapshotSize())) {
             Fail(Error::SyncTimeout, "rollback hooks unavailable");
             return;
         }
         if (runtime.snapshotReady)
-            runtime.snapshots.Reset(mem.SnapshotSize());
+            runtime.snapshots.Reset(runtime.inputLead ? mem.PresentationSnapshotSize() : mem.SnapshotSize(), runtime.inputLead != 0);
         if (phase == GamePhase::InGame && !mem.PrepareBattleAudio()) {
             Fail(Error::SyncTimeout, "sound preparation restoration failed");
             return;
@@ -1528,10 +1899,10 @@ reconcileBoundary:
     } else if (!timeline.IsActive())
         timeline.Resume();
     const auto captureHint = timeline.NextDeadlineTicks();
-    if (!Wait(
-            "metronome input", 3000000,
-            [&] { return timeline.HasCaptured(runtime.sequence.Capture()) || timeline.HasOverflowed(); }, 0,
-            captureHint))
+    if (!timeline.HasCaptured(runtime.sequence.Capture()))
+        cccaster::core::timer::WasapiClock::PrepareRelease(captureHint +
+            60 * cccaster::core::timer::FrameTiming::BattleInputPhaseUs());
+    if (!WaitForCapture("metronome input", runtime.sequence.Capture(), captureHint))
         return;
     if (timeline.HasOverflowed()) {
         Fail(Error::SyncTimeout, "input clock backlog exhausted");
@@ -1552,56 +1923,78 @@ reconcileBoundary:
     if (phase == GamePhase::InGame && runtime.sequence.Next() >= runtime.sequence.Base() + 360)
         cccaster::diagnostics::NotifySpikeDebugReady();
     uint32_t localValue = 0, remoteValue = 0;
-    if (!buf.TryGetLocalInput(runtime.postRoundDelay.Source(runtime.sequence.Next()), localValue)) {
-        Fail(Error::SyncTimeout, "local input missing");
-        return;
-    }
+    bool localReady = readLocal(runtime.sequence.Next(), localValue);
     bool remoteReady = readRemote(runtime.sequence.Next(), remoteValue);
     const bool allowPrediction = runtime.snapshotReady && mem.CanRollback() && !runtime.postRoundDelay.first;
     const bool mayPredict = allowPrediction && runtime.history.CanPredict();
-    if (!remoteReady && mayPredict) {
-        remoteValue = runtime.history.Prediction();
+    if ((!localReady || !remoteReady) && mayPredict) {
+        if (!localReady && !buf.TryGetLocalInput(AlignedInputSource(runtime.sequence.Next())-1,localValue))
+            localValue=runtime.history.LocalPrediction();
+        if (!remoteReady) remoteValue = runtime.history.Prediction();
         if (cccaster::testing::IsScriptedInputEnabled() || cccaster::testing::IsInputTraceEnabled())
-            DebugLog("[Rollback] PREDICT frame=%u confirmed=%u", runtime.sequence.Next(),
-                     runtime.history.Confirmed());
-    } else if (!remoteReady || (runtime.snapshotReady && !runtime.history.CanPredict())) {
+            DebugLog("[Rollback] PREDICT frame=%u confirmed=%u local=%u remote=%u", runtime.sequence.Next(),
+                runtime.history.Confirmed(),unsigned(!localReady),unsigned(!remoteReady));
+    } else if (!localReady || !remoteReady || (runtime.snapshotReady && !runtime.history.CanPredict())) {
         if (!Wait("remote input", 3000000, [&] {
                 if (runtime.snapshotReady)
-                    return runtime.history.ReadyToResume(readRemote, allowPrediction);
+                    return runtime.history.ReadyToResume(readLocal, readRemote, allowPrediction);
                 return readRemote(runtime.sequence.Next(), remoteValue);
             }))
             return;
-        const auto mismatch = runtime.snapshotReady ? runtime.history.Reconcile(readRemote) : 0;
+        const auto addressMismatch = runtime.snapshotReady ? ReconcileInputWrites() : 0;
+        auto mismatch = runtime.snapshotReady ? runtime.history.Reconcile(readLocal, readRemote) : 0;
+        if (addressMismatch && (!mismatch || addressMismatch < mismatch)) mismatch = addressMismatch;
         if (mismatch) {
-            const bool replayProbe = cccaster::diagnostics::SpinProbe::Enabled();
-            if (replayProbe) cccaster::diagnostics::DeferredNumericLog::Prepare();
-            runtime.replayBeginTicks = replayProbe ? cccaster::platform::RealMonotonicTicks() : 0;
-            runtime.replaySaveTicks = runtime.replayPrepareTicks = 0;
-            runtime.replaySaved = runtime.replaySkipped = 0;
-            runtime.replayFrom = mismatch;
-            const unsigned targetIntro = mem.IntroState();
-            const auto restoreStart = cccaster::platform::RealMonotonicUs();
-            if (!mem.BeginReplay(mismatch, runtime.sequence.Next()) ||
-                !runtime.snapshots.Load(mismatch, mem)) {
-                Fail(Error::SyncTimeout, "rollback restore failed");
-                return;
-            }
-            if (std::getenv("CCCASTER_PACE_TRACE"))
-                DebugLog("[RestoreStage] f=%u restore=%lld", runtime.sequence.Next(),
-                         cccaster::platform::RealMonotonicUs() - restoreStart);
-            runtime.replayRestoreEnd = replayProbe ? cccaster::platform::RealMonotonicTicks() : 0;
-            runtime.replayFrame = mismatch;
-            runtime.replayTarget = runtime.sequence.Next();
-            runtime.replayStarted = cccaster::platform::RealMonotonicUs();
-            cccaster::domain::ui::StateUiLogic::RecordRollback(runtime.replayTarget - mismatch);
-            if (cccaster::testing::IsScriptedInputEnabled() || cccaster::testing::IsInputTraceEnabled())
-                cccaster::diagnostics::DeferredNumericLog::Log("[Rollback] BEGIN frame=%u target=%u depth=%u forced=0 intro=%u targetIntro=%u", mismatch,
-                         runtime.replayTarget, runtime.replayTarget - mismatch, unsigned(mem.IntroState()), targetIntro);
-            // 1回だけ入り直して最初の再計算入力を設定。ゲーム更新そのものはPresentから戻って行う。
-            Step();
+            if (BeginRollback(mismatch, false)) ContinueReplay();
             return;
         }
     }
+
+    // HasCaptured above already waited for the independent input publication.
+    // Start immediately afterwards, retaining its absolute deadline as the timing
+    // reference. Only the legacy comparison adds a fixed phase. Replay bypasses
+    // this ordinary-frame entry entirely.
+    const auto captureDue = timeline.CapturedDeadlineTicks(runtime.sequence.Capture());
+    const auto inputPhaseUs = cccaster::core::timer::FrameTiming::BattleInputPhaseUs();
+    const auto simulationDue =
+        captureDue ? captureDue + 60 * inputPhaseUs : 0;
+    const auto preparationDue = simulationDue ? simulationDue -
+        60 * cccaster::core::timer::FrameTiming::FinalSpinUs : 0;
+    cccaster::core::timer::FrameTiming::presentDueTicks =
+        captureDue ? simulationDue + 60 * cccaster::core::timer::FrameTiming::PresentBudgetUs() : 0;
+    static const bool paceTrace = std::getenv("CCCASTER_PACE_TRACE") != nullptr;
+    const auto readyAudio = paceTrace ? cccaster::core::timer::WasapiClock::GetTimeUs() : 0;
+    using Probe = cccaster::diagnostics::SpinProbe;
+    const bool probe = Probe::Enabled() && simulationDue && runtime.snapshotReady && mem.CanRollback();
+    // 締切前の保存済み数値だけを整形。採取・スピン内にログを挟まない。
+    static const bool clockFollowTrace = std::getenv("CCCASTER_CLOCK_FOLLOW_TRACE") != nullptr;
+    if (probe || clockFollowTrace) timeline.TraceCapturedPhase(runtime.sequence.Capture());
+    if (probe) Probe::Start(runtime.sequence.Next(), runtime.snapshotReady && mem.CanRollback(),
+                            preparationDue, cccaster::core::timer::WasapiClock::GetTimeTicks());
+    if (!probe)
+        cccaster::diagnostics::DeferredNumericLog::Prepare();
+    if (inputPhaseUs && simulationDue &&
+        !Wait(
+            "simulation deadline", 3000000,
+            [&] { return cccaster::core::timer::WasapiClock::GetTimeTicks() >= preparationDue; },
+            preparationDue))
+        return;
+    if (paceTrace && !probe) {
+        const auto q0 = cccaster::platform::RealMonotonicUs();
+        const auto audio = cccaster::core::timer::WasapiClock::GetTimeUs();
+        const auto q1 = cccaster::platform::RealMonotonicUs();
+        cccaster::diagnostics::DeferredNumericLog::Log("[Pace] f=%u due=%lld ready=%lld audio=%lld qpc=%lld read=%lld work=%lld play=%d",
+                 runtime.sequence.Next(), simulationDue / 60, readyAudio, audio, (q0 + q1) / 2, q1 - q0,
+                 cccaster::core::timer::FrameTiming::workUs, runtime.snapshotReady && mem.CanRollback());
+    }
+    BeginNormalFrame(simulationDue, runtime.sequence.Next(), phase == GamePhase::InGame && intro == 0);
+    static const bool handoffTrace = std::getenv("CCCASTER_INPUT_SEND_TRACE") != nullptr;
+    if (handoffTrace)
+        cccaster::diagnostics::DeferredNumericLog::Log(
+            "[InputHandoff] f=%u capture=%u source=%u captureDue=%lld simulationDue=%lld phaseUs=%lld",
+            runtime.sequence.Next(), runtime.sequence.Capture(), AlignedInputSource(runtime.sequence.Next()),
+            captureDue, simulationDue, inputPhaseUs);
+
     // 待機中に最古入力が確定した場合、最新入力が未着でも空いた枠を使える。
     // Reconcileの不一致は上で復元へ戻すため、訂正を取り落とさない。
     if (!readRemote(runtime.sequence.Next(), remoteValue)) {
@@ -1611,6 +2004,14 @@ reconcileBoundary:
         }
         remoteValue = runtime.history.Prediction();
     }
+    if (!readLocal(runtime.sequence.Next(),localValue)) {
+        if (!allowPrediction || !runtime.history.CanPredict()) {
+            Fail(Error::SyncTimeout,"local prediction capacity unavailable");return;
+        }
+        if (!buf.TryGetLocalInput(AlignedInputSource(runtime.sequence.Next())-1,localValue))
+            localValue=runtime.history.LocalPrediction();
+    }
+    cccaster::diagnostics::FramePipeline::InputRead();
     p1 = ctx.isHost ? localValue : remoteValue;
     p2 = ctx.isHost ? remoteValue : localValue;
     static const bool stageTrace = std::getenv("CCCASTER_PACE_TRACE") != nullptr;
@@ -1620,6 +2021,7 @@ reconcileBoundary:
         Fail(Error::SyncTimeout, "snapshot save failed");
         return;
     }
+    cccaster::diagnostics::FramePipeline::Saved();
     if (stageTrace)
         DebugLog("[SnapshotStage] f=%u save=%lld", runtime.sequence.Next(),
                  cccaster::platform::RealMonotonicUs() - saveStart);
@@ -1638,7 +2040,7 @@ reconcileBoundary:
         uint32_t followingRemote = 0;
         const bool nextReady = runtime.snapshotReady
             ? ((allowPrediction && runtime.history.CanPredict()) ||
-               runtime.history.ReadyToResume(readRemote, allowPrediction))
+               runtime.history.ReadyToResume(readLocal, readRemote, allowPrediction))
             : readRemote(runtime.sequence.Next() + 1, followingRemote);
         if (nextReady) FrameControl::SetModeHighSpeedSkip();
     }
@@ -1656,43 +2058,10 @@ reconcileBoundary:
         runtime.spectatorPending.Set(cccaster::spectator::Input, runtime.sequence.Next(), std::array<uint32_t, 2>{p1, p2});
         runtime.spectatorHasPending = true; // 次Stepの準備区間で公開。締切後にコピーしない。
     }
-    // 採取の予定時刻を基準に更新開始を揃える。相手待ちや保存の所要時間を次の周期に足さない。
-    // 3msは入力公開・保存の余裕。ロールアップ経路はここを通らず即時に再計算する。
-    const auto captureDue = timeline.CapturedDeadlineTicks(runtime.sequence.Capture());
-    const auto simulationDue =
-        captureDue ? captureDue + 60 * cccaster::core::timer::FrameTiming::SimulationGuardUs : 0;
-    const auto preparationDue = simulationDue ? simulationDue -
-        60 * cccaster::core::timer::FrameTiming::ReleasePreparationUs : 0;
-    cccaster::core::timer::FrameTiming::presentDueTicks =
-        captureDue ? simulationDue + 60 * cccaster::core::timer::FrameTiming::PresentBudgetUs() : 0;
-    static const bool paceTrace = std::getenv("CCCASTER_PACE_TRACE") != nullptr;
-    const auto readyAudio = paceTrace ? cccaster::core::timer::WasapiClock::GetTimeUs() : 0;
-    using Probe = cccaster::diagnostics::SpinProbe;
-    const bool probe = Probe::Enabled() && simulationDue && runtime.snapshotReady && mem.CanRollback();
-    // 締切前の保存済み数値だけを整形。採取・スピン内にログを挟まない。
-    static const bool clockFollowTrace = std::getenv("CCCASTER_CLOCK_FOLLOW_TRACE") != nullptr;
-    if (probe || clockFollowTrace) timeline.TraceCapturedPhase(runtime.sequence.Capture());
-    if (probe) Probe::Start(runtime.sequence.Next(), runtime.snapshotReady && mem.CanRollback(),
-                            preparationDue, cccaster::core::timer::WasapiClock::GetTimeTicks());
-    if (!probe)
-        cccaster::diagnostics::DeferredNumericLog::Prepare();
-    if (simulationDue &&
-        !Wait(
-            "simulation deadline", 3000000,
-            [&] { return cccaster::core::timer::WasapiClock::GetTimeTicks() >= preparationDue; },
-            preparationDue))
-        return;
-    if (paceTrace && !probe) {
-        const auto q0 = cccaster::platform::RealMonotonicUs();
-        const auto audio = cccaster::core::timer::WasapiClock::GetTimeUs();
-        const auto q1 = cccaster::platform::RealMonotonicUs();
-        cccaster::diagnostics::DeferredNumericLog::Log("[Pace] f=%u due=%lld ready=%lld audio=%lld qpc=%lld read=%lld work=%lld play=%d",
-                 runtime.sequence.Next(), simulationDue / 60, readyAudio, audio, (q0 + q1) / 2, q1 - q0,
-                 cccaster::core::timer::FrameTiming::workUs, runtime.snapshotReady && mem.CanRollback());
-    }
     mem.BeginSimulation(runtime.sequence.Next());
     if (probe) Probe::sample.begin = Probe::Now();
     WriteGameInputs(phase, p1, p2);
+    cccaster::diagnostics::FramePipeline::Prepared();
     if (phase == GamePhase::CharaSelect) cccaster::diagnostics::startup::InputReady();
     if (probe) Probe::sample.input = Probe::Now();
     TraceFrame(runtime.sequence.Next(), GameInput::Unpack(p1), GameInput::Unpack(p2));
@@ -1715,23 +2084,25 @@ reconcileBoundary:
     runtime.previousIntro = intro;
     ++ctx.framesInPhase;
     if (probe) Probe::sample.step = Probe::Now();
-    cccaster::core::timer::FrameTiming::releaseDueTicks = simulationDue;
-    cccaster::core::timer::FrameTiming::releaseFrame = runtime.sequence.Next() - 1;
-    if (cccaster::diagnostics::UpdateCadence::Enabled())
-        cccaster::diagnostics::UpdateCadence::Get().Arm(runtime.sequence.Next() - 1,
-            phase == GamePhase::InGame && intro == 0);
 }
 bool SceneRunner::IsReplaying() {
-    return runtime.replayFrame && runtime.replayFrame < runtime.replayTarget;
+    return runtime.pendingReplay || runtime.replayFrame;
 }
 bool SceneRunner::IsReady() {
     return runtime.ready.load(std::memory_order_acquire);
 }
+bool SceneRunner::SamplesLocalInputAfterWait() {
+    if (!IsReady() || !runtime.running || !runtime.context || IsReplaying() ||
+        (runtime.context->appMode != 1 && runtime.context->appMode != 5))
+        return false;
+    auto &mem = cccaster::game_interface::GameMem();
+    return mem.IsAvailable() && mem.GameMode() == CC_GAME_MODE_IN_GAME;
+}
 uint8_t SceneRunner::AppMode() {
     return IsReady() && runtime.context ? runtime.context->appMode : uint8_t{255};
 }
-bool SceneRunner::RequestTrainingDelay(int frames) {
-    if (AppMode() != 1 || frames < 0 || frames > cccaster::public_api::NetplaySettings::MaxDelay)
+bool SceneRunner::RequestLocalDelay(int frames) {
+    if ((AppMode() != 1 && AppMode() != 5) || frames < 0 || frames > cccaster::public_api::NetplaySettings::MaxDelay)
         return false;
     runtime.requestedTrainingDelay.store(frames);
     return true;
@@ -1758,7 +2129,7 @@ SceneRunner::PlayerNamesSnapshot SceneRunner::PlayerNames() {
         std::memcpy(result.p2.data(), runtime.spectator.match.names[1], 32);
         return result;
     }
-    if (AppMode() == 1) {
+    if (AppMode() == 1 || AppMode() == 5) {
         cccaster::public_api::NormalizePlayerName(result.p1.data(), result.p1.size(), runtime.context->playerName, "PLAYER 1");
         cccaster::public_api::NormalizePlayerName(result.p2.data(), result.p2.size(), "PLAYER 2", "PLAYER 2");
         return result;

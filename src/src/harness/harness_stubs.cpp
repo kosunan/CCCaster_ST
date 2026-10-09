@@ -222,10 +222,36 @@ void MbaaMemTrace::Sample(uint32_t) {}
 namespace cccaster::game_interface {
 // harnessは実ウィンドウを持たない。移動中の契約はtest_window_dragで検査する。
 bool WndProcHook::BlocksEscapeExit() { return false; }
+bool WndProcHook::BlocksCloseExit() { return false; }
 void WndProcHook::PumpMessages() {} // harnessにはゲーム窓がない。
 }
 #endif // _WIN32
 
 namespace cccaster::domain::ui::training_standby_view {
 bool Step(game_interface::GameInput) { return false; }
+}
+
+namespace cccaster::boss::selection {
+bool Configure(unsigned, bool) { return true; }
+bool Enabled() { return false; }
+}
+
+// 画像読込み・ゲームの色カーソルは実ゲーム専用。転送の契約は専用単体試験で検査する。
+namespace cccaster::training_palette {
+bool Install() { return true; }
+namespace selection {
+void Configure(unsigned,bool) {}
+void Tick() {}
+void Filter(game_interface::GameInput&,game_interface::GameInput&) {}
+void Publish(uint32_t,uint32_t) {}
+bool Ready(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t) { return true; }
+}
+}
+
+#include "core_dll/hook/DisplaySettings.hpp"
+namespace cccaster::game_interface::borderless {
+DisplaySettings GetDisplaySettings() { return {}; }
+bool ChangeResolution(int) { return false; }
+bool SetFullscreen(bool) { return false; }
+void SetScaleFilter(bool) {}
 }

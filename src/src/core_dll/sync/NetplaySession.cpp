@@ -1,4 +1,5 @@
 #include "core_dll/sync/InputTimeline.hpp"
+#include "core_dll/timing/SpinAssistScope.hpp"
 #include "shared_contracts/IpcData.hpp"
 #include "shared_contracts/EmblemFile.hpp"
 #include "core_dll/common/DataPaths.hpp"
@@ -170,6 +171,14 @@ void NetplaySession::Start(bool isHost, const std::string &targetIp, uint16_t ta
     _state.isSynced.store(false);
     _state.isPeerAlive.store(false);
     _state.peerReady.store(false);
+    const auto presentRollback = std::getenv("CCCASTER_TEST_PRESENT_ROLLBACK");
+    // 自入力を次の採取まで予測して1更新前へ差し替える方式は通常使用しない。
+    // 既存実験の比較時だけ明示指定で有効化する。相手入力の通常ロールバックは維持。
+    _state.localPresentRollback.store(presentRollback && presentRollback[0] == '1');
+    _state.peerPresentRollback.store(false);
+    const auto bosses=std::getenv("CCCASTER_BOSS_CHARACTERS");
+    _state.localBossCharacters.store(bosses && bosses[0]=='1');
+    _state.peerBossCharacters.store(false);
     _state.clockOffsetUs.store(0);
     _state.lastRttUs.store(0);
     _state.meanRttUs.store(0);
@@ -387,7 +396,8 @@ void NetplaySession::InputThreadMain() {
         if (!_running.load(std::memory_order_acquire))
             break;
         stats.Tick("input");
-        auto due = timeline.NextDeadlineTicks();
+        const auto target = timeline.NextCapture();
+        const auto due = target.due;
         if (!due) {
             // ロード・合流中は無期限に眠る。Begin/Resume/Stopが起こす。
             _inputWake.Wait(ticket, -1);
@@ -395,21 +405,44 @@ void NetplaySession::InputThreadMain() {
         }
         auto remaining = (due - timer::WasapiClock::GetTimeTicks()) / 60;
         constexpr int64_t spinMarginUs = 1000; // 実対戦の起床超過430us+旧500usから校正。
+        struct CaptureContext {
+            cccaster::core::sync::InputTimeline &timeline;
+            cccaster::core::sync::InputTimeline::CaptureTarget target;
+            NetplaySession &session;
+        } capture{timeline, target, *this};
+        const auto estimate = platform::RealMonotonicTicks() + remaining * 60;
+        timer::SpinTask task(estimate - spinMarginUs * 60, estimate + 4000 * 60,
+            [](void *arg, int worker) {
+                auto &c = *static_cast<CaptureContext *>(arg);
+                if (!c.session.IsRunning()) return true;
+                if (timer::WasapiClock::GetTimeTicks() < c.target.due) return false;
+                return c.timeline.TryPump(c.target, c.session.GetMetronome().GetPeriodCorrectionParts(), worker);
+            }, &capture);
+        timer::SpinAssistScope assist(timer::SpinPrototype::Capture(), timer::SpinChannels::Capture, task);
         if (remaining > spinMarginUs) {
             _inputWake.Wait(ticket, remaining - spinMarginUs);
             continue;
         }
         static const bool stageTrace = std::getenv("CCCASTER_PACE_TRACE") != nullptr;
         const auto spinBegin = stageTrace ? platform::RealMonotonicUs() : 0;
+        static const bool fault = timer::SpinPrototype::Flag("CCCASTER_TEST_CAPTURE_STALL");
+        static unsigned faultIteration = 0;
+        if (fault && ++faultIteration % 60 == 0) {
+            platform::RealSleepMs(3);
+            domain::session::DebugLog("[CaptureStall] f=%u due=%lld resumed=%lld", target.frame, due,
+                timer::WasapiClock::GetTimeTicks());
+        }
         // 最後だけ短時間スピン。通信キューや入力バッファを繰り返し走査しない。
         while (_running.load(std::memory_order_acquire) && timeline.IsActive() &&
-               timer::WasapiClock::GetTimeTicks() < due)
+               timer::WasapiClock::GetTimeTicks() < due && !(assist.Workers() && task.Ready()))
             cccaster::platform::CpuRelax();
         if (!_running.load(std::memory_order_acquire))
             break;
         const auto spinEnd = stageTrace ? platform::RealMonotonicUs() : 0;
         const auto started = stats.enabled ? platform::RealMonotonicUs() : 0;
-        timeline.PumpTicks(timer::WasapiClock::GetTimeTicks(), _metronome.GetPeriodCorrectionParts());
+        if (timer::SpinPrototype::Capture()) timeline.TryPump(target, _metronome.GetPeriodCorrectionParts(), -1);
+        else timeline.PumpTicks(timer::WasapiClock::GetTimeTicks(), _metronome.GetPeriodCorrectionParts());
+        assist.Finish(); // 入力スレッド終了/再arm前に、実行中の採取とスタック引数の使用を完了させる。
         if (stageTrace)
             domain::session::DebugLog("[InputSpin] f=%u begin=%lld end=%lld", timeline.SampledFrame(),
                                       spinBegin, spinEnd);

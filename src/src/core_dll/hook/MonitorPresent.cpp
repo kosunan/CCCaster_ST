@@ -3,6 +3,7 @@
 #include "core_dll/hook/RenderProbe.hpp"
 #include "core_dll/timing/DisplayCadence.hpp"
 #include "core_dll/timing/FrameTiming.hpp"
+#include "core_dll/timing/IdlePresentation.hpp"
 #include "core_dll/common/Platform.hpp"
 #include "core_dll/common/DebugLog.hpp"
 #include "core_dll/common/StartupTrace.hpp"
@@ -190,6 +191,7 @@ bool Submit(bool skipped, const RECT* source, const RECT* destination, HWND over
     return true;
 }
 void Pump(int64_t remainingUs) {
+    // 初回・再試行・同じ完成画像の再提示とも、スピン前の余裕がある間だけ行う。
     if (ready && active && remainingUs > guardUs) Display();
 }
 void Reset() {

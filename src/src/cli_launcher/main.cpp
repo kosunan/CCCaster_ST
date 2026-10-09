@@ -34,12 +34,19 @@ int main(int argc, char *argv[]) {
     // Dの既定は2。RはINIの旧値によらず、MainControllerで当面7固定にする。
     {
         // DLLと同じ設定を読む。起動時のカレントディレクトリに依存させない。
-        std::filesystem::path configDir = std::filesystem::absolute(argv[0]).parent_path();
+        std::filesystem::path configDir;
 #ifdef _WIN32
+        // Windowsのargv[0]はANSI。日本語パスをfilesystemへ渡すと、
+        // 下のUnicodeパスで上書きする前に文字変換例外となる場合がある。
         wchar_t executablePath[32768]{};
         const DWORD length = GetModuleFileNameW(nullptr, executablePath, std::size(executablePath));
-        if (length > 0 && length < std::size(executablePath))
-            configDir = std::filesystem::path(executablePath).parent_path();
+        if (!length || length >= std::size(executablePath)) {
+            std::cerr << "[BOOT_ERROR] code=windows stage=preflight win32=" << GetLastError() << '\n';
+            return 2;
+        }
+        configDir = std::filesystem::path(executablePath).parent_path();
+#else
+        configDir = std::filesystem::absolute(argv[0]).parent_path();
 #endif
         const std::string kConfigPath = cccaster::PathUtf8(cccaster::ConfigPath(configDir));
         std::ifstream testFile(cccaster::Utf8Path(kConfigPath));
@@ -61,6 +68,7 @@ int main(int argc, char *argv[]) {
     }
     bool isHeadless = false;
     bool trainingMode = false;
+    bool localVersusMode = false;
     bool replayMode = false;
     bool spectatorMode = false;
     bool isIpv6 = false;
@@ -80,7 +88,11 @@ int main(int argc, char *argv[]) {
         } else if (arg == "join" && i+1<argc) { connectionHash=argv[++i]; isHeadless=true;
         } else if (arg == "spectate" && i+1<argc) { connectionHash=argv[++i]; spectatorMode=true; isHeadless=true;
         } else if (arg == "--no-spectators") { cccaster::main_app::ConfigManager::SetInt("Connection","AllowSpectators",0);
+        } else if (arg == "--boss-characters") { cccaster::main_app::ConfigManager::SetInt("Connection","BossCharacters",1);
+        } else if (arg == "--no-boss-characters") { cccaster::main_app::ConfigManager::SetInt("Connection","BossCharacters",0);
         } else if (arg == "--allow-spectators") { cccaster::main_app::ConfigManager::SetInt("Connection","AllowSpectators",1);
+        } else if (arg == "--no-opponent-extra-colors") { cccaster::main_app::ConfigManager::SetInt("Connection","ShowOpponentExtraColors",0);
+        } else if (arg == "--show-opponent-extra-colors") { cccaster::main_app::ConfigManager::SetInt("Connection","ShowOpponentExtraColors",1);
         } else if (arg == "--legacy-host") { isHost=true; _putenv_s("CCCASTER_LEGACY_HOST","1");
         } else if (arg == "--offline-network") { _putenv_s("CCCASTER_P2P_OFFLINE","1");
         } else if (arg == "--ntfy-server" && i+1<argc) { _putenv_s("CCCASTER_NTFY_SERVER",argv[++i]);
@@ -91,6 +103,9 @@ int main(int argc, char *argv[]) {
             isHeadless = true;
         } else if (arg == "--replay") {
             replayMode = true;
+            isHeadless = true;
+        } else if (arg == "--offline") {
+            localVersusMode = true;
             isHeadless = true;
         } else if (arg == "--training") {
             trainingMode = true;
@@ -142,8 +157,9 @@ int main(int argc, char *argv[]) {
                   << "パケットロス=" << simLossPercent << "%\n";
     }
 
-    cccaster::main_app::controller::MainController appController(isHeadless, isIpv6, trainingMode || replayMode || isHost, targetIp, port,
-        connectionHash, false, replayMode ? cccaster::public_api::IpcGameMode::Replay
+    cccaster::main_app::controller::MainController appController(isHeadless, isIpv6, trainingMode || localVersusMode || replayMode || isHost, targetIp, port,
+        connectionHash, false, localVersusMode ? cccaster::public_api::IpcGameMode::LocalVersus
+                             : replayMode ? cccaster::public_api::IpcGameMode::Replay
                              : spectatorMode ? cccaster::public_api::IpcGameMode::Spectator
                              : trainingMode ? cccaster::public_api::IpcGameMode::Training
                                             : cccaster::public_api::IpcGameMode::Versus);

@@ -8,6 +8,10 @@
 #include "core_dll/mbaa_mem/SteamInputPatch.hpp"
 #include "core_dll/mbaa_mem/SteamMenuPatch.hpp"
 #include "core_dll/rollback/SteamReplayEffects.hpp"
+#include "core_dll/mbaa_mem/SteamV154Signatures.hpp"
+#include "core_dll/mbaa_mem/SteamPaletteSignatures.hpp"
+#include "core_dll/mbaa_mem/SteamTrainingV158Signatures.hpp"
+#include "core_dll/mbaa_mem/SteamV158StartupSignatures.hpp"
 #endif
 
 using namespace cccaster::game_build;
@@ -56,6 +60,40 @@ static void Signatures(const Bytes& file, const PeIdentity& p) {
     const auto mapped = MapImage(file, base);
     std::memcpy(memory, mapped.data(), mapped.size());
     LoadedImage image{base, p.imageSize};
+    CC_CASE("Steam 1.5.4の入力・FPS・解像度署名はASLR後も一致し命令変更を拒否する");
+    namespace v154 = cccaster::game_memory::steam_v154;
+    namespace code = cccaster::game_memory::steam_code;
+    for (const auto& signature : {v154::FpsUpdate, v154::InputBefore, v154::InputAfter,
+                                  v154::ResolutionWindow, v154::ResolutionRequest, v154::ResolutionReset,
+                                  v154::AspectSelection}) {
+        auto bytes = std::span(memory + signature.address - 0x400000, signature.size);
+        CC_CHECK_EQ(code::NormalizedHash(bytes, base - 0x400000, signature.relocations), signature.hash);
+        bytes[0] ^= 1;
+        CC_CHECK(code::NormalizedHash(bytes, base - 0x400000, signature.relocations) != signature.hash);
+        bytes[0] ^= 1;
+    }
+    // SteamはECX=入力元、EDX=方向欄、確定書込み後はESI=actor。
+    CC_CHECK_EQ(U32(mapped, 0xc2f14), base + 0x1ca9b8);
+    const unsigned char afterStore[]{0x88,0x86,0xe7,0x02,0,0,0x8b,0x8e,0xe8,0x02,0,0};
+    CC_CHECK(std::memcmp(memory + 0xc5766, afterStore, sizeof(afterStore)) == 0);
+    CC_CHECK_EQ(memory[0x8b15c], 0x41); // INC ECX、後続の集計処理を飛ばさない
+    CC_CHECK_EQ(U32(mapped, 0x8b15f), base + 0x3dc2a8);
+    CC_CASE("Steam 1.5.8のカラー・Training署名をASLR後に照合し改変を拒否する");
+    namespace palette = cccaster::game_memory::steam_palette;
+    namespace training = cccaster::game_memory::steam_training_v158;
+    auto checkSignature = [&](const code::Signature& signature) {
+        auto bytes = std::span(memory + signature.address - 0x400000, signature.size);
+        CC_CHECK_EQ(code::NormalizedHash(bytes, base - 0x400000, signature.relocations), signature.hash);
+        bytes[bytes.size() - 1] ^= 1;
+        CC_CHECK(code::NormalizedHash(bytes, base - 0x400000, signature.relocations) != signature.hash);
+        bytes[bytes.size() - 1] ^= 1;
+    };
+    for (const auto& signature : {palette::Upload, palette::Cache, palette::Loader,
+            palette::Input, palette::Draw, palette::Update, palette::Refresh,
+            palette::Recolor, palette::Sprite, palette::Font, palette::Queue}) checkSignature(signature);
+    for (const auto& signature : training::Menu) checkSignature(signature);
+    for (const auto& signature : training::Hitbox) checkSignature(signature);
+    for (const auto& signature : cccaster::game_memory::steam_v158_startup::All) checkSignature(signature);
     CC_CASE("Steam選択確定フックと選択データ参照を再配置後も照合する");
     const unsigned char stageExpected[] = {0x83,0xf8,0xff,0x74,0x10};
     CC_CHECK(std::memcmp(memory + 0x7ffed, stageExpected, sizeof(stageExpected)) == 0);
