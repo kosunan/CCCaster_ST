@@ -18,6 +18,10 @@ class InputTimeline {
     void Pause();
     void Resume();
     void PumpTicks(int64_t nowTicks, int64_t periodCorrectionParts);
+    struct CaptureTarget { uint64_t generation; uint32_t frame; int64_t due; };
+    CaptureTarget NextCapture();
+    // 同じ要求を複数時計から渡せる。ロック取得後に世代・F・締切を確認し、実時刻で1回だけ採取。
+    bool TryPump(const CaptureTarget &target, int64_t periodCorrectionParts, int worker);
     // テスト/旧呼出元だけの互換入口。実入力スレッドはPumpTicksを使用。
     void Pump(int64_t nowUs, int64_t intervalUs, int64_t nowTicks = 0) {
         PumpTicks(nowTicks ? nowTicks : nowUs*60, (intervalUs*60-999960)*timer::ClockParts);
@@ -26,6 +30,8 @@ class InputTimeline {
     int64_t NextDeadlineTicks();
     int64_t CapturedDeadlineTicks(uint32_t frame);
     int64_t CapturedDeadlineUs(uint32_t frame);
+    // 左側メニュー用。同じFで採取した、F4遮断後・キャラ選択フィルター前の入力。
+    bool TryGetMenuInput(uint32_t frame, game_interface::GameInput &input);
     void TraceCapturedPhase(uint32_t frame);
     bool IsActive() const {
         return active_.load(std::memory_order_acquire);
@@ -44,6 +50,7 @@ class InputTimeline {
     }
 
   private:
+    bool PumpTicksImpl(int64_t nowTicks, int64_t periodCorrectionParts, const CaptureTarget *target, int worker);
     void PublishSchedule();
     struct CaptureTime {
         uint32_t frame = 0;
@@ -52,6 +59,7 @@ class InputTimeline {
         int64_t phaseParts = 0, rateParts = 0;
         uint32_t revision = 0;
         bool ready = false;
+        game_interface::GameInput menuInput{};
     };
     std::array<CaptureTime, MatchInputBuffer::RING_SIZE> captureTimes_{};
     int64_t phaseParts_ = 0, rateParts_ = 0;
@@ -64,6 +72,7 @@ class InputTimeline {
     std::atomic<bool> active_{false}, overflow_{false};
     std::atomic<uint32_t> sampled_{0}, consumed_{0};
     uint32_t base_ = 0, next_ = 0, lastValue_ = 0;
+    uint64_t generation_ = 0;
     bool host_ = false, starting_ = false;
     game_interface::GamePhase phase_{};
     timer::FrameCadence cadence_;

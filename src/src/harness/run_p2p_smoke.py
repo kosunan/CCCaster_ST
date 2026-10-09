@@ -20,12 +20,25 @@ def run_real(args, output):
         raise RuntimeError('PowerShell 7 (pwsh)が必要です')
     env = clean_environment()
     env['CCCASTER_NTFY_SERVER'] = args.server
+    if args.extra_color: env['CCCASTER_TEST_EXTRA_COLOR']='1'
+    if args.boss_characters == '12': env['CCCASTER_TEST_BOSS_SELECT']='1'
+    if args.input_runahead:
+        env['CCCASTER_TEST_INPUT_RUNAHEAD_SIDES'] = args.input_runahead
+    if args.present_rollback is not None:
+        env['CCCASTER_TEST_PRESENT_ROLLBACK_SIDES'] = args.present_rollback
     if args.monitor_timing:
         env.update(CCCASTER_MONITOR_PRESENT_TRACE='1', CCCASTER_FRAME_TIMING_TRACE='1',
                    CCCASTER_UPDATE_CADENCE='1')
+    if args.input_handoff_trace:
+        env.update(CCCASTER_INPUT_SEND_TRACE='1', CCCASTER_UPDATE_CADENCE='1',
+                   CCCASTER_MONITOR_PRESENT_TRACE='1')
+    if args.legacy_input_handoff:
+        env.update(CCCASTER_TEST_INPUT_PHASE_US='3000')
     if args.monitor_hz:
         env['CCCASTER_TEST_MONITOR_HZ'] = str(args.monitor_hz)
-    config = dict(spectator=args.standby_spectator and not args.no_spectators)
+    config = dict(spectator=args.standby_spectator and not args.no_spectators, input_runahead=args.input_runahead)
+    config['native_input_writes'] = args.present_rollback == '12'
+    config['present_rollback'] = dict(lead=1 if args.present_rollback == '12' else 0, delay=args.delay)
     if args.selection_options:
         env.update(CCCASTER_TEST_SELECTION_OPTIONS='1', CCCASTER_TEST_FIXED_STAGE='59')
         config['selection_options'] = True
@@ -45,18 +58,62 @@ def run_real(args, output):
     runtime = args.test_root.resolve()
     command += ['-TestRoot', str(runtime)]
     before = protected_hashes(runtime)
+    settings = {runtime / f'MBAACC_{side}/cccaster_st/cccaster_steam.ini': None for side in (1,2)} if args.delay is not None or args.boss_characters is not None else {}
+    for path in settings: settings[path] = path.read_bytes() if path.exists() else None
+    display_backups = {}
+    if args.selection_options:
+        for side in (1, 2):
+            for name in ('display.ini', 'display.ini.bak', 'display.ini.tmp'):
+                path = runtime / f'MBAACC_{side}/cccaster_st' / name
+                display_backups[path] = path.read_bytes() if path.exists() else None
     (output / 'protected_before.json').write_text(json.dumps(before, indent=2), encoding='utf-8')
     result = dict(passed=False, command=command,
                   environment={k: v for k, v in env.items() if k.startswith('CCCASTER_')})
     started = time.monotonic()
     try:
+        # 保存機能のあるメニューを検査する。既定表示から始め、終了時に利用者の設定を戻す。
+        for path in display_backups: path.unlink(missing_ok=True)
+        for path, saved in settings.items():
+            data=saved or b''
+            values=[]
+            if args.delay is not None:values.append(('Netplay','DefaultDelay',args.delay))
+            if args.boss_characters is not None:
+                side=path.parent.parent.name[-1]
+                values.append(('Connection','BossCharacters',int(side in args.boss_characters)))
+            for group,key,value in values:
+                section=re.search(rb'(?ims)^\['+group.encode()+rb'\]\r?\n(.*?)(?=^\[|\Z)',data)
+                entry=f'{key}={value}\r\n'.encode('ascii')
+                if section:
+                    body=re.sub(rb'(?im)^'+key.encode()+rb'\s*=.*\r?\n?',b'',section[1])
+                    data=data[:section.start(1)]+entry+body+data[section.end(1):]
+                else:data+=f'\r\n[{group}]\r\n'.encode()+entry
+            path.write_bytes(data)
         run = subprocess.run(command, env=env)
         result['exit_code'] = run.returncode
         result.update(evaluate(output, config))
+        if args.extra_color:
+            color_logs={role:(output/f'game_{side}.log').read_text(encoding='utf-8',errors='replace') for side,role in ((1,'host'),(2,'client'))}
+            result['extra_colors']={role:bool(re.search(r'\[ExtraColor\] LOAD slot=0 character=0 .*matched=1 applied=1',data)) for role,data in color_logs.items()}
+            result['passed'] &= all(result['extra_colors'].values())
         result['passed'] &= run.returncode == 0
+        if args.boss_characters is not None:
+            checks={}
+            for side in (1,2):
+                data=(output/f'game_{side}.log').read_text(encoding='utf-8',errors='replace')
+                enabled='[BossSelect] ENABLED mode=0 value=1' in data
+                checks[str(side)]=enabled==(args.boss_characters=='12')
+                if enabled:checks[str(side)] &= '[BossSelect] STYLE' in data
+            result['boss_characters']=checks
+            result['passed'] &= all(checks.values())
     except Exception as exc:
         result.update(passed=False, error=str(exc))
     finally:
+        for path, saved in display_backups.items():
+            if saved is None: path.unlink(missing_ok=True)
+            else: path.write_bytes(saved)
+        for path, saved in settings.items():
+            if saved is None: path.unlink(missing_ok=True)
+            else: path.write_bytes(saved)
         result['protected_unchanged'] = before == protected_hashes(runtime)
         result['protected_count'] = len(before)
         result['passed'] &= result['protected_unchanged']
@@ -70,12 +127,19 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--server", help="省略時はローカルの通知サーバー")
     parser.add_argument("--real-game", action="store_true")
+    parser.add_argument('--input-runahead', choices=['1', '2', '12'], help='指定した端だけで1F先行表示を検証')
+    parser.add_argument('--present-rollback', choices=['0','1','2','12'], help='対応ビットを送る端。片側だけなら双方の入力前倒しが無効になることを検査')
+    parser.add_argument('--delay',type=int,choices=range(9),help='試験中だけ両者の初期Dを指定し、元のINIを復元する')
     parser.add_argument("--standby-spectator", action="store_true", help="対戦参加前に6文字コードで観戦待機")
     parser.add_argument("--no-spectators", action="store_true", help="観戦拒否と実ゲームのTCP待受停止を確認")
     parser.add_argument('--seconds', type=int, default=40, help='試験上限秒。条件達成で早期終了')
     parser.add_argument('--fixed-duration', action='store_true', help='指定秒まで継続する比較・耐久用')
     parser.add_argument('--selection-options', action='store_true', help='キャラ選択の設定メニューと背景ON/OFF混在を検査')
+    parser.add_argument('--extra-color',action='store_true',help='保存済みホストEXTRA 6の転送・両側適用を検査')
+    parser.add_argument('--boss-characters',choices=['0','1','2','12'],help='ボス許可を有効にする端。双方ON時は標準入力でボスを選択する')
     parser.add_argument('--monitor-timing', action='store_true', help='実Presentと60Hz更新を別々に採取する')
+    parser.add_argument('--input-handoff-trace', action='store_true', help='採取・公開からゲーム注入までを実QPCで記録する')
+    parser.add_argument('--legacy-input-handoff', action='store_true', help='比較専用：旧3msの入力公開位相')
     parser.add_argument('--monitor-hz', type=int, choices=range(20, 1001), metavar='20..1000',
                         help='検証専用の表示要求Hz。実モニター設定は変更しない')
     parser.add_argument('--test-root', type=pathlib.Path, default=ROOT / 'test/runtime', help='独立したMBAACC_1〜3の親フォルダー')

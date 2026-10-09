@@ -1,4 +1,5 @@
 #include "core_dll/timing/FrameTiming.hpp"
+#include "core_dll/timing/FramePipeline.hpp"
 #include "core_dll/common/StartupTrace.hpp"
 #include "core_dll/timing/SpinProbe.hpp"
 #include "core_dll/timing/WasapiClock.hpp"
@@ -23,6 +24,7 @@
 #include "core_dll/hook/MonitorPresent.hpp"
 #include "core_dll/mbaa_mem/NativeLoopOptimization.hpp"
 #include "core_dll/rollback/ReplayEffects.hpp"
+#include "core_dll/mbaa_mem/NativeFpsCounter.hpp"
 #include "core_dll/hook/WndProcHook.hpp"
 #include "core_dll/hook/DirectInputHook.hpp"
 #include "core_dll/ui/UIManager.hpp"
@@ -34,6 +36,8 @@
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
 #include "core_dll/mbaa_mem/IGameMemory.hpp"
 #include "core_dll/mbaa_mem/StateSweep.hpp"
+#include "core_dll/engine/InputRunahead.hpp"
+#include "core_dll/mbaa_mem/LateInputRollbackProbe.hpp"
 #include <imgui.h>
 #include <imgui_impl_dx9.h>
 #include <imgui_impl_win32.h>
@@ -66,6 +70,11 @@ OverlayFrame overlayFrame;
 // Register — DxHook にコールバックを登録
 // ============================================================================
 void GameFrameOrchestrator::Register() {
+    const bool fpsInstalled = cccaster::game_interface::native_fps_counter::Install([] {
+        return SceneRunner::IsReplaying() || input_runahead::Previewing() ||
+            cccaster::testing::late_input::Replaying();
+    });
+    DebugLog("[NativeFpsCounter] installed=%d site=0048B15C count=normal elapsed=all",int(fpsInstalled));
     cccaster::game_interface::DxHook::SetEndSceneCallback(OnEndScene);
     cccaster::game_interface::DxHook::SetPresentCallback(OnPresent);
     cccaster::game_interface::DxHook::SetAfterPresentCallback(OnAfterPresent);
@@ -97,9 +106,12 @@ void GameFrameOrchestrator::Shutdown() {
 // ============================================================================
 // OnAfterPresent — 完成画像の提示後に次フレームの入力を準備（1F1回）
 // ============================================================================
-//   1. SceneRunner::Step() — ゲームセッションロジック
-//   2. DirectInputHook::Poll() — ジョイスティック状態取得
+//   ローカル戦闘はSceneRunnerの待機後に採取。それ以外はここでUI入力を準備する。
 void GameFrameOrchestrator::OnAfterPresent(LPDIRECT3DDEVICE9 pDevice) {
+    if (SceneRunner::ContinueReplay()) return;
+    if (cccaster::testing::late_input::AfterPresent()) return;
+    if (input_runahead::AfterPresent()) return;
+    cccaster::diagnostics::FramePipeline::Flush();
     // Steamの効果音抑止は元の走査関数全体を照合する。
     // その設置を済ませてから、別の命令範囲を使う空き要求走査を最適化する。
     if (cccaster::sync::InstallReplayEffects())
@@ -114,9 +126,11 @@ void GameFrameOrchestrator::OnAfterPresent(LPDIRECT3DDEVICE9 pDevice) {
     // ネット対戦の生入力は独立時計が採取する。UIのエッジ履歴だけPresentごとに進める。
     if (!SceneRunner::IsReplaying()) {
         cccaster::game_interface::WndProcHook::PumpMessages();
-        if (!cccaster::core::sync::InputTimeline::GetInstance().IsActive())
-            cccaster::game_interface::DirectInputHook::Poll();
-        cccaster::game_interface::DirectInputHook::PollUi();
+        if (!SceneRunner::SamplesLocalInputAfterWait()) {
+            if (!cccaster::core::sync::InputTimeline::GetInstance().IsActive())
+                cccaster::game_interface::DirectInputHook::Poll();
+            cccaster::game_interface::DirectInputHook::PollUi();
+        }
         // 再検出は設定を行うキャラクター選択中だけ。対戦中のDirectInput列挙を避ける。
         auto &inputMem = cccaster::game_interface::GameMem();
         if (inputMem.IsAvailable() && (inputMem.GameMode() == CC_GAME_MODE_CHARA_SELECT ||
@@ -129,6 +143,10 @@ void GameFrameOrchestrator::OnAfterPresent(LPDIRECT3DDEVICE9 pDevice) {
         if (cccaster::testing::state_sweep::Step(SceneRunner::AppMode(), pDevice)) return;
         const auto before = cccaster::core::netplay::NetplaySession::GetState().appliedFrame.load();
         SceneRunner::Step();
+        auto& lateMemory=cccaster::game_interface::GameMem();
+        cccaster::testing::late_input::AfterStep(cccaster::testing::late_input::Depth()>=0 && SceneRunner::AppMode()==1 && lateMemory.IsAvailable() &&
+            lateMemory.CanPredict() && !lateMemory.IsPauseMenuOpen() && !lateMemory.IsTrainingDummy() &&
+            !lateMemory.IsTrainingRecording() && !cccaster::domain::ui::StateUiLogic::IsMappingWindowOpen());
         using Probe = cccaster::diagnostics::SpinProbe;
         if (Probe::pending) Probe::sample.callbackEntry = Probe::Now();
         const auto after = cccaster::core::netplay::NetplaySession::GetState().appliedFrame.load();
@@ -137,9 +155,9 @@ void GameFrameOrchestrator::OnAfterPresent(LPDIRECT3DDEVICE9 pDevice) {
         const bool localSelect = mem.IsAvailable() && mem.GameMode() == CC_GAME_MODE_CHARA_SELECT &&
                                  cccaster::core::sync::InputTimeline::GetInstance().IsActive();
         if (mem.IsAvailable() && (mem.GameMode() == CC_GAME_MODE_IN_GAME || localSelect) && after != before) {
-            // 最終ゲートを使う通常戦闘は、ゲームへ戻る時の生QPCを次Presentで取り込む。
+            // Normal battle frames capture entry before input/snapshot work in Step.
             if (Probe::pending) Probe::sample.observeBegin = Probe::Now();
-            if (!Timing::releaseDueTicks) {
+            if (!Timing::releasedTicks && !Timing::releaseDueTicks) {
                 Timing::releaseUs = cccaster::platform::RealMonotonicUs();
                 Timing::Simulation().Capture(Timing::releaseUs, after, false);
             }
@@ -157,15 +175,31 @@ void GameFrameOrchestrator::OnAfterPresent(LPDIRECT3DDEVICE9 pDevice) {
 }
 
 void GameFrameOrchestrator::OnPresent(LPDIRECT3DDEVICE9 pDevice) {
-    SceneRunner::PrepareDrawing();
-    // 通常更新の解放時刻は変えず、統計走査・除算・整形だけ次の待機前へ移す。
-    // 再計算Presentでも一度だけ消費し、再計算そのものを標本に加えない。
+    // Consume the normal release sample before rollback can clear releaseFrame.
     using Timing = cccaster::core::timer::FrameTiming;
     if (Timing::releasedTicks) {
         Timing::releaseUs = Timing::releasedTicks / 60;
         Timing::Simulation().Capture(Timing::releaseUs, Timing::releaseFrame, false);
         Timing::releasedTicks = 0;
     }
+    if (SceneRunner::BeforePresent()) return;
+    if (!input_runahead::Previewing() && !cccaster::testing::late_input::Replaying()) SceneRunner::PrepareDrawing();
+    auto& previewMemory = cccaster::game_interface::GameMem();
+    const auto previewMode = SceneRunner::AppMode();
+    if (cccaster::testing::late_input::BeforePresent(pDevice,cccaster::testing::late_input::Depth()>=0 && previewMode==1 && previewMemory.IsAvailable() &&
+        previewMemory.CanPredict() && !previewMemory.IsPauseMenuOpen() && !previewMemory.IsTrainingDummy() &&
+        !previewMemory.IsTrainingRecording() && !cccaster::domain::ui::StateUiLogic::IsMappingWindowOpen())) return;
+    const bool previewEligible = input_runahead::Enabled() && SceneRunner::IsReady() && !SceneRunner::IsReplaying() &&
+        (previewMode == 0 || previewMode == 1 || previewMode == 5) && previewMemory.IsAvailable() &&
+        previewMemory.CanPredict() && !previewMemory.IsPauseMenuOpen() &&
+        // DUMMYの再生位置/自動スロット切替は戦闘ロールバックの保存対象外。
+        // 録画・再生中は通常更新を提示し、録画内容と実行回数を保持する。
+        !(previewMode == 1 && (previewMemory.IsTrainingDummy() || previewMemory.IsTrainingRecording())) &&
+        !cccaster::core::SpeedFlags::RenderSkip().load() &&
+        !cccaster::domain::ui::StateUiLogic::IsMappingWindowOpen();
+    if (input_runahead::BeforePresent(previewEligible)) return;
+    // 通常更新の解放時刻は変えず、統計走査・除算・整形だけ次の待機前へ移す。
+    // 再計算Presentでも一度だけ消費し、再計算そのものを標本に加えない。
     auto &actual = Timing::Simulation();
     const bool simulationReport = actual.ObserveCaptured();
     static const bool simulationTrace = std::getenv("CCCASTER_FRAME_TIMING_TRACE") != nullptr;
@@ -183,6 +217,7 @@ void GameFrameOrchestrator::OnPresent(LPDIRECT3DDEVICE9 pDevice) {
             unsigned(overlayFrame.begin), unsigned(overlayFrame.end));
     }
     overlayFrame = {};
+    cccaster::diagnostics::FramePipeline::PresentReady();
     // HUD合成もWORKへ含め、元Presentを呼ぶ直前の境界で表示要求間隔を測る。
     if (Timing::releaseUs) {
         Timing::workUs = cccaster::platform::RealMonotonicUs() - Timing::releaseUs;
@@ -221,7 +256,7 @@ void GameFrameOrchestrator::OnPresent(LPDIRECT3DDEVICE9 pDevice) {
             if (presentDue > now && remaining <= Timing::PresentBudgetUs()) {
 
                 if (remaining > Timing::PresentSpinGuardUs)
-                    cccaster::platform::PreciseWaitUs(remaining - Timing::PresentSpinGuardUs);
+                    cccaster::platform::RealSleepUs(remaining - Timing::PresentSpinGuardUs);
                 // 短区間は相関QPCで待つ。音声APIや共有mutexをスピン回数だけ呼ばない。
 
                 // 最終判定はWASAPI由来時計。補間速度差で早く提示しない。
@@ -270,7 +305,7 @@ bool GameFrameOrchestrator::OnPresentSkip(LPDIRECT3DDEVICE9 pDevice) {
                 mem.GameMode(), unsigned(mem.IntroState()), unsigned(skipped), unsigned(SceneRunner::IsReplaying()),
                 cccaster::platform::RealMonotonicUs());
     }
-    return skipped;
+    return skipped || input_runahead::SkipPresent() || cccaster::testing::late_input::SkipPresent();
 }
 
 // ============================================================================
@@ -281,7 +316,7 @@ bool GameFrameOrchestrator::OnPresentSkip(LPDIRECT3DDEVICE9 pDevice) {
 void GameFrameOrchestrator::OnEndScene(LPDIRECT3DDEVICE9 pDevice) {
     if (OverlayTraceEnabled()) ++overlayFrame.endScenes;
     // イントロ最初のHUD準備にも間に合わせる。OnPresentでも最終確認する。
-    SceneRunner::PrepareDrawing();
+    if (!input_runahead::Previewing() && !cccaster::testing::late_input::Replaying()) SceneRunner::PrepareDrawing();
     // ── ImGui 遅延初期化（初回のみ）──
     if (!s_imguiInitialized) {
         cccaster::diagnostics::startup::Mark("ui_begin");
@@ -406,7 +441,7 @@ void GameFrameOrchestrator::RenderOverlay(LPDIRECT3DDEVICE9 pDevice) {
         ++overlayFrame.prepared;
         overlayFrame.begin = pDevice->BeginScene();
         if (SUCCEEDED(overlayFrame.begin)) {
-            ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
+            cccaster::hud::RenderDrawData();
             overlayFrame.end = pDevice->EndScene();
             overlayFrame.drawn = SUCCEEDED(overlayFrame.end);
         }

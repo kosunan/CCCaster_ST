@@ -50,7 +50,8 @@ def main():
         initial = gui.wait(lambda s: not s['elements']['loading']['visible'])
         save('initial.json', initial)
         expected = dict(Sound=True, FlashTaskbar=True, DesktopPopup=True, ConnectionPreference=0,
-                        AllowSpectators=True, SoftwareRendering=False, NtfyServer='https://ntfy.sh',
+                        AllowSpectators=True, ShowOpponentExtraColors=True, BossCharacters=False,
+                        TrainingStandby=False, SoftwareRendering=False, NtfyServer='https://ntfy.sh',
                         public=False, port=7500, delay=2, rollback=7)
         assert initial['state']['settings'] == expected, initial['state']['settings']
         assert initial['state']['language'] == 'ja'
@@ -62,7 +63,7 @@ def main():
             if gui.call()['state']['language'] != language:
                 gui.click('language')
                 gui.wait(lambda s: s['state']['language'] == language)
-            for page in ('matching', 'spectate', 'training', 'replay', 'settings', 'guide'):
+            for page in ('matching', 'spectate', 'controller', 'settings', 'guide'):
                 if page == 'settings':
                     gui.settings()
                 else:
@@ -75,7 +76,7 @@ def main():
             direct = gui.click('direct-tab')
             assert not direct['overflow']
             save(f'{language}_direct.json', direct)
-            result['checks'].append(f'{language}: 6ページと直接接続の表示・横はみ出しなし')
+            result['checks'].append(f'{language}: 5ページと直接接続の表示・横はみ出しなし')
         gui.settings()
         gui.type('player-name', 'RELEASE_TEST')
         gui.click('settings-back')

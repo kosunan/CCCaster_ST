@@ -23,6 +23,7 @@
 #include <vector>
 #include <string>
 #include "shared_contracts/PlayerEmblem.hpp"
+#include "core_dll/engine/ExtraColorNetwork.hpp"
 #include "core_dll/sync/NetplayClock.hpp"
 
 namespace cccaster {
@@ -33,6 +34,8 @@ class Metronome; // 前方宣言
 
 class SyncCodec {
     cccaster::emblem::Exchange _emblems;
+    cccaster::training_palette::network::Exchange _extraColors;
+    bool _extraTurn=false;
   public:
     // ─── 初期化 ─────────────────────────────────────────
     void Initialize(bool isHost, int delayFrames, int maxRollback, Metronome *metronome);
@@ -150,6 +153,8 @@ class SyncCodec {
     // 追加の任意フラグなのでwire 10拡張8のサイズ・必須同期処理は変えない。
     static constexpr uint8_t FLAG_LOADING_SKIP_CURRENT = 0x04;
     static constexpr uint8_t FLAG_LOADING_SKIP_NEXT = 0x08;
+    static constexpr uint8_t FLAG_PRESENT_ROLLBACK = 0x10;
+    static constexpr uint8_t FLAG_BOSS_CHARACTERS = 0x20;
 
   private:
     static void BuildUnifiedPacket(std::vector<uint8_t> &pkt, uint8_t phase, uint8_t type, int64_t timestampTicks,

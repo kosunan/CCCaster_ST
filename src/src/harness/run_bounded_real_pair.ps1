@@ -1,4 +1,4 @@
-param([int]$Seconds=45,[int]$Port=17800,[string]$Network='', [string]$TestRoot='', [ValidateRange(0,2)][int]$CloseSide=0, [switch]$DebugSpikes, [switch]$VirtualController, [switch]$ManualInput, [string]$OutputDirectory='', [switch]$UseConnectionCode, [string]$ConnectIp='127.0.0.1', [switch]$StandbySpectator, [switch]$NoSpectators, [string]$CheckpointConfig='', [string]$Python='python', [ValidatePattern('^[0-9A-Fa-f]{8}$')][string]$VirtualProduct1='05C4054C', [ValidatePattern('^[0-9A-Fa-f]{8}$')][string]$VirtualProduct2='09CC054C', [string]$BuildManifest='')
+param([int]$Seconds=45,[int]$Port=17800,[string]$Network='', [string]$TestRoot='', [ValidateRange(0,2)][int]$CloseSide=0, [switch]$DebugSpikes, [switch]$VirtualController, [switch]$ManualInput, [string]$OutputDirectory='', [switch]$UseConnectionCode, [string]$ConnectIp='127.0.0.1', [switch]$StandbySpectator, [switch]$NoSpectators, [string]$CheckpointConfig='', [string]$Python='python', [ValidatePattern('^[0-9A-Fa-f]{8}$')][string]$VirtualProduct1='05C4054C', [ValidatePattern('^[0-9A-Fa-f]{8}$')][string]$VirtualProduct2='09CC054C', [string]$BuildManifest='', [ValidateSet('','1','2','12')][string]$NoOpponentExtraColorSides='', [switch]$BossCharacters)
 $taskDebugStarted=[DateTime]::UtcNow
 $ErrorActionPreference='Stop'
 $taskRoot=Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
@@ -15,7 +15,7 @@ $taskMeasured=[Diagnostics.Stopwatch]::StartNew()
 $taskVerifySides=if($StandbySpectator){@(1,2,3)}else{@(1,2)}
 if($StandbySpectator -and !$UseConnectionCode){throw '観戦待機試験にはUseConnectionCodeが必要'}
 $taskTestEnv=@{}
-foreach($taskKey in 'CCCASTER_SCRIPT_INPUT','CCCASTER_INPUT_TRACE','CCCASTER_MEM_TRACE','CCCASTER_TIME_SCALE','CCCASTER_TEST_NETWORK','CCCASTER_TEST_VIRTUAL_PRODUCT') {
+foreach($taskKey in 'CCCASTER_SCRIPT_INPUT','CCCASTER_INPUT_TRACE','CCCASTER_MEM_TRACE','CCCASTER_TIME_SCALE','CCCASTER_TEST_NETWORK','CCCASTER_TEST_VIRTUAL_PRODUCT','CCCASTER_TEST_INPUT_RUNAHEAD','CCCASTER_TEST_PRESENT_ROLLBACK','CCCASTER_BOUNDARY_WORKERS','CCCASTER_BOUNDARY_CPUS','CCCASTER_TEST_BOUNDARY_STALL','CCCASTER_SPIN_PUBLICATION','CCCASTER_SPIN_CAPTURE','CCCASTER_TEST_CAPTURE_STALL') {
     $taskTestEnv[$taskKey]=[Environment]::GetEnvironmentVariable($taskKey,'Process')
 }
 # 両側とも起動していないことを、配布ファイルやログに触れる前に確認する。
@@ -59,6 +59,19 @@ try {
     $env:CCCASTER_SCRIPT_INPUT=if($VirtualController -or $ManualInput){'0'}else{'1'};$env:CCCASTER_INPUT_TRACE='1';if(!$VirtualController){Remove-Item Env:CCCASTER_TEST_VIRTUAL_PRODUCT -ErrorAction SilentlyContinue};$env:CCCASTER_MEM_TRACE='1';$env:CCCASTER_TIME_SCALE='1'
     if($Network){$env:CCCASTER_TEST_NETWORK=$Network}else{Remove-Item Env:CCCASTER_TEST_NETWORK -ErrorAction SilentlyContinue}
     foreach($taskSide in 1,2) {
+        foreach($taskBoundaryKey in 'CCCASTER_BOUNDARY_WORKERS','CCCASTER_BOUNDARY_CPUS','CCCASTER_TEST_BOUNDARY_STALL','CCCASTER_SPIN_PUBLICATION','CCCASTER_SPIN_CAPTURE','CCCASTER_TEST_CAPTURE_STALL') {
+            $taskBoundaryValue=[Environment]::GetEnvironmentVariable("${taskBoundaryKey}_$taskSide",'Process')
+            if($null -eq $taskBoundaryValue){$taskBoundaryValue=$taskTestEnv[$taskBoundaryKey]}
+            if($null -eq $taskBoundaryValue){Remove-Item -LiteralPath "Env:$taskBoundaryKey" -ErrorAction SilentlyContinue}
+            else{[Environment]::SetEnvironmentVariable($taskBoundaryKey,$taskBoundaryValue,'Process')}
+        }
+        if($env:CCCASTER_TEST_PRESENT_ROLLBACK_SIDES) {
+            $env:CCCASTER_TEST_PRESENT_ROLLBACK=if($env:CCCASTER_TEST_PRESENT_ROLLBACK_SIDES.Contains([string]$taskSide)){'1'}else{'0'}
+        }
+        if($env:CCCASTER_TEST_INPUT_RUNAHEAD_SIDES) {
+            if($env:CCCASTER_TEST_INPUT_RUNAHEAD_SIDES.Contains([string]$taskSide)){$env:CCCASTER_TEST_INPUT_RUNAHEAD='1'}
+            else{$env:CCCASTER_TEST_INPUT_RUNAHEAD='0'}
+        }
         $taskDir=Join-Path $taskTest "MBAACC_$taskSide\cccaster_st"
         if($VirtualController){$env:CCCASTER_TEST_VIRTUAL_PRODUCT=if($taskSide -eq 1){$VirtualProduct1}else{$VirtualProduct2}}
         $taskHostMode=if($UseConnectionCode){'--host'}else{'--legacy-host'}
@@ -98,6 +111,8 @@ try {
                 Set-Content -LiteralPath (Join-Path $taskOut 'connection_code.txt')
         }
         if($DebugSpikes){$taskArgs+=' --debug-spikes'}
+        if($BossCharacters){$taskArgs+=' --boss-characters'}
+        $taskArgs+=if($NoOpponentExtraColorSides.Contains([string]$taskSide)){' --no-opponent-extra-colors'}else{' --show-opponent-extra-colors'}
         if($env:CCCASTER_TEST_BASELINE_HOST_SCENE_PAIRS) {
             if($taskSide -eq 1){$env:CCCASTER_DISABLE_SCENE_MERGE='1'}else{Remove-Item Env:CCCASTER_DISABLE_SCENE_MERGE -ErrorAction SilentlyContinue}
         }
@@ -130,7 +145,23 @@ try {
         if($env:CCCASTER_TEST_BASELINE_HOST_REPLAY_SAVES){
             if($taskSide -eq 1){$env:CCCASTER_KEEP_CONFIRMED_REPLAY_SNAPSHOTS='1'}else{Remove-Item Env:CCCASTER_KEEP_CONFIRMED_REPLAY_SNAPSHOTS -ErrorAction SilentlyContinue}
         }
-        $taskLaunchers+=Start-Process (Join-Path $taskDir 'CCCaster_Steam.exe') -WindowStyle Hidden -PassThru -WorkingDirectory $taskDir -ArgumentList $taskArgs -RedirectStandardOutput (Join-Path $taskOut "launcher_$taskSide.log") -RedirectStandardError (Join-Path $taskOut "launcher_$taskSide.err")
+        # 子CLIとゲームへ生成時からCPU制約を継承する。起動後の設定では初期化検証にならない。
+        $taskAffinity=[Environment]::GetEnvironmentVariable("CCCASTER_TEST_PROCESS_AFFINITY_$taskSide",'Process')
+        $taskSelf=[Diagnostics.Process]::GetCurrentProcess()
+        $taskPreviousAffinity=$taskSelf.ProcessorAffinity
+        try {
+            if($taskAffinity) {
+                if($taskAffinity -notmatch '^[0-9]+$' -or [long]$taskAffinity -le 0 -or
+                   ([long]$taskAffinity -band $taskPreviousAffinity.ToInt64()) -ne [long]$taskAffinity) {
+                    throw 'CPU制約は現在の許可範囲内の正の10進マスクで指定する'
+                }
+                $taskSelf.ProcessorAffinity=[IntPtr]([long]$taskAffinity)
+            }
+            $taskLaunchers+=Start-Process (Join-Path $taskDir 'CCCaster_Steam.exe') -WindowStyle Hidden -PassThru -WorkingDirectory $taskDir -ArgumentList $taskArgs -RedirectStandardOutput (Join-Path $taskOut "launcher_$taskSide.log") -RedirectStandardError (Join-Path $taskOut "launcher_$taskSide.err")
+        } finally {
+            if($taskAffinity){$taskSelf.ProcessorAffinity=$taskPreviousAffinity}
+            $taskSelf.Dispose()
+        }
         $taskStartedSides+=$taskSide
         # P2Pは直後のコード発行待ちが準備完了を保証する。旧IP経路だけ従来待ちを残す。
         if($taskSide -eq 1 -and !$UseConnectionCode){Start-Sleep -Seconds 3}
@@ -185,7 +216,10 @@ try {
     }
 } finally {
     if($taskMonitor -and !$taskMonitor.HasExited){Stop-Process -Id $taskMonitor.Id -Force -ErrorAction SilentlyContinue}
-    foreach($taskKey in $taskTestEnv.Keys){[Environment]::SetEnvironmentVariable($taskKey,$taskTestEnv[$taskKey],'Process')}
+    foreach($taskKey in $taskTestEnv.Keys){
+        if($null -eq $taskTestEnv[$taskKey]){Remove-Item -LiteralPath "Env:$taskKey" -ErrorAction SilentlyContinue}
+        else{[Environment]::SetEnvironmentVariable($taskKey,$taskTestEnv[$taskKey],'Process')}
+    }
     $taskChildren=@(Get-CimInstance Win32_Process -Filter "Name='MBAA.exe'" | Where-Object {$_.ParentProcessId -in $taskLaunchers.Id})
     foreach($taskChild in $taskChildren){if($taskChild.ProcessId -notin $taskGames){$taskGames+=$taskChild.ProcessId}}
     if($null -eq $taskOldReplaySaves){Remove-Item Env:CCCASTER_KEEP_CONFIRMED_REPLAY_SNAPSHOTS -ErrorAction SilentlyContinue}else{$env:CCCASTER_KEEP_CONFIRMED_REPLAY_SNAPSHOTS=$taskOldReplaySaves}

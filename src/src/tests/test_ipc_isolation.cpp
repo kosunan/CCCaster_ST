@@ -7,9 +7,11 @@ int main(int argc, char **argv) {
     state.magicVersion = IPC_VERSION_MAGIC;
     state.isHost = argc == 1;
     state.localPort = state.isHost ? 18100 : 18101;
+    std::strcpy(state.lastErrorReason, state.isHost ? "rollback restore failed" : "independent launcher");
     if (argc > 1 && std::string(argv[1]) == "reader") {
         SharedState read{};
-        return IpcManager::OpenAndRead(read) && read.localPort == 18100 ? 0 : 1;
+        return IpcManager::OpenAndRead(read) && read.localPort == 18100 &&
+            std::strcmp(read.lastErrorReason,"rollback restore failed")==0 ? 0 : 1;
     }
     HANDLE mapping = IpcManager::CreateAndWrite(state);
     if (!mapping)
@@ -46,6 +48,7 @@ int main(int argc, char **argv) {
         CC_CHECK(IpcManager::OpenAndRead(read));
         CC_CHECK_EQ(read.localPort, 18100);
         CC_CHECK(read.isHost);
+        CC_CHECK(std::strcmp(read.lastErrorReason,"rollback restore failed")==0);
     }
     CC_CASE("終了理由をDLL消失後も保持し最初の操作を維持する");
     CC_CHECK(RequestLocalGameExit(SessionExitReason::Escape));
@@ -62,6 +65,7 @@ int main(int argc, char **argv) {
     CC_CHECK(!RequestLocalGameExit(SessionExitReason::Escape));
     CC_CHECK(IpcManager::OpenAndRead(exitState));
     CC_CHECK(!exitState.gameShutdownRequest);
+    CC_CHECK_EQ(exitState.localExitReason, static_cast<uint32_t>(SessionExitReason::Escape));
     CC_CASE("IPC版が違う更新要求は失敗を返して内容を触らない");
     CC_CHECK(IpcManager::UpdateOrReadState([](SharedState &s) { s.magicVersion = 0; }));
     bool modified = false;

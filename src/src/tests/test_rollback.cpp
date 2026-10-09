@@ -85,6 +85,49 @@ static int delayedSimulation(uint32_t limit, uint32_t networkLag = 0) {
     return 0;
 }
 
+// 自入力も未採取の1枠を保持予測する。相手入力の到着が遅れていても、
+// Present前で自入力を訂正し、全確定後は同じ入力列を逐次実行した状態と一致する。
+static int bothInputsSimulation(uint32_t networkLag) {
+    using cccaster::sync::PredictionHistory;
+    constexpr uint32_t first=65537, count=300;
+    PredictionHistory history;history.Reset(first,20);
+    std::array<Model,32> saves{};
+    Model state,baseline;
+    uint32_t frontier=first,localCorrections=0;
+    auto local=[](uint32_t f) { return (f*17)%31; };
+    auto remote=[](uint32_t f) { return (f*23)%29; };
+    for (uint32_t f=first;f<first+count;++f) advance(baseline,local(f+1),remote(f+1));
+    for (uint32_t tick=0;tick<count+networkLag+80;++tick) {
+        auto readLocal=[&](uint32_t f,uint32_t &v) { v=local(f+1);return f-first+1<=tick; };
+        auto readRemote=[&](uint32_t f,uint32_t &v) { v=remote(f+1);return f-first+1+networkLag<=tick; };
+        for (uint32_t f=history.Confirmed()+1;f<history.Next();++f) {
+            uint32_t v; if (readLocal(f,v) && history.Get(f)->local!=v) ++localCorrections;
+        }
+        const auto mismatch=history.Reconcile(readLocal,readRemote);
+        if (mismatch) {
+            state=saves[mismatch%32];
+            for (uint32_t f=mismatch;f<frontier;++f) {
+                uint32_t a,b;CHECK(history.ResolveReplay(f,readLocal,readRemote,a,b));
+                if (history.NeedsReplaySnapshot(f)) saves[f%32]=state;
+                advance(state,a,b);
+            }
+        }
+        if (frontier==first+count) {
+            if (history.Confirmed()==frontier-1) break;
+            continue;
+        }
+        if (!history.CanPredict()) continue;
+        uint32_t a,b;
+        if (!readLocal(frontier,a)) a=history.LocalPrediction();
+        if (!readRemote(frontier,b)) b=history.Prediction();
+        saves[frontier%32]=state;CHECK(history.Record(frontier,a,b));
+        advance(state,a,b);++frontier;
+    }
+    CHECK(frontier==first+count);CHECK(history.Confirmed()==frontier-1);
+    CHECK(state==baseline);CHECK(localCorrections>0);
+    return 0;
+}
+
 struct SnapshotMemory : cccaster::game_interface::IGameMemory {
     uint32_t value = 0;
     bool IsAvailable() const override {
@@ -204,6 +247,19 @@ static int snapshotChains() {
 }
 int main() {
     CHECK(snapshotChains() == 0);
+    CHECK(bothInputsSimulation(0) == 0);
+    CHECK(bothInputsSimulation(5) == 0);
+    CHECK(bothInputsSimulation(22) == 0);
+    {
+        cccaster::sync::PredictionHistory pending;pending.Reset(10,7);
+        CHECK(pending.Record(10,0,0));CHECK(pending.Record(11,0,0));
+        auto own=[](uint32_t f,uint32_t &v) { v=f==11 ? 4 : 0;return true; };
+        auto absent=[](uint32_t,uint32_t &) { return false; };
+        CHECK(pending.Reconcile(own,absent)==11); // 古い相手入力の欠落で新しい自入力を止めない。
+        CHECK(pending.Confirmed()==9);CHECK(pending.Get(11)->local==4);
+        auto peer=[](uint32_t,uint32_t &v) { v=0;return true; };
+        CHECK(pending.Reconcile(own,peer)==0);CHECK(pending.Confirmed()==11);
+    }
     CHECK(delayedSimulation(0) == 0);
     CHECK(delayedSimulation(4) == 0);
     CHECK(delayedSimulation(8) == 0);

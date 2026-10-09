@@ -1,4 +1,6 @@
+#include "core_dll/hook/HookBatch.hpp"
 #include "core_dll/mbaa_mem/RealGameMemory.hpp"
+#include "core_dll/mbaa_mem/BossCharacterSelect.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
 #include "core_dll/mbaa_mem/MbaaInputDefs.hpp"
 #include <windows.h>
@@ -134,7 +136,7 @@ bool RealGameMemory::ConfigureRandomStages() {
     const auto status = MH_Initialize();
     if (status != MH_OK && status != MH_ERROR_ALREADY_INITIALIZED) return false;
     if (MH_CreateHook(address, reinterpret_cast<void *>(cccaster_random_stage),
-                      &cccaster_random_stage_original) != MH_OK || MH_EnableHook(address) != MH_OK) return false;
+                      &cccaster_random_stage_original) != MH_OK || cccaster::hook_batch::Enable(address) != MH_OK) return false;
     installed = true;
     return true;
 }
@@ -162,7 +164,7 @@ bool ConfigureMenuObserver() {
     if (MH_CreateHook(address, reinterpret_cast<void *>(cccaster_menu_hook), &cccaster_menu_original) !=
         MH_OK)
         return false;
-    if (MH_EnableHook(address) != MH_OK)
+    if (cccaster::hook_batch::Enable(address) != MH_OK)
         return false;
     installed = true;
     return true;
@@ -178,7 +180,7 @@ bool RealGameMemory::ConfigureNetplayMenu() {
     std::memcpy(openExpected.data()+5,&singleton,4);
     if (!openAddress || std::memcmp(openAddress,openExpected.data(),openExpected.size())) return false;
     if (MH_CreateHook(openAddress, reinterpret_cast<void *>(cccaster_retry_open_hook),
-                      &cccaster_retry_open_original) != MH_OK || MH_EnableHook(openAddress) != MH_OK)
+                      &cccaster_retry_open_original) != MH_OK || cccaster::hook_batch::Enable(openAddress) != MH_OK)
         return false;
     installed = true;
     return true;
@@ -221,7 +223,7 @@ bool RealGameMemory::BeginIndependentSelect(bool host) {
         const unsigned char expected[] = {0x83, 0xf8, 0xff, 0x74, 0x10};
         if (std::memcmp(address, expected, sizeof(expected))) return false;
         if (MH_CreateHook(address, reinterpret_cast<void *>(cccaster_stage_hook),
-                          &cccaster_stage_original) != MH_OK || MH_EnableHook(address) != MH_OK) return false;
+                          &cccaster_stage_original) != MH_OK || cccaster::hook_batch::Enable(address) != MH_OK) return false;
         installed = true;
     }
     selectActive = true;
@@ -247,7 +249,7 @@ bool RealGameMemory::ReadLocalSelection(bool host, core::sync::SelectionState &s
         state.selector = s[3]; state.character = s[4]; state.moon = s[5]; state.color = s[6];
         state.confirmed = 1;
         ++state.revision;
-        if (!state.Valid()) return false;
+        if (!state.Valid(boss::selection::Enabled())) return false;
         domain::session::DebugLog("[Select] LOCAL epoch=%u char=%u moon=%u color=%u selector=%u",
                                   state.epoch, state.character, state.moon, state.color, state.selector);
     }

@@ -5,6 +5,10 @@
 
 #include "core_dll/ui/UIManager.hpp"
 #include "core_dll/ui/TrainingCharacterView.hpp"
+#include "core_dll/ui/TrainingPaletteView.hpp"
+#include "core_dll/ui/TrainingHitboxView.hpp"
+#include "core_dll/mbaa_mem/TrainingHitboxMenu.hpp"
+#include "core_dll/mbaa_mem/TrainingPaletteMenu.hpp"
 #include "core_dll/ui/TrainingStandbyView.hpp"
 #include "core_dll/ui/HudDisplay.hpp"
 #include "core_dll/ui/State_Ui_Logic.hpp"
@@ -39,7 +43,11 @@ void UIManager::Render(UiPhase phase) {
         ControllerUiLogic::Suspend();
     }
     if (StateUiLogic::IsMappingWindowOpen()) { ControllerUiView::Draw(); return; }
+    if (training && phase == UiPhase::InGame && training_palette_view::Draw()) return;
     if (training && phase == UiPhase::InGame && training_character_view::Draw()) return;
+    if (training && phase == UiPhase::InGame && training_hitbox_view::Draw()) return;
+    // 標準Trainingメニュー中は名前・勝数・詳細情報を重ねない。HUDの選択モードは保持する。
+    if (training && phase == UiPhase::InGame && cccaster::game_interface::GameMem().IsPauseMenuOpen()) return;
     if (cccaster::domain::session::SceneRunner::AppMode() == 4 && phase != UiPhase::InGame) return;
     switch (phase) {
     case UiPhase::CharaSelect:
@@ -61,9 +69,10 @@ void UIManager::Render(UiPhase phase) {
 // --- 入力イベント委譲 ---
 void UIManager::OnDelayInput(int num) {
     auto &mem = cccaster::game_interface::GameMem();
-    if (mem.IsAvailable() && cccaster::domain::session::SceneRunner::AppMode() == 1 &&
-        (mem.GameMode() == CC_GAME_MODE_CHARA_SELECT || mem.GameMode() == CC_GAME_MODE_IN_GAME)) {
-        cccaster::domain::session::SceneRunner::RequestTrainingDelay(num);
+    const auto appMode = cccaster::domain::session::SceneRunner::AppMode();
+    if (mem.IsAvailable() && (appMode == 1 || appMode == 5) &&
+        (mem.GameMode() == CC_GAME_MODE_CHARA_SELECT || (appMode == 1 && mem.GameMode() == CC_GAME_MODE_IN_GAME))) {
+        cccaster::domain::session::SceneRunner::RequestLocalDelay(num);
         return;
     }
     if (mem.IsAvailable() && mem.GameMode() == CC_GAME_MODE_CHARA_SELECT &&
@@ -99,6 +108,22 @@ bool UIManager::IsMappingWindowOpen() {
 // ============================================================================
 
 int UIManager::HandleWndProcMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    namespace hitbox = cccaster::training_hitbox;
+    if (uMsg == WM_KILLFOCUS) hitbox::escapeHeld = false;
+    if ((uMsg == WM_KEYUP || uMsg == WM_SYSKEYUP) && wParam == VK_ESCAPE && hitbox::escapeHeld.exchange(false)) return 1;
+    if ((uMsg == WM_KEYDOWN || uMsg == WM_SYSKEYDOWN) && wParam == VK_ESCAPE && (hitbox::Active() || hitbox::escapeHeld)) {
+        hitbox::escapeHeld = true;
+        if (!(lParam & (1u << 30))) hitbox::escapeRequested = true;
+        return 1;
+    }
+    if (uMsg == WM_KILLFOCUS) cccaster::training_palette::escapeHeld = false;
+    if ((uMsg == WM_KEYUP || uMsg == WM_SYSKEYUP) && wParam == VK_ESCAPE && cccaster::training_palette::escapeHeld) {
+        cccaster::training_palette::escapeHeld = false;
+        ImGui_ImplWin32_WndProcHandler(hWnd,uMsg,wParam,lParam);
+        return 1;
+    }
+    if (uMsg == WM_KEYDOWN && wParam == VK_ESCAPE && cccaster::training_palette::Active())
+        cccaster::training_palette::escapeHeld = true;
     if (training_standby_view::Active() && (uMsg == WM_KEYDOWN || uMsg == WM_SYSKEYDOWN ||
         uMsg == WM_KEYUP || uMsg == WM_SYSKEYUP || uMsg == WM_CHAR)) {
         if (uMsg == WM_KEYDOWN) training_standby_view::Key(static_cast<unsigned>(wParam), (lParam & (1u << 30)) != 0);
@@ -118,7 +143,7 @@ int UIManager::HandleWndProcMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM 
             !(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000)) {
             const auto mode = cccaster::domain::session::SceneRunner::AppMode();
             auto &mem = cccaster::game_interface::GameMem();
-            if ((mode == 0 || mode == 1) && mem.IsAvailable() && mem.GameMode() == CC_GAME_MODE_CHARA_SELECT)
+            if ((mode == 0 || mode == 1 || mode == 5) && mem.IsAvailable() && mem.GameMode() == CC_GAME_MODE_CHARA_SELECT)
                 options::Queue(options::Toggle);
             else HudDisplay::Cycle();
         }
@@ -144,6 +169,8 @@ int UIManager::HandleWndProcMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM 
     if (ImGui_ImplWin32_WndProcHandler(hWnd, uMsg, wParam, lParam)) {
         return 1; // ImGui が消費
     }
+    if (cccaster::training_palette::Active() && wParam != VK_F4 &&
+        (uMsg == WM_KEYDOWN || uMsg == WM_KEYUP || uMsg == WM_CHAR)) return 1;
 
     // (2) ホットキー処理
     if (uMsg == WM_KEYDOWN || uMsg == WM_SYSKEYDOWN) {

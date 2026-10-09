@@ -1,4 +1,7 @@
+#include "core_dll/hook/HookBatch.hpp"
 #include "core_dll/mbaa_mem/TrainingCharacterMenu.hpp"
+#include "core_dll/mbaa_mem/TrainingPaletteMenu.hpp"
+#include "core_dll/mbaa_mem/TrainingHitboxMenu.hpp"
 #include "core_dll/mbaa_mem/RealGameMemory.hpp"
 #include "core_dll/mbaa_mem/MbaaAddresses.hpp"
 #include "core_dll/mbaa_mem/MbaaInputDefs.hpp"
@@ -11,10 +14,17 @@
 #include <cstring>
 #include <cstdio>
 #include "SteamV15Signatures.hpp"
+#include "SteamTrainingV158Signatures.hpp"
 using cccaster::game_memory::GameRuntime;
 
 // SteamのABI・STL配置は steam_training_v15.asm に照合記録を残す。
-extern "C" { uintptr_t cc_training_image_reader=0; }
+extern "C" { uintptr_t cc_training_presentation_loader=0; }
+__attribute__((naked)) void cc_training_load_presentation(unsigned, unsigned, unsigned, unsigned) {
+    // Steam 47D9D0: ECX=slot、EDX=side、stack=character/予約2DWORD/CUT番号。callerが16byte回収。
+    __asm__ __volatile__("movl 4(%esp),%ecx; movl 12(%esp),%edx; pushl 16(%esp);"
+                         "pushl $0; pushl $0; pushl 20(%esp);"
+                         "call *_cc_training_presentation_loader; addl $16,%esp; ret");
+}
 void cc_training_append(void* vector, void* item) {
     reinterpret_cast<void (__thiscall*)(void*,void*)>(GameRuntime::Preferred(0x41f960))(vector,&item);
 }
@@ -39,9 +49,9 @@ bool cc_training_file_exists(const char* path) {
     return false;
 }
 // 519DB0: ECX=path、EDX=file**、残り2引数はcallerが回収する。
-__attribute__((naked)) int cc_training_read_image(const char*,void*) {
-    __asm__ __volatile__("movl 4(%esp),%ecx\n\tmovl 8(%esp),%edx\n\tpushl $0\n\tpushl $0\n\t"
-                         "call *_cc_training_image_reader\n\taddl $8,%esp\n\tret\n\t");
+__attribute__((naked)) int cc_training_read_image(const char*,void*,uintptr_t) {
+    __asm__ __volatile__("movl 4(%esp),%ecx\n\tmovl 8(%esp),%edx\n\tmovl 12(%esp),%eax\n\tpushl $0\n\tpushl $0\n\t"
+                         "call *%eax\n\taddl $8,%esp\n\tret\n\t");
 }
 
 namespace cccaster::game_interface { bool ConfigureMenuObserver(); }
@@ -70,6 +80,22 @@ uint32_t* Descriptor(uint32_t character) {
 const char* NativeString(uint32_t* base) {
     return base[5] < 16 ? reinterpret_cast<const char*>(base)
                         : reinterpret_cast<const char*>(base[0]);
+}
+void AddInformation(uint32_t* menu, const char* key, const char* text) {
+    auto* information = reinterpret_cast<uint8_t*>(menu[0xDC/4]);
+    if (!information) return;
+    // Information\\Training.iniの読込みと同じ文字列形式・アロケータを使用する。
+    // 元のINIは変更せず、メニューが所有する説明一覧へ登録する。
+    // Steamは24byte文字列2個、説明vectorは情報object+0xB0。
+    // 51E96C..51EA48の生成／登録／破棄と同じ呼出規約を使う。
+    uint32_t entry[12]{};
+    entry[5] = entry[11] = 15;
+    const auto assign = reinterpret_cast<void (__thiscall*)(void*, const char*, size_t)>(GameRuntime::Preferred(0x403f50));
+    assign(entry, key, std::strlen(key));
+    assign(entry + 6, text, std::strlen(text));
+    reinterpret_cast<void (__thiscall*)(void*,void*)>(GameRuntime::Preferred(0x51ee50))(information + 0xB0, entry);
+    for (auto* value : {entry, entry + 6})
+        if (value[5] >= 16) reinterpret_cast<void (__cdecl*)(void*)>(GameRuntime::Preferred(0x52c38e))(reinterpret_cast<void*>(value[0]));
 }
 bool Exists(const char* path) {
     const auto attributes = GetFileAttributesA(path);
@@ -112,9 +138,24 @@ __attribute__((force_align_arg_pointer)) uint32_t* __fastcall Construct(uint32_t
         item, "CHARACTER", "CC_CHARACTER", 0);
     item[0] = GameRuntime::Preferred(0x583600); item[1] = item[3] = 1;
     cc_training_append(set + 0x40/4, item);
+    AddInformation(result, "CC_CHARACTER", "Change the character and Moon style for P1 or P2.");
     auto** begin = reinterpret_cast<uint32_t**>(set[0x40/4]);
     auto** end = reinterpret_cast<uint32_t**>(set[0x44/4]);
     std::rotate(begin, end - 1, end);
+    const auto addMenu = [&](const char* label, const char* key, const char* explanation, unsigned position) {
+        auto* extra = static_cast<uint32_t*>(reinterpret_cast<void* (__cdecl*)(size_t)>(GameRuntime::Preferred(0x52cd13))(0x50));
+        if (!extra) return;
+        reinterpret_cast<void* (__thiscall*)(void*, const char*, const char*, int)>(GameRuntime::Preferred(0x435100))(
+            extra, label, key, 0);
+        extra[0] = GameRuntime::Preferred(0x583600); extra[1] = extra[3] = 1;
+        cc_training_append(set + 0x40/4, extra);
+        AddInformation(result, key, explanation);
+        begin = reinterpret_cast<uint32_t**>(set[0x40/4]);
+        end = reinterpret_cast<uint32_t**>(set[0x44/4]);
+        std::rotate(begin + position, end - 1, end);
+    };
+    addMenu("COLOR PALETTE", "CC_PALETTE", "Edit character colors and save or load palettes.", 1);
+    addMenu("HITBOX", "CC_HITBOX", "Show or hide hitboxes and other collision boxes.", 2);
     set[0x38/4] = set[0x3c/4] = 0;
     menuSet = set;
     error = "";
@@ -156,6 +197,20 @@ __attribute__((force_align_arg_pointer)) void __fastcall RoundReset(void* battle
         reinterpret_cast<void (__cdecl*)()>(GameRuntime::Preferred(0x472ff0))();
         // Steam通常ロード4A00D0のキャラ資産部分。背景5077D0は呼ばない。
         reinterpret_cast<int (__fastcall*)(void*, void*)>(GameRuntime::Preferred(0x49f9e0))(description, nullptr);
+        // ボス差分にない表示画像だけを元キャラから補う。戦闘定義や背景には触れない。
+        for (unsigned slot = 0; slot < 4; ++slot) {
+            const auto* actor = reinterpret_cast<const uint8_t*>(GameRuntime::Preferred(0x5bc370) + slot * 0xAFC);
+            if (!actor[0]) continue;
+            const auto character = uint32_t(actor[5]);
+            const auto presentation = PresentationCharacter(character);
+            if (presentation == character) continue;
+            cc_training_load_presentation(slot, presentation, slot % 2, presentation);
+            const auto* images = reinterpret_cast<const uint32_t*>(GameRuntime::Preferred(0x5cb530) + slot * 0x20);
+            unsigned cutMask = 0;
+            for (unsigned i = 0; i < 5; ++i) if (images[2+i]) cutMask |= 1u << i;
+            DebugLog("[TrainingCharacter] PRESENTATION slot=%u char=%u source=%u face=%u color=%u cutMask=%u",
+                     slot, character, presentation, images[0] != 0, images[1] != 0, cutMask);
+        }
         changed = true;
         DebugLog("[TrainingCharacter] LOAD end side=%u char=%u moon=%u elapsedUs=%lld stage=%u",
                  side, choice.character, choice.moon, platform::RealMonotonicUs()-started, *CC_STAGE_SELECTOR_ADDR);
@@ -165,11 +220,11 @@ __attribute__((force_align_arg_pointer)) void __fastcall RoundReset(void* battle
 bool Hook(uintptr_t address, const unsigned char* bytes, size_t length, void* replacement, void** original) {
     if (std::memcmp(reinterpret_cast<void*>(address), bytes, length)) return false;
     return MH_CreateHook(reinterpret_cast<void*>(address), replacement, original) == MH_OK &&
-           MH_EnableHook(reinterpret_cast<void*>(address)) == MH_OK;
+           cccaster::hook_batch::Enable(reinterpret_cast<void*>(address)) == MH_OK;
 }
 }
 const Selection& Current() { return selection; }
-bool Busy() { return selection.open || pending; }
+bool Busy() { return selection.open || pending || training_palette::Active() || training_hitbox::Active(); }
 const char* Error() { return error; }
 int PortraitIndex(uint32_t character) {
     if (!installed || character >= 101) return -1;
@@ -189,9 +244,10 @@ std::string CharacterName(uint32_t character) {
     return std::string(name, strnlen(name, 32));
 }
 bool ReadImage(const char* path, std::vector<uint8_t>& bytes) {
-    if (!installed) return false;
+    if (!game_build::RuntimeValidated()) return false;
+    // Paletteは対戦/Versusでも利用するため、Trainingメニュー初期化には依存しない。
     uint32_t* file = nullptr;
-    if (!cc_training_read_image(path,&file) || !file)
+    if (!cc_training_read_image(path,&file,GameRuntime::Preferred(0x519db0)) || !file)
         return false;
     ++file[0x48/4];
     auto* data = reinterpret_cast<uint8_t*>(file[0x30/4]);
@@ -214,7 +270,14 @@ void ObserveMenu(uint32_t* menu, uint32_t* command) {
         }
         return;
     }
-    if (selection.open) { *command = 0; return; }
+    if (selection.open || training_palette::Active() || training_hitbox::Active()) { *command = 0; return; }
+    if (*command == 1 && menu[0x38/4] == FindItem(menu,"CC_HITBOX")) {
+        training_hitbox::Open(); *command = 0; return;
+    }
+    if (*command == 1 && menu[0x38/4] == FindItem(menu,"CC_PALETTE")) {
+        training_palette::Open(*reinterpret_cast<uint8_t*>(GameRuntime::Preferred(0x5c9c97)));
+        *command = 0; return;
+    }
     if (*command == 1 && menu[0x38/4] == 0) {
         selection.Open({Choice{*reinterpret_cast<uint32_t*>(GameRuntime::Preferred(0x7b4378)), *reinterpret_cast<uint32_t*>(GameRuntime::Preferred(0x7b4384))},
                         Choice{*reinterpret_cast<uint32_t*>(GameRuntime::Preferred(0x7b43a4)), *reinterpret_cast<uint32_t*>(GameRuntime::Preferred(0x7b43b0))}},
@@ -234,7 +297,10 @@ bool RealGameMemory::ConfigureTrainingMenu() {
     if (!game_build::RuntimeValidated() || !ConfigureMenuObserver()) return false;
     for(const auto& signature : game_memory::steam_v15::TrainingMenu)
         if(!game_memory::steam_code::Matches(signature)) return false;
-    cc_training_image_reader=GameRuntime::Preferred(0x519db0);
+    for(const auto& signature : game_memory::steam_training_v158::Menu)
+        if(!game_memory::steam_code::Matches(signature)) return false;
+    if (!training_palette::Install() || !training_hitbox::Install()) return false;
+    cc_training_presentation_loader=GameRuntime::Preferred(0x47d9d0);
     const unsigned char entry[]{0x55,0x8b,0xec,0x6a,0xff};
     if (!Hook(GameRuntime::Preferred(0x4d6320), entry, sizeof(entry), reinterpret_cast<void*>(Construct),
               reinterpret_cast<void**>(&originalConstructor)) ||
@@ -245,6 +311,8 @@ bool RealGameMemory::ConfigureTrainingMenu() {
 }
 bool RealGameMemory::StepTrainingMenu(GameInput& p1, GameInput& p2, bool configuring) {
     using namespace training_character;
+    training_hitbox::Step(p1,p2,configuring);
+    training_palette::Step(p1,p2,configuring);
     const bool didChange = changed;
     changed = false;
     if (GameMode() != CC_GAME_MODE_IN_GAME) {

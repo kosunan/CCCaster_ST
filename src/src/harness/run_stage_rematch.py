@@ -21,6 +21,28 @@ VALID_RANDOM = set(range(1, 60)) - EXCLUDED - {11, 14, 15, 33}
 SELECTION = r"\[Select\] {} p1=(\d+)/(\d+)/(\d+) p2=(\d+)/(\d+)/(\d+) stage=(\d+)"
 
 
+def analyze_extra_colors(data, side, blocked=''):
+    last_commit = data.rfind('[Select] COMMIT ')
+    pattern = r'\[ExtraColor\] LOAD slot=0 character=0 .*matched=1 applied=1'
+    applied = re.findall(pattern, data)
+    expected = side == 1 or '2' not in blocked
+    applied_ok = (len(applied) >= 2 and last_commit >= 0 and bool(re.search(pattern, data[last_commit:]))) if expected else not applied
+    sends = [dict(zip(('epoch','serial','character','extra','bytes','fast','qpc'),map(int,row))) for row in re.findall(
+        r'\[ExtraColor\] SEND epoch=(\d+) serial=(\d+) character=(\d+) extra=(\d+) bytes=(\d+) hash=\w+ fast=(\d+) qpc=(\d+)',data)]
+    ready = [dict(zip(('epoch','wait_us','fast','qpc'),map(int,row))) for row in re.findall(
+        r'\[ExtraColor\] READY epoch=(\d+) waitUs=(\d+) fast=(\d+) qpc=(\d+)',data)]
+    policies = [tuple(map(int,row)) for row in re.findall(
+        r'\[ExtraColor\] POLICY receive=(\d) peerReceive=(\d) selected=(\d+) sent=(\d+)',data)]
+    peer_receives = str(3-side) not in blocked
+    policy_ok = bool(policies) and all((local, peer) == (int(str(side) not in blocked), int(peer_receives))
+                                      for local, peer, selected, sent in policies)
+    if side == 1:
+        policy_ok &= any(selected == 6 and sent == (6 if peer_receives else 0) for local,peer,selected,sent in policies)
+        policy_ok &= any(s['bytes'] > 12 for s in sends) if peer_receives else all(s['bytes'] == 12 for s in sends)
+    return dict(passed=bool(applied_ok and policy_ok and len(ready) >= 2), expected_applied=expected,
+                applied=len(applied), policies=policies, sends=sends, ready=ready)
+
+
 def analyze_assembly_text(text, expected):
     active = False
     changes = []
@@ -390,6 +412,13 @@ def main():
     parser.add_argument('--test-root', type=Path, default=ROOT / 'test/runtime', help='独立したMBAACC_1〜3の親フォルダー')
     parser.add_argument('--network', default='15,25,5', help='片道遅延min,maxミリ秒,損失率（既定15,25,5）')
     parser.add_argument('--spectator', action='store_true')
+    parser.add_argument('--extra-color', action='store_true', help='ホストEXTRA 6を選び、再戦後の両側適用を確認')
+    parser.add_argument('--boss-characters', action='store_true', help='双方ONでボスを通常入力から選び、再戦・観戦を確認')
+    parser.add_argument('--extra-color-legacy', action='store_true', help='比較用: EXTRA 6を従来の全量形式で転送する')
+    parser.add_argument('--no-opponent-extra-colors', choices=['1','2','12'], default='', help='指定側で相手のEXTRA受信をOFFにし、自分の色の適用と送信抑止を確認')
+    parser.add_argument('--spin-prototype', action='store_true', help='入力公開・採取の共有スピン試作を有効化する')
+    parser.add_argument('--legacy-present', action='store_true', help='モニター同期を無効にし、元の単独Present待機を検証する')
+    parser.add_argument('--input-runahead', choices=['1', '2', '12'], help='指定した対戦端だけで1F先行表示を検証')
     parser.add_argument('--full-intro', action='store_true', help='登場演出を自然終了させ、描画・周期を記録する')
     parser.add_argument('--monitor-timing', action='store_true', help='実Presentと60Hz更新を別々に採取する')
     parser.add_argument('--monitor-hz', type=int, choices=range(20, 1001), metavar='20..1000',
@@ -400,6 +429,7 @@ def main():
     parser.add_argument('--loading-input', choices=('none', 'host', 'client', 'both'),
                         help='ロード画面の押下端末を指定し、先着・イントロ待機を検証する（spectator/full-intro必須）')
     args = parser.parse_args()
+    if args.extra_color_legacy or args.no_opponent_extra_colors: args.extra_color=True
     if not 1 <= args.round_frames <= 60000 or args.seconds < 1:
         parser.error('--round-framesは1〜60000、--secondsは1以上')
     if not re.fullmatch(r'\d+,\d+,\d+', args.network):
@@ -417,6 +447,15 @@ def main():
     service = Service()
     threading.Thread(target=service.serve_forever, daemon=True).start()
     env = clean_environment()
+    if args.extra_color: env['CCCASTER_TEST_EXTRA_COLOR'] = '1'
+    if args.boss_characters: env['CCCASTER_TEST_BOSS_SELECT'] = '1'
+    if args.extra_color_legacy: env['CCCASTER_TEST_EXTRA_COLOR_LEGACY'] = '1'
+    if args.spin_prototype:
+        env.update(CCCASTER_SPIN_PUBLICATION='1', CCCASTER_SPIN_CAPTURE='1',
+                   CCCASTER_PACE_TRACE='1')
+    if args.legacy_present:
+        env.update(CCCASTER_DISABLE_MONITOR_PRESENT='1', CCCASTER_PACE_TRACE='1')
+    if args.input_runahead: env['CCCASTER_TEST_INPUT_RUNAHEAD_SIDES'] = args.input_runahead
     env.update(CCCASTER_NTFY_SERVER=f'http://127.0.0.1:{service.server_port}',
                CCCASTER_TEST_RETRY_QUICK='1', CCCASTER_TEST_NATIVE_RETRY='1',
                CCCASTER_TEST_REMATCH='2' if args.scenario == 'character' else '0')
@@ -448,12 +487,17 @@ def main():
            '-UseConnectionCode', '-CloseSide', '1', '-OutputDirectory', str(out), '-TestRoot', str(runtime)]
     if args.spectator:
         cmd.append('-StandbySpectator')
-    config = dict(scenario=args.scenario, spectator=args.spectator, full_intro=args.full_intro,
+    if args.boss_characters:
+        cmd.append('-BossCharacters')
+    config = dict(scenario=args.scenario, spectator=args.spectator, full_intro=args.full_intro, input_runahead=args.input_runahead,
+                  native_input_writes=False,
                   baseline=args.baseline, loading_input=args.loading_input,
                   round_frames=args.round_frames, round_max_epoch=0 if args.fixed_duration else 3)
     (out / 'checkpoint_config.json').write_text(json.dumps(config), encoding='utf-8')
     if not args.fixed_duration:
         cmd += ['-CheckpointConfig', str(out / 'checkpoint_config.json'), '-Python', sys.executable]
+    if args.no_opponent_extra_colors:
+        cmd += ['-NoOpponentExtraColorSides', args.no_opponent_extra_colors]
     result = dict(passed=False, scenario=args.scenario, command=cmd)
     result['environment'] = {k: v for k, v in env.items() if k.startswith('CCCASTER_')}
     started = time.monotonic()
@@ -463,12 +507,27 @@ def main():
             run = subprocess.run(cmd, env=env, stdout=log, stderr=subprocess.STDOUT)
         result['exit_code'] = run.returncode
         result.update(evaluate(out, config))
+        if args.extra_color:
+            result['extra_colors'] = {}
+            result['extra_color_transfer'] = {}
+            for side in (1, 2):
+                data = (out / f'game_{side}.log').read_text(encoding='utf-8', errors='replace')
+                check = analyze_extra_colors(data, side, args.no_opponent_extra_colors)
+                result['extra_colors'][str(side)] = check['passed']
+                result['extra_color_transfer'][str(side)] = check
+            result['passed'] &= all(result['extra_colors'].values())
         if args.native_loop_comparison or args.native_loop_trace:
             result['native_loops'] = analyze_native_loops(
                 [(out / f'game_{side}.log').read_text(encoding='utf-8', errors='replace')
                  for side in range(1, 4 if args.spectator else 3)], args.native_loop_comparison)
             result['passed'] &= result['native_loops']['passed']
         result['passed'] &= run.returncode == 0
+        if args.boss_characters:
+            result['boss_characters']={}
+            for side,character in ((1,58),(2,59)):
+                data=(out/f'game_{side}.log').read_text(encoding='utf-8',errors='replace')
+                result['boss_characters'][str(side)]=bool(re.search(r'\[Select\] LOCAL epoch=65536 char='+str(character)+r' moon=9 ',data))
+            result['passed'] &= all(result['boss_characters'].values())
     except Exception as exc:
         result.update(passed=False, error=str(exc))
     finally:

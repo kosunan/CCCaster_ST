@@ -4,6 +4,26 @@
 #include <set>
 using namespace cccaster::training_character;
 int main() {
+    CC_CASE("ボスは双方合意時だけ選択可能、オフライン対戦は常に対象外");
+    for(unsigned mode=0;mode<6;++mode)for(bool local:{false,true})for(bool peer:{false,true}) {
+        CC_CHECK_EQ(cccaster::boss::Enabled(mode,local,peer),mode==1 ? local : mode==0 && local && peer);
+    }
+    for(auto id:cccaster::boss::Characters) {
+        cccaster::core::sync::SelectionState value;
+        value.character=id;value.selector=cccaster::boss::Cell(id);value.moon=cccaster::boss::Moon(id);value.confirmed=1;
+        CC_CHECK(value.Valid(true));CC_CHECK(!value.Valid(false));
+        cccaster::core::sync::SelectionState receiver;
+        CC_CHECK(!receiver.Accept(value,false));CC_CHECK(receiver.Accept(value,true));
+        value.moon=value.moon==0 ? 9 : 0;CC_CHECK(!value.Valid(true));
+    }
+    CC_CASE("ボスの表示参照だけを元キャラへ戻し、固有キャラ番号を保つ");
+    const std::array<std::array<uint32_t,2>,6> presentations{{{53,3},{58,8},{59,9},{72,22},{73,23},{85,35}}};
+    for (uint32_t id = 0; id < 200; ++id) {
+        uint32_t expected = id;
+        for (const auto& pair : presentations) if (pair[0] == id) expected = pair[1];
+        CC_CHECK_EQ(PresentationCharacter(id),expected);
+    }
+    CC_CHECK_EQ(PresentationCharacter(UINT32_MAX),UINT32_MAX);
     CC_CASE("通常選択可能な全キャラとムーンを決定まで保持する");
     std::set<uint32_t> unique;
     for (auto character : Characters) {

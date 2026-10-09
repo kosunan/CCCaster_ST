@@ -4,7 +4,10 @@
 #include "core_dll/sync/MatchInputBuffer.hpp"
 #include "core_dll/hook/DirectInputHook.hpp"
 #include "core_dll/ui/State_Ui_Logic.hpp"
+#include "core_dll/engine/SelectionOptions.hpp"
 #include <vector>
+#include <thread>
+namespace cccaster::core::timer { extern int64_t testClockTicks; }
 namespace {
 uint32_t physical = 0;
 bool mapping = false;
@@ -34,6 +37,34 @@ int64_t RealMonotonicTicks() {
 } // namespace cccaster::platform
 using namespace cccaster::core::sync;
 int main() {
+    CC_CASE("複数時計の採取要求は1回だけ実行し、停止/再開/再初期化前の要求は捨てる");
+    auto &race = InputTimeline::GetInstance();
+    race.Reset();
+    race.Begin(65536, 65539, cccaster::game_interface::GamePhase::InGame, true, 60000000);
+    const auto old = race.NextCapture();
+    cccaster::core::timer::testClockTicks = old.due - 1;
+    CC_CHECK(!race.TryPump(old, 0, 0));
+    CC_CHECK_EQ(polls, 0u);
+    race.Pause(); race.Resume();
+    cccaster::core::timer::testClockTicks = old.due;
+    CC_CHECK(race.TryPump(old, 0, 0));
+    CC_CHECK_EQ(polls, 0u);
+    const auto resumed = race.NextCapture();
+    race.Reset();
+    race.Begin(65536, 65539, cccaster::game_interface::GamePhase::InGame, true, old.due);
+    CC_CHECK(race.TryPump(resumed, 0, 0));
+    CC_CHECK_EQ(polls, 0u);
+    const auto target = race.NextCapture();
+    std::vector<std::thread> claimants;
+    for (int i = 0; i < 5; ++i) claimants.emplace_back([&, i] {
+        while (!race.TryPump(target, 0, i - 1)) std::this_thread::yield();
+    });
+    for (auto &thread : claimants) thread.join();
+    CC_CHECK_EQ(polls, 1u);
+    CC_CHECK(race.HasCaptured(target.frame));
+    CC_CHECK_EQ(race.NextCapture().frame, target.frame + 1);
+    cccaster::core::timer::testClockTicks = 0;
+    polls = 0;
     CC_CASE("未来の開始時刻より前に入力を採取しない");
     auto &future = InputTimeline::GetInstance();
     future.Reset();
@@ -332,6 +363,108 @@ int main() {
     timeline.PumpTicks(799999999, 0); CC_CHECK(!timeline.HasCaptured(131075));
     timeline.PumpTicks(800000000, 0);
     CC_CHECK(buffer.TryGetLocalInput(131075, input)); CC_CHECK_EQ(input, 0);
+    using cccaster::game_interface::GameInput;
+    using cccaster::game_interface::GamePhase;
+    namespace options = cccaster::domain::scene::selection_options;
+    auto beginMenu = [&] {
+        timeline.Reset(); buffer.Initialize(65536, 2, 7);
+        SettingsCommands::Reset(2, 7);
+        state.peerSchedule = {};
+        mapping = false; physical = 0;
+        timeline.Begin(65536, 65537, GamePhase::CharaSelect, true, 60000000);
+    };
+    auto captureMenu = [&] {
+        const auto frame = timeline.NextCapture().frame;
+        GameInput menuInput;
+        CC_CHECK(!timeline.TryGetMenuInput(frame, menuInput));
+        timeline.PumpTicks(timeline.NextDeadlineTicks(), 0);
+        CC_CHECK(timeline.TryGetMenuInput(frame, menuInput));
+        timeline.SetConsumed(frame);
+        return menuInput;
+    };
+    auto changed = [](const options::Result &result) {
+        return result.animation >= 0 || result.hudStep || result.resolutionStep ||
+               result.fullscreen >= 0 || result.nativeStep;
+    };
+    CC_CASE("左メニューの全A対応項目は保持で1回、解放後の再押下で次の1回だけ変更する");
+    for (const auto buttons : {CC_BUTTON_A, CC_BUTTON_CONFIRM, CC_BUTTON_A | CC_BUTTON_CONFIRM}) {
+        for (unsigned row = 1; row < options::Menu::RowCount; ++row) {
+            beginMenu();
+            options::Menu menu, filteredMenu;
+            menu.open = filteredMenu.open = true;
+            menu.row = filteredMenu.row = row;
+            unsigned changes = 0, filteredChanges = 0;
+            physical = GameInput{0, static_cast<uint16_t>(buttons)}.Pack();
+            for (unsigned i = 0; i < 24; ++i) {
+                const auto menuInput = captureMenu();
+                CC_CHECK_EQ(menuInput.Pack(), physical);
+                changes += changed(menu.Step(menuInput, 0, true, false, true, true));
+                // 従来のゲーム入力をメニューへ渡すと複数回押下になることも再現する。
+                CC_CHECK(buffer.TryGetLocalInput(timeline.SampledFrame(), input));
+                filteredChanges += changed(filteredMenu.Step(GameInput::Unpack(input), 0, true, false, true, true));
+            }
+            CC_CHECK_EQ(changes, 1u);
+            CC_CHECK(filteredChanges > 1);
+            physical = 0;
+            CC_CHECK(!changed(menu.Step(captureMenu(), 0, true, false, true, true)));
+            physical = GameInput{0, static_cast<uint16_t>(buttons)}.Pack();
+            for (unsigned i = 0; i < 12; ++i)
+                changes += changed(menu.Step(captureMenu(), 0, true, false, true, true));
+            CC_CHECK_EQ(changes, 2u);
+        }
+    }
+    CC_CASE("メニューを閉じてもA保持中はキャラ選択へ流さず、全解放の後だけ通す");
+    beginMenu();
+    options::Menu closing;
+    closing.open = true; closing.row = 2;
+    physical = CC_BUTTON_A | CC_BUTTON_CONFIRM;
+    closing.Step(captureMenu(), 0, true, false, true, true);
+    CC_CHECK(closing.Step(captureMenu(), options::Close, true, false, true, true).block);
+    for (unsigned i = 0; i < 12; ++i)
+        CC_CHECK(closing.Step(captureMenu(), 0, true, false, true, true).block);
+    physical = 0;
+    CC_CHECK(closing.Step(captureMenu(), 0, true, false, true, true).block);
+    physical = CC_BUTTON_A | CC_BUTTON_CONFIRM;
+    CC_CHECK(!closing.Step(captureMenu(), 0, true, false, true, true).block);
+    CC_CASE("メニュー用入力もF4設定中と閉じた直後のA保持を遮断する");
+    beginMenu();
+    physical = CC_BUTTON_A | CC_BUTTON_CONFIRM;
+    mapping = true;
+    for (unsigned i = 0; i < 12; ++i) CC_CHECK(captureMenu().IsNeutral());
+    mapping = false;
+    for (unsigned i = 0; i < 12; ++i) CC_CHECK(captureMenu().IsNeutral());
+    physical = 0; CC_CHECK(captureMenu().IsNeutral());
+    physical = CC_BUTTON_A | CC_BUTTON_CONFIRM;
+    CC_CHECK_EQ(captureMenu().Pack(), physical);
+    CC_CASE("遅れて消費するメニュー入力は同じFの保持状態を使い、最新の解放で書き換えない");
+    beginMenu();
+    physical = CC_BUTTON_A | CC_BUTTON_CONFIRM;
+    const auto heldInput = captureMenu();
+    const auto firstHeld = timeline.SampledFrame();
+    physical = 0;
+    timeline.PumpTicks(timeline.NextDeadlineTicks() + 2 * ClockFrame, 0);
+    GameInput captured;
+    for (unsigned i = 0; i < 3; ++i) {
+        CC_CHECK(timeline.TryGetMenuInput(firstHeld + i, captured));
+        CC_CHECK_EQ(captured.Pack(), heldInput.Pack());
+    }
+    CC_CHECK(timeline.TryGetMenuInput(firstHeld + 3, captured));
+    CC_CHECK(captured.IsNeutral());
+    timeline.SetConsumed(timeline.SampledFrame());
+    CC_CASE("周回上書き・停止・世代変更・対戦中のメニュー入力を誤取得しない");
+    for (unsigned i = 0; i < MatchInputBuffer::RING_SIZE; ++i) captureMenu();
+    CC_CHECK(!timeline.TryGetMenuInput(firstHeld, captured));
+    const auto lastMenuFrame = timeline.SampledFrame();
+    timeline.Pause(); CC_CHECK(!timeline.TryGetMenuInput(lastMenuFrame, captured));
+    timeline.Resume(); CC_CHECK(timeline.TryGetMenuInput(lastMenuFrame, captured));
+    timeline.Begin(131072, 131073, GamePhase::CharaSelect, true, 800000000);
+    CC_CHECK(!timeline.TryGetMenuInput(lastMenuFrame, captured));
+    CC_CHECK(!timeline.TryGetMenuInput(131073, captured));
+    captureMenu();
+    timeline.Reset(); CC_CHECK(!timeline.TryGetMenuInput(131073, captured));
+    timeline.Begin(131072, 131073, GamePhase::InGame, true, 800000000);
+    timeline.PumpTicks(800000000, 0);
+    CC_CHECK(!timeline.TryGetMenuInput(131073, captured));
     return cccaster::test::Summarize("input_timeline");
 }
 

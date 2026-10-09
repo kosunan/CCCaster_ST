@@ -35,6 +35,22 @@ int main() {
     SyncCodec codec;
     codec.Initialize(true, 2, 4, nullptr);
 
+    CC_CASE("描画前訂正の対応ビットは既存wireの任意フラグで交換する");
+    auto &capability=cccaster::core::netplay::NetplaySession::GetMutableState();
+    capability.peerPresentRollback=false;capability.localPresentRollback=false;
+    const auto legacyPacket=codec.BuildPacket(0,0);
+    Receive(codec,legacyPacket);CC_CHECK(!capability.peerPresentRollback);
+    capability.localPresentRollback=true;
+    const auto enhancedPacket=codec.BuildPacket(0,0);
+    // 後続の画像チャンクは送信ごとに有無が変わる。既存ヘッダ・固定flags欄を照合する。
+    CC_CHECK_EQ(enhancedPacket[6],10);
+    CC_CHECK_EQ(enhancedPacket[6],legacyPacket[6]);
+    constexpr size_t capabilityOffset=SyncCodec::UNIFIED_HEADER_SIZE+24+4+3;
+    CC_CHECK(enhancedPacket[capabilityOffset] & SyncCodec::FLAG_PRESENT_ROLLBACK);
+    CC_CHECK(!(legacyPacket[capabilityOffset] & SyncCodec::FLAG_PRESENT_ROLLBACK));
+    Receive(codec,enhancedPacket);CC_CHECK(capability.peerPresentRollback);
+    Receive(codec,legacyPacket);CC_CHECK(capability.peerPresentRollback); // 古い到着順でも対応を消さない。
+
     CC_CASE("初回送信は未生成の履歴を確定しない");
     buf.Initialize(200, 2, 4);
     buf.WriteLocal(201, 17, 0, false);
@@ -246,6 +262,28 @@ int main() {
     peer.ack = 1;
     CC_CHECK(local.Accept(peer));
     CC_CHECK_EQ(local.ack, 3u);
+    CC_CASE("ボス選択は双方の許可があるパケットだけ受理する");
+    shared.localSelection.character = 53;
+    shared.localSelection.selector = 47;
+    shared.localSelection.moon = 8;
+    shared.localSelection.revision = 4;
+    shared.localBossCharacters = true;
+    auto bossPacket = codec.BuildPacket(262145, 0);
+    shared.localBossCharacters = false;
+    Receive(codec, bossPacket);
+    CC_CHECK_EQ(shared.peerSelection.character, 11u);
+    shared.localBossCharacters = true;
+    auto noPermission = bossPacket;
+    noPermission[51] &= ~uint8_t(0x20); // 共通ヘッダー20 + NTP24 + base4 + count/D/R。
+    Receive(codec, noPermission);
+    CC_CHECK_EQ(shared.peerSelection.character, 11u);
+    Receive(codec, bossPacket);
+    CC_CHECK_EQ(shared.peerSelection.character, 53u);
+    CC_CHECK_EQ(shared.peerSelection.moon, 8u);
+    CC_CHECK(shared.peerBossCharacters.load());
+    shared.localBossCharacters = false;
+    shared.peerBossCharacters = false;
+    shared.localSelection = local;
     CC_CASE("再戦は確定項目を再送し、相手が再戦へ入るまで旧戦闘末尾を保持する");
     buf.Reset();
     shared.protocolError = false;
@@ -317,10 +355,15 @@ int main() {
     codec.Reset();
     auto sourcePacket = codec.BuildPacket(0, 0);
     // 時計世代は既存SYNC本体の末尾。任意の画像拡張を先に除く。
-    cccaster::emblem::Chunk profile;
-    std::memcpy(&profile, sourcePacket.data() + sourcePacket.size() - sizeof(profile), sizeof(profile));
-    CC_CHECK(profile.Valid());
-    sourcePacket.resize(sourcePacket.size() - sizeof(profile));
+    cccaster::training_palette::network::Chunk color;
+    std::memcpy(&color,sourcePacket.data()+sourcePacket.size()-sizeof(color),sizeof(color));
+    if(color.magic==cccaster::training_palette::network::Magic) {
+        CC_CHECK(color.Valid());sourcePacket.resize(sourcePacket.size()-sizeof(color));
+    } else {
+        cccaster::emblem::Chunk profile;
+        std::memcpy(&profile, sourcePacket.data() + sourcePacket.size() - sizeof(profile), sizeof(profile));
+        CC_CHECK(profile.Valid());sourcePacket.resize(sourcePacket.size() - sizeof(profile));
+    }
     int64_t sampleNow = 60000000;
     const auto feedClock = [&](uint32_t generation, bool staleEcho = false) {
         sampleNow += 1000000;
